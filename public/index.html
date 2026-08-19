@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RAIN Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark"></span>
+    <span class="name">RAIN</span><span class="sub">Intelligence</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="crumbs" id="crumbs"></div>
+  <button class="btn ghost sm hidden" id="restartBtn">New analysis</button>
+</header>
+
+<main class="wrap">
+
+  <!-- ══════════════ SCREEN 1 — landing ══════════════ -->
+  <section class="screen active" id="s-landing">
+    <div class="hero">
+      <h1>Track what your <span class="hl">competitors</span><br />are actually advertising</h1>
+      <p class="lede">Enter a product landing page. We pull the real ads their competitors are running right now — the creative, the offers, and how long each has been live.</p>
+
+      <div class="searchbar">
+        <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="urlInput" type="text" spellcheck="false"
+               placeholder="yourbank.com/checking" autocomplete="off" />
+        <button class="btn primary" id="analyzeBtn">Analyze</button>
+      </div>
+      <div class="hint" id="urlHint">Use the product page, not the homepage — it tells us which product to scope to.</div>
+
+      <div class="chipsrow" id="quickClients"></div>
+
+      <div class="statusline" id="healthLine"></div>
+    </div>
+  </section>
+
+  <!-- ══════════════ SCREEN 2 — purpose ══════════════ -->
+  <section class="screen" id="s-mode">
+    <div class="panel-head">
+      <div>
+        <div class="eyebrow" id="modeInst">—</div>
+        <h2>What are you using this for?</h2>
+      </div>
+    </div>
+
+    <div class="modegrid">
+      <button class="modecard" data-mode="creative">
+        <div class="mc-icon creative"></div>
+        <div class="mc-title">Creative Inspiration</div>
+        <div class="mc-q">"What are competitors making?"</div>
+        <p>Real display creatives from competitors, grouped by idea and filtered to your product. Sorted by what is running now, with longevity shown.</p>
+        <div class="mc-tags"><span>Google display</span><span>Image creatives</span></div>
+      </button>
+
+      <button class="modecard" data-mode="benchmark">
+        <div class="mc-icon bench"></div>
+        <div class="mc-title">Campaign Benchmark</div>
+        <div class="mc-q">"How did our ads compare to theirs?"</div>
+        <p>Your ads against their ads over the same window — offers, longevity and volume side by side. Facts first; strategies only when you ask.</p>
+        <div class="mc-tags"><span>Google search</span><span>Ads vs ads</span></div>
+      </button>
+
+      <div class="modecard disabled">
+        <div class="mc-icon proposal"></div>
+        <div class="mc-title">Proposal Evidence</div>
+        <div class="mc-q">"Which ads go in the pitch?"</div>
+        <p>Select competitor ads for a prospect and export them into the proposal deck.</p>
+        <div class="mc-tags"><span class="soon">Next build</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ SCREEN 3 — competitors ══════════════ -->
+  <section class="screen" id="s-comp">
+    <div class="panel-head">
+      <div>
+        <div class="eyebrow" id="compInst">—</div>
+        <h2>Confirm competitors</h2>
+        <p class="sub" id="compSub"></p>
+      </div>
+      <div class="scopebox">
+        <label>Product scope</label>
+        <select id="productSel"></select>
+        <label>Window</label>
+        <select id="daysSel">
+          <option value="30">Last 30 days</option>
+          <option value="60">Last 60 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="complist" id="compList"></div>
+
+    <div class="addrow">
+      <input type="text" id="addName" placeholder="Competitor name" />
+      <input type="text" id="addDomain" placeholder="competitor.com" />
+      <button class="btn ghost" id="addBtn">＋ Add</button>
+    </div>
+
+    <div class="actionbar">
+      <div class="costnote" id="costNote"></div>
+      <button class="btn primary lg" id="captureBtn">Capture ads</button>
+    </div>
+  </section>
+
+  <!-- ══════════════ SCREEN 4 — capture progress ══════════════ -->
+  <section class="screen" id="s-run">
+    <div class="panel-head"><div><h2>Capturing</h2><p class="sub">All advertisers are fetched at once.</p></div></div>
+    <div class="proglist" id="progList"></div>
+  </section>
+
+  <!-- ══════════════ SCREEN 5 — results ══════════════ -->
+  <section class="screen" id="s-results">
+    <div class="resulthead">
+      <div>
+        <div class="eyebrow" id="resEyebrow">—</div>
+        <h2 id="resTitle">—</h2>
+      </div>
+      <div class="resstats" id="resStats"></div>
+    </div>
+
+    <div class="samplingbar" id="samplingBar"></div>
+
+    <div class="filters" id="filters"></div>
+
+    <div id="resultBody"></div>
+  </section>
+
+</main>
+
+<!-- evidence drawer -->
+<div class="drawer-bg" id="drawerBg"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <h3 id="drawerTitle">Evidence</h3>
+    <button class="btn ghost sm" id="drawerClose">Close</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<script src="app.js"></script>
+</body>
+</html>

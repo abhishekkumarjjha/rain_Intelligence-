@@ -1,0 +1,15 @@
+{
+  "name": "rain-intelligence",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "RAIN Intelligence — competitive advertising evidence for Creative inspiration and Campaign benchmarking",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.test.js && node test/pipeline.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "express": "^4.21.0"
+  }
+}

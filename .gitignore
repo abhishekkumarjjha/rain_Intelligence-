@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.local
+
+# Run snapshots + extraction cache — machine-local, may contain client data
+runs/*
+!runs/.gitkeep
+
+npm-debug.log*
+.DS_Store

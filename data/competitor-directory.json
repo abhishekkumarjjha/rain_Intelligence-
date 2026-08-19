@@ -1,0 +1,535 @@
+[
+  {
+    "client": "Horicon Bank",
+    "client_domain": "horiconbank.com",
+    "market": "Wisconsin — Dodge County/Beaver Dam core, Fox Valley, Milwaukee metro",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Fox Communities Credit Union", "domain": "foxcu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Fox Valley CU advertising mortgage, checking, business in Horicon's Appleton/Oshkosh market." },
+      { "name": "FVSBank", "domain": "fvsbank.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Fond du Lac mutual competing on mortgage, checking, business in the same core footprint." },
+      { "name": "National Exchange Bank & Trust", "domain": "nebat.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Fond du Lac community bank — closest same-size, same-footprint peer." },
+      { "name": "Associated Bank", "domain": "associatedbank.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Green Bay regional advertising statewide across Milwaukee and Fox Valley." },
+      { "name": "Landmark Credit Union", "domain": "landmarkcu.com", "type_tag": "Regional CU", "product_scope": ["mortgage","checking"], "reason": "Largest WI CU, dominant Milwaukee metro with a Beaver Dam branch." }
+    ]
+  },
+  {
+    "client": "La Capitol Federal Credit Union",
+    "client_domain": "lacapfcu.org",
+    "market": "Louisiana — Baton Rouge core, statewide targeting",
+    "institution_type": "Regional CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Neighbors Federal Credit Union", "domain": "neighborsfcu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Baton Rouge CU serving the same nine-parish core with a full lineup." },
+      { "name": "EFCU Financial", "domain": "efcufinancial.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Baton Rouge CU competing on checking, auto, mortgage, HELOC." },
+      { "name": "Pelican State Credit Union", "domain": "pelicanstatecu.com", "type_tag": "Regional CU", "product_scope": ["auto-loan","personal-loan","checking"], "reason": "Baton Rouge-HQ statewide CU with strong auto and personal lending." },
+      { "name": "Campus Federal", "domain": "campusfederal.org", "type_tag": "Local CU", "product_scope": ["checking","auto-loan","heloc"], "reason": "Baton Rouge (LSU-rooted) CU competing on checking, auto, HELOC." }
+    ]
+  },
+  {
+    "client": "WEOKIE Federal Credit Union",
+    "client_domain": "weokie.org",
+    "market": "Oklahoma — Oklahoma City metro",
+    "institution_type": "Regional CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Tinker Federal Credit Union", "domain": "tinkerfcu.org", "type_tag": "Regional CU", "product_scope": ["all"], "reason": "Oklahoma's largest CU, OKC-based — top checking/deposit search competitor." },
+      { "name": "Communication Federal Credit Union", "domain": "comfedcu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "OKC CU competing for the same checking and certificate members." },
+      { "name": "Oklahoma's Credit Union", "domain": "oklahomacu.com", "type_tag": "Local CU", "product_scope": ["all"], "reason": "OKC-metro CU competing on everyday checking and deposits." },
+      { "name": "Allegiance Credit Union", "domain": "allegiancecu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "OKC CU competing in the same metro for checking and CD." },
+      { "name": "True Sky Federal Credit Union", "domain": "trueskycu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "OKC-based CU competing for local deposit and certificate accounts." }
+    ]
+  },
+  {
+    "client": "Isabella Bank",
+    "client_domain": "isabellabank.com",
+    "market": "Michigan — mid-Michigan, 8 counties (Mt. Pleasant core, Midland, Saginaw, Big Rapids)",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Firstbank", "domain": "firstbankmi.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Alma/Mt. Pleasant community bank — closest same-market, same-size peer." },
+      { "name": "Mercantile Bank of Michigan", "domain": "mercbank.com", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "Michigan bank with an active mid-Michigan mortgage presence." },
+      { "name": "Independent Bank", "domain": "independentbank.com", "type_tag": "Regional Bank", "product_scope": ["mortgage","checking"], "reason": "Michigan community bank competing across mid-Michigan." },
+      { "name": "Isabella Community Credit Union", "domain": "iccuonline.com", "type_tag": "Local CU", "product_scope": ["auto-loan","checking"], "reason": "Mt. Pleasant CU competing head-to-head for local auto and checking." }
+    ]
+  },
+  {
+    "client": "Sutton Bank",
+    "client_domain": "suttonbank.com",
+    "market": "North-central Ohio — Attica/Tiffin (Seneca), Willard/New London (Huron), Ashland, Mansfield (Richland)",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Civista Bank", "domain": "civistabank.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Sandusky-HQ bank blanketing Sutton's exact footprint on mortgage and checking." },
+      { "name": "The Croghan Colonial Bank", "domain": "croghan.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Fremont bank competing across the Seneca/Sandusky county core." },
+      { "name": "Old Fort Banking Company", "domain": "oldfortbank.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Tiffin-area bank overlapping Sutton's Seneca County home market." },
+      { "name": "Mechanics Bank", "domain": "mechbank.com", "type_tag": "Community Bank", "product_scope": ["mortgage","checking"], "reason": "Mansfield bank competing for mortgage/checking in Richland County." }
+    ]
+  },
+  {
+    "client": "Del Norte Credit Union",
+    "client_domain": "dncu.com",
+    "market": "Northern New Mexico — Santa Fe, Los Alamos, Rio Arriba, Taos",
+    "institution_type": "Regional CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "State Employees Credit Union of New Mexico", "domain": "secunm.org", "type_tag": "Local CU", "product_scope": ["mortgage"], "reason": "Santa Fe-HQ CU in the same city competing directly on mortgage." },
+      { "name": "Nusenda Credit Union", "domain": "nusenda.org", "type_tag": "Regional CU", "product_scope": ["mortgage"], "reason": "Largest NM CU with Santa Fe/Taos branches and heavy mortgage presence." },
+      { "name": "Rocket Mortgage", "domain": "rocketmortgage.com", "type_tag": "Digital Bank", "product_scope": ["mortgage"], "reason": "National digital lender named in RAIN's July review as taking DNCU search share." },
+      { "name": "Neighbors Bank", "domain": "neighborsbank.com", "type_tag": "Digital Bank", "product_scope": ["mortgage"], "reason": "National online mortgage lender flagged as a new entrant in DNCU's auction." },
+      { "name": "US Eagle Federal Credit Union", "domain": "useaglefcu.org", "type_tag": "Regional CU", "product_scope": ["mortgage"], "reason": "Statewide NM CU competing for the same Santa Fe-area mortgage searchers." }
+    ]
+  },
+  {
+    "client": "Congressional Federal Credit Union",
+    "client_domain": "congressionalfcu.org",
+    "market": "Washington DC metro — Capitol Hill, Northern Virginia (Oakton/Fairfax), MD suburbs",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "U.S. Senate Federal Credit Union", "domain": "ussfcu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Capitol Hill's Senate-side CU — Congressional's closest peer on the same Hill base." },
+      { "name": "Lafayette Federal Credit Union", "domain": "lfcu.org", "type_tag": "Local CU", "product_scope": ["mortgage","heloc","cd"], "reason": "Rockville DC-metro CU cited locally as a strong mortgage/home-equity option." },
+      { "name": "PenFed Credit Union", "domain": "penfed.org", "type_tag": "Regional CU", "product_scope": ["mortgage","heloc","auto-loan"], "reason": "McLean-HQ CU and one of the DC metro's heaviest mortgage/HELOC/auto advertisers." },
+      { "name": "Apple Federal Credit Union", "domain": "applefcu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Fairfax CU in Congressional's own Oakton/Fairfax County backyard." },
+      { "name": "CommonWealth One Federal Credit Union", "domain": "cofcu.org", "type_tag": "Local CU", "product_scope": ["heloc","auto-loan","savings"], "reason": "Alexandria/Arlington CU competing on home-equity and auto in NoVA." }
+    ]
+  },
+  {
+    "client": "UNCLE Credit Union",
+    "client_domain": "unclecu.org",
+    "market": "California East Bay / Tri-Valley — Livermore, Pleasanton, Dublin (Alameda, Contra Costa, San Joaquin, Stanislaus)",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Patelco Credit Union", "domain": "patelco.org", "type_tag": "Regional CU", "product_scope": ["all"], "reason": "Dublin-HQ CU in UNCLE's own backyard and a dominant Bay Area mortgage/HELOC/auto advertiser." },
+      { "name": "1st United Credit Union", "domain": "1stunitedcu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Pleasanton CU competing across the same Alameda/Contra Costa footprint." },
+      { "name": "Fremont Bank", "domain": "fremontbank.com", "type_tag": "Community Bank", "product_scope": ["mortgage","heloc"], "reason": "East Bay community bank with strong mortgage/home-equity advertising." },
+      { "name": "Provident Credit Union", "domain": "providentcu.org", "type_tag": "Regional CU", "product_scope": ["mortgage","auto-loan","heloc"], "reason": "Bay Area CU competing for mortgage/auto/home-equity searchers in the East Bay." },
+      { "name": "First Technology Federal Credit Union", "domain": "firsttechfed.com", "type_tag": "Regional CU", "product_scope": ["mortgage","auto-loan","personal-loan"], "reason": "Tech-employee CU overlapping UNCLE's LLNL/lab-rooted base." }
+    ]
+  },
+  {
+    "client": "Firstmark Credit Union",
+    "client_domain": "firstmarkcu.org",
+    "market": "Texas — San Antonio metro",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Randolph-Brooks Federal Credit Union", "domain": "rbfcu.org", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "San Antonio's largest CU and the dominant local checking advertiser." },
+      { "name": "Security Service Federal Credit Union", "domain": "ssfcu.org", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "San Antonio-HQ CU competing heavily for the same metro checking members." },
+      { "name": "Generations Federal Credit Union", "domain": "mygenfcu.org", "type_tag": "Local CU", "product_scope": ["checking"], "reason": "San Antonio CU with education/city-employee roots near Firstmark's own base." },
+      { "name": "Credit Human", "domain": "credithuman.com", "type_tag": "Local CU", "product_scope": ["checking"], "reason": "San Antonio-HQ CU competing for the same local checking searchers." },
+      { "name": "Broadway Bank", "domain": "broadway.bank", "type_tag": "Community Bank", "product_scope": ["checking"], "reason": "Independent San Antonio community bank competing for local checking." }
+    ]
+  },
+  {
+    "client": "INB",
+    "client_domain": "inb.com",
+    "market": "Central Illinois — Springfield, Bloomington, Peoria, Champaign",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Bank of Springfield", "domain": "bankwithbos.com", "type_tag": "Community Bank", "product_scope": ["mortgage"], "reason": "Springfield community bank, same core market." },
+      { "name": "Heartland Bank and Trust", "domain": "hbtbank.com", "type_tag": "Community Bank", "product_scope": ["mortgage"], "reason": "Bloomington community bank in the same footprint." },
+      { "name": "United Community Bank", "domain": "ucbbank.com", "type_tag": "Community Bank", "product_scope": ["mortgage"], "reason": "Chatham/Springfield-area mortgage lender." },
+      { "name": "CEFCU", "domain": "cefcu.com", "type_tag": "Regional CU", "product_scope": ["mortgage"], "reason": "Large Peoria-based CU competing on home lending." }
+    ]
+  },
+  {
+    "client": "Wasatch Peaks Credit Union",
+    "client_domain": "wasatchpeaks.com",
+    "market": "Northern Utah — Ogden / Weber County",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "America First Credit Union", "domain": "americafirst.com", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "Ogden-HQ CU, dominant local checking advertiser." },
+      { "name": "Goldenwest Credit Union", "domain": "gwcu.org", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "Ogden-HQ CU competing head-to-head locally." },
+      { "name": "Mountain America Credit Union", "domain": "macu.com", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "Statewide Utah CU with heavy Ogden presence." },
+      { "name": "Cyprus Credit Union", "domain": "cypruscu.com", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "Wasatch Front CU competing for checking members." },
+      { "name": "Utah First Credit Union", "domain": "utahfirst.com", "type_tag": "Local CU", "product_scope": ["checking"], "reason": "Northern Utah CU in the same market." }
+    ]
+  },
+  {
+    "client": "Brazos Valley Schools Credit Union",
+    "client_domain": "bvscu.org",
+    "market": "Houston metro — Katy and west/southwest Houston",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "TDECU", "domain": "tdecu.org", "type_tag": "Regional CU", "product_scope": ["all"], "reason": "Largest Houston-region CU across all products." },
+      { "name": "Members Choice Credit Union", "domain": "mccu.com", "type_tag": "Local CU", "product_scope": ["all"], "reason": "West Houston/Katy CU, direct overlap." },
+      { "name": "First Service Credit Union", "domain": "fscu.com", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Houston CU competing on auto and consumer lending." },
+      { "name": "Houston Federal Credit Union", "domain": "houstonfcu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Sugar Land/SW Houston CU in the same market." },
+      { "name": "Smart Financial Credit Union", "domain": "smartcu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Houston CU competing for the same members." }
+    ]
+  },
+  {
+    "client": "Mirastar Federal Credit Union",
+    "client_domain": "mirastarfcu.org",
+    "market": "Silicon Valley — Santa Clara County / San Jose",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Technology Credit Union", "domain": "techcu.com", "type_tag": "Regional CU", "product_scope": ["all"], "reason": "San Jose CU, dominant Silicon Valley player." },
+      { "name": "Star One Credit Union", "domain": "starone.org", "type_tag": "Regional CU", "product_scope": ["all"], "reason": "Sunnyvale CU competing across Santa Clara County." },
+      { "name": "Meriwest Credit Union", "domain": "meriwest.com", "type_tag": "Local CU", "product_scope": ["all"], "reason": "San Jose CU, direct local peer." },
+      { "name": "Provident Credit Union", "domain": "providentcu.org", "type_tag": "Regional CU", "product_scope": ["auto-loan","cd"], "reason": "Bay Area CU competing on auto and deposits." },
+      { "name": "Patelco Credit Union", "domain": "patelco.org", "type_tag": "Regional CU", "product_scope": ["all"], "reason": "Major Bay Area CU advertising across the Valley." }
+    ]
+  },
+  {
+    "client": "Sacramento Credit Union",
+    "client_domain": "sactocu.org",
+    "market": "Greater Sacramento, CA",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Golden 1 Credit Union", "domain": "golden1.com", "type_tag": "Regional CU", "product_scope": ["checking","auto-loan"], "reason": "Sacramento-HQ CU; named in RAIN's July auto-loan competitor review." },
+      { "name": "SAFE Credit Union", "domain": "safecu.org", "type_tag": "Regional CU", "product_scope": ["checking","auto-loan"], "reason": "Folsom/Sacramento CU; named in RAIN's July auto review." },
+      { "name": "Heritage Community Credit Union", "domain": "heritageccu.com", "type_tag": "Local CU", "product_scope": ["auto-loan"], "reason": "Sacramento CU flagged in RAIN's auto rate/promo analysis." },
+      { "name": "First U.S. Community Credit Union", "domain": "firstus.org", "type_tag": "Local CU", "product_scope": ["checking","auto-loan"], "reason": "Sacramento CU competing for local members." }
+    ]
+  },
+  {
+    "client": "Heritage Bank",
+    "client_domain": "heritagebanknw.com",
+    "market": "Pacific Northwest — western WA, Portland OR, Boise ID",
+    "institution_type": "Regional Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "WaFd Bank", "domain": "wafd.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Seattle-based regional bank across the PNW." },
+      { "name": "Umpqua Bank", "domain": "umpquabank.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Dominant OR/WA regional community bank." },
+      { "name": "Banner Bank", "domain": "bannerbank.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "PNW regional competing in the same markets." },
+      { "name": "1st Security Bank of Washington", "domain": "1stsecuritybank.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Western WA community bank, direct overlap." },
+      { "name": "Sound Credit Union", "domain": "soundcu.com", "type_tag": "Regional CU", "product_scope": ["all"], "reason": "Tacoma-area CU competing across Puget Sound." }
+    ]
+  },
+  {
+    "client": "First Commonwealth Bank",
+    "client_domain": "fcbanking.com",
+    "market": "Western/central Pennsylvania and Ohio — Pittsburgh metro core",
+    "institution_type": "Regional Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Dollar Bank", "domain": "dollarbank.com", "type_tag": "Regional Bank", "product_scope": ["mortgage","heloc"], "reason": "Pittsburgh mortgage/home-equity heavyweight." },
+      { "name": "First National Bank (FNB Corporation)", "domain": "fnb-online.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Pittsburgh-region regional bank, broad overlap." },
+      { "name": "S&T Bank", "domain": "stbank.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Indiana PA-HQ bank — same hometown as the client." },
+      { "name": "Northwest Bank", "domain": "northwest.bank", "type_tag": "Regional Bank", "product_scope": ["mortgage","business-loan"], "reason": "Western PA regional competing on lending." },
+      { "name": "Huntington Bank", "domain": "huntington.com", "type_tag": "Regional Bank", "product_scope": ["mortgage","business-loan"], "reason": "Major mortgage/SBA advertiser across the PA/OH footprint." }
+    ]
+  },
+  {
+    "client": "LCNB Bank",
+    "client_domain": "lcnb.com",
+    "market": "Southwest Ohio — Cincinnati, Dayton, Lebanon",
+    "institution_type": "Regional Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "First Financial Bank", "domain": "bankatfirst.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Cincinnati regional bank across SW Ohio." },
+      { "name": "Wright-Patt Credit Union", "domain": "wpcu.coop", "type_tag": "Regional CU", "product_scope": ["all"], "reason": "Dayton's dominant CU, heavy local advertiser." },
+      { "name": "Fifth Third Bank", "domain": "53.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Cincinnati-HQ regional competing metro-wide." },
+      { "name": "Merchants National Bank", "domain": "merchantsnat.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "SW Ohio community bank, closer size peer." }
+    ]
+  },
+  {
+    "client": "Renasant Bank",
+    "client_domain": "renasantbank.com",
+    "market": "Southeast — MS/AL/TN/GA (MULTI-MARKET: pick per metro — Tupelo, Jackson, Birmingham, Memphis, Nashville, Atlanta)",
+    "institution_type": "Regional Bank",
+    "curated": "2026-08-12",
+    "multi_market": true,
+    "competitors": [
+      { "name": "Trustmark National Bank", "domain": "trustmark.com", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "Jackson MS regional, direct mortgage rival across MS/AL." },
+      { "name": "Cadence Bank", "domain": "cadencebank.com", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "Tupelo-rooted regional competing on mortgage." },
+      { "name": "Regions Bank", "domain": "regions.com", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "Birmingham regional, major SE mortgage advertiser." },
+      { "name": "BankPlus", "domain": "bankplus.net", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "Mississippi bank competing on home lending." },
+      { "name": "Origin Bank", "domain": "origin.bank", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "MS/LA/TX regional competing in overlapping metros." }
+    ]
+  },
+  {
+    "client": "MidFirst Bank",
+    "client_domain": "midfirst.com",
+    "market": "Oklahoma (OKC/Tulsa) + Phoenix (MULTI-MARKET: pick per metro; Phoenix is a national-bank auction)",
+    "institution_type": "Regional Bank",
+    "curated": "2026-08-12",
+    "multi_market": true,
+    "competitors": [
+      { "name": "BancFirst", "domain": "bancfirst.bank", "type_tag": "Regional Bank", "product_scope": ["checking","business-loan"], "reason": "Oklahoma's largest state bank, direct OKC/Tulsa rival." },
+      { "name": "Bank of Oklahoma (BOK Financial)", "domain": "bankofoklahoma.com", "type_tag": "Regional Bank", "product_scope": ["checking","business-loan"], "reason": "Tulsa-HQ regional competing across OK metros (consumer brand domain)." },
+      { "name": "Arvest Bank", "domain": "arvest.com", "type_tag": "Regional Bank", "product_scope": ["checking","business-loan"], "reason": "AR/OK regional with strong OK retail presence." },
+      { "name": "Tinker Federal Credit Union", "domain": "tinkerfcu.org", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "OKC's largest CU, competing for checking members." }
+    ]
+  },
+  {
+    "client": "Greenfield Banking Company",
+    "client_domain": "gbcbank.com",
+    "market": "Indiana — Hancock County / east Indianapolis (Greenfield, McCordsville, Fortville)",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "First Merchants Bank", "domain": "firstmerchants.com", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "Strong mortgage presence across east Indianapolis / Hancock County." },
+      { "name": "Indiana Members Credit Union", "domain": "imcu.com", "type_tag": "Regional CU", "product_scope": ["mortgage"], "reason": "Large regional CU with competitive mortgage rates and east-side Indy branches." },
+      { "name": "Centier Bank", "domain": "centier.com", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "Active mortgage lender with east Indianapolis / McCordsville / Fortville presence." },
+      { "name": "STAR Financial Bank", "domain": "starfinancial.com", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "East-central Indiana mortgage competitor serving Hancock and surrounding counties." },
+      { "name": "Old National Bank", "domain": "oldnational.com", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "Major regional mortgage presence across the east Indianapolis metro." }
+    ]
+  },
+  {
+    "client": "Meredith Village Savings Bank",
+    "client_domain": "mvsb.com",
+    "market": "New Hampshire — Lakes Region (Meredith, Laconia, Plymouth, Wolfeboro)",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Franklin Savings Bank", "domain": "fsbnh.com", "type_tag": "Community Bank", "product_scope": ["heloc","business-loan","checking"], "reason": "Direct Lakes Region competitor for HELOC, checking, business." },
+      { "name": "Northway Bank", "domain": "northwaybank.com", "type_tag": "Community Bank", "product_scope": ["heloc","business-loan"], "reason": "Central NH mutual active in HELOC and business deposits." },
+      { "name": "Service Credit Union", "domain": "servicecu.org", "type_tag": "Regional CU", "product_scope": ["heloc","checking"], "reason": "Large NH CU competing on consumer/home-equity across the Lakes Region." },
+      { "name": "Mascoma Bank", "domain": "mascomabank.com", "type_tag": "Community Bank", "product_scope": ["business-loan","checking"], "reason": "Strong Plymouth / Lakes Region presence for business and retail." }
+    ]
+  },
+  {
+    "client": "Bank of Missouri",
+    "client_domain": "bankofmissouri.com",
+    "market": "Missouri — SE & Central (MULTI-MARKET: Perryville, Cape Girardeau, Springfield, Columbia)",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "multi_market": true,
+    "competitors": [
+      { "name": "Central Bank", "domain": "centralbank.net", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Major Missouri bank across Cape Girardeau / Columbia corridors." },
+      { "name": "Southern Bank", "domain": "bankwithsouthern.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Active retail competitor in SE Missouri (Perryville/Cape area)." },
+      { "name": "Great Southern Bank", "domain": "greatsouthernbank.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Regional player with deposit/mortgage presence in Springfield and the Ozarks." },
+      { "name": "First Midwest Bank of the Ozarks", "domain": "onemidwest.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "SE Missouri (Poplar Bluff) retail competitor.", "review": "domain onemidwest.com — Grok medium confidence, confirm in-app" }
+    ]
+  },
+  {
+    "client": "West Plains Bank and Trust Company",
+    "client_domain": "westplainsbank.com",
+    "market": "Missouri — south-central (West Plains / Howell County, Ozarks)",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Southern Bank", "domain": "bankwithsouthern.com", "type_tag": "Community Bank", "product_scope": ["checking","mortgage"], "reason": "Direct south-central Missouri competitor for checking and mortgage." },
+      { "name": "Great Southern Bank", "domain": "greatsouthernbank.com", "type_tag": "Regional Bank", "product_scope": ["mortgage"], "reason": "Regional player with mortgage/deposit presence in the Ozarks." },
+      { "name": "First Community Bank", "domain": "1stcombank.com", "type_tag": "Community Bank", "product_scope": ["checking","mortgage"], "reason": "Poplar Bluff-area independent bank in the broader south-central MO market.", "review": "domain 1stcombank.com — Grok medium; Poplar Bluff is ~90mi from West Plains, confirm local relevance" }
+    ]
+  },
+  {
+    "client": "The Friendship State Bank",
+    "client_domain": "friendshipstatebank.com",
+    "market": "Southeast Indiana — Ripley/Dearborn counties (Friendship, Batesville, Lawrenceburg)",
+    "institution_type": "Local Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "The Napoleon State Bank", "domain": "napoleonstatebank.com", "type_tag": "Community Bank", "product_scope": ["mortgage","personal-loan"], "reason": "SE Indiana bank expanding into Batesville / Ripley County with mortgage and personal lending." },
+      { "name": "First Financial Bank", "domain": "bankatfirst.com", "type_tag": "Regional Bank", "product_scope": ["mortgage","personal-loan"], "reason": "Active mortgage/consumer lender in the Dearborn / Ripley / Lawrenceburg corridor." },
+      { "name": "Ripley County Bank", "domain": "ripleycountybank.com", "type_tag": "Local Bank", "product_scope": ["mortgage","personal-loan"], "reason": "Hyper-local competitor in the same SE Indiana counties." }
+    ]
+  },
+  {
+    "client": "Financial Plus Credit Union",
+    "client_domain": "financialplus.org",
+    "market": "Illinois — Illinois Valley (Ottawa / LaSalle County)",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Streator Onized Credit Union", "domain": "streatoronizedcu.com", "type_tag": "Local CU", "product_scope": ["credit-card","personal-loan","cd"], "reason": "Local CU serving LaSalle County with overlapping consumer products." },
+      { "name": "Ottawa Savings Bank", "domain": "ottawasavings.com", "type_tag": "Community Bank", "product_scope": ["cd","personal-loan"], "reason": "Local Illinois Valley bank competing for CDs and personal loans in LaSalle County." },
+      { "name": "Central Bank Illinois", "domain": "cbi.bank", "type_tag": "Community Bank", "product_scope": ["cd","personal-loan"], "reason": "Community bank with Ottawa / LaSalle presence for consumer deposits and loans." },
+      { "name": "NuMark Credit Union", "domain": "numarkcu.org", "type_tag": "Local CU", "product_scope": ["credit-card","personal-loan","cd"], "reason": "Illinois Valley CU competing for credit cards, personal loans and CDs in the Ottawa market." }
+    ]
+  },
+  {
+    "client": "Downeast Credit Union",
+    "client_domain": "downeastcu.com",
+    "market": "Maine — eastern & central (Bangor, Washington/Hancock/Penobscot counties)",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Bangor Savings Bank", "domain": "bangor.com", "type_tag": "Community Bank", "product_scope": ["heloc"], "reason": "Dominant local bank competing on HELOC in Bangor / eastern Maine." },
+      { "name": "Machias Savings Bank", "domain": "machiassavings.com", "type_tag": "Community Bank", "product_scope": ["heloc"], "reason": "Eastern Maine community bank active in HELOC and retail." },
+      { "name": "Maine Savings FCU", "domain": "mainesavings.com", "type_tag": "Local CU", "product_scope": ["heloc"], "reason": "Direct geographic/product overlap on home equity (note: also a RAIN client)." }
+    ]
+  },
+  {
+    "client": "Maine Savings FCU",
+    "client_domain": "mainesavings.com",
+    "market": "Maine — Bangor / central Maine",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Bangor Savings Bank", "domain": "bangor.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Primary local retail competitor in the Bangor metro." },
+      { "name": "Downeast Credit Union", "domain": "downeastcu.com", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Overlapping central/eastern Maine footprint (note: also a RAIN client)." },
+      { "name": "University Credit Union", "domain": "ucumaine.com", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Orono/Bangor-area CU competing for local membership." }
+    ]
+  },
+  {
+    "client": "Forward Bank",
+    "client_domain": "forward.bank",
+    "market": "Wisconsin — central/northern (Marshfield)",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Associated Bank", "domain": "associatedbank.com", "type_tag": "Regional Bank", "product_scope": ["cd","checking","mortgage"], "reason": "Strong central Wisconsin presence for CD, checking, mortgage." },
+      { "name": "Nicolet National Bank", "domain": "nicoletbank.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Active competitor in Marshfield / northern Wisconsin." },
+      { "name": "IncredibleBank", "domain": "incrediblebank.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Wausau-based WI bank competing on consumer deposits and loans." }
+    ]
+  },
+  {
+    "client": "Garden Savings Federal Credit Union",
+    "client_domain": "gardensavingsfcu.org",
+    "market": "Northern New Jersey — Parsippany / Morris County",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Affinity Federal Credit Union", "domain": "affinityfcu.com", "type_tag": "Regional CU", "product_scope": ["auto-loan","savings"], "reason": "Major northern NJ CU competing on auto and savings." },
+      { "name": "North Jersey Federal Credit Union", "domain": "njfcu.org", "type_tag": "Local CU", "product_scope": ["auto-loan","savings"], "reason": "Local competitor in Morris/Essex County for consumer loans." },
+      { "name": "Lakeland Bank", "domain": "lakelandbank.com", "type_tag": "Regional Bank", "product_scope": ["auto-loan","savings"], "reason": "Northern NJ bank active in Morris County for auto and savings." },
+      { "name": "Credit Union of New Jersey", "domain": "cunj.org", "type_tag": "Regional CU", "product_scope": ["auto-loan","savings"], "reason": "Statewide NJ CU with northern presence competing for auto and savings." },
+      { "name": "Provident Bank", "domain": "provident.bank", "type_tag": "Regional Bank", "product_scope": ["auto-loan","savings"], "reason": "Northern NJ bank competing directly in Morris County auto and savings markets." }
+    ]
+  },
+  {
+    "client": "Bank of Botetourt",
+    "client_domain": "bankofbotetourt.com",
+    "market": "Virginia — Roanoke / Botetourt County",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Member One Federal Credit Union", "domain": "memberonefcu.com", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Large local CU competing for Roanoke / Botetourt retail business." },
+      { "name": "Freedom First Credit Union", "domain": "freedomfirst.com", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Roanoke-based CU active in the same geographic market." },
+      { "name": "First Bank & Trust Co.", "domain": "firstbank.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "SW Virginia bank with a Roanoke Valley loan-production presence.", "review": "HQ is Lebanon VA (SW Virginia); Roanoke is via LPO — peripheral fit, confirm relevance" }
+    ]
+  },
+  {
+    "client": "Colony Bank",
+    "client_domain": "colony.bank",
+    "market": "Georgia — statewide (MULTI-MARKET: Savannah, Columbus, Valdosta, Tallahassee corridor)",
+    "institution_type": "Regional Bank",
+    "curated": "2026-08-12",
+    "multi_market": true,
+    "competitors": [
+      { "name": "Synovus Bank", "domain": "synovus.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Strong Georgia retail competitor across Savannah/Columbus/Valdosta." },
+      { "name": "Ameris Bank", "domain": "amerisbank.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Southeast regional competing in south Georgia metros." },
+      { "name": "South State Bank", "domain": "southstatebank.com", "type_tag": "Regional Bank", "product_scope": ["all"], "reason": "Active in coastal and south Georgia markets." }
+    ]
+  },
+  {
+    "client": "South Atlantic Bank",
+    "client_domain": "southatlantic.bank",
+    "market": "Coastal South Carolina (MULTI-MARKET: Myrtle Beach, Charleston)",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "multi_market": true,
+    "competitors": [
+      { "name": "South State Bank", "domain": "southstatebank.com", "type_tag": "Regional Bank", "product_scope": ["checking"], "reason": "Primary coastal SC competitor for checking and retail." },
+      { "name": "First Citizens Bank", "domain": "firstcitizens.com", "type_tag": "Regional Bank", "product_scope": ["checking"], "reason": "Strong Myrtle Beach / Charleston presence." },
+      { "name": "Coastal Carolina National Bank", "domain": "coastalcarolinabank.com", "type_tag": "Community Bank", "product_scope": ["checking"], "reason": "Local coastal SC bank competing directly on checking." }
+    ]
+  },
+  {
+    "client": "Velocity Community Credit Union",
+    "client_domain": "velocitycommunity.org",
+    "market": "Florida — Palm Beach County",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Space Coast Credit Union", "domain": "sccu.com", "type_tag": "Regional CU", "product_scope": ["auto-loan"], "reason": "Large Florida CU competing for auto loans in Palm Beach County." },
+      { "name": "Tropical Financial Credit Union", "domain": "tfcu.org", "type_tag": "Regional CU", "product_scope": ["auto-loan"], "reason": "South Florida CU competing for auto loans in Palm Beach County." },
+      { "name": "Power Financial Credit Union (IBM Southeast)", "domain": "powerfi.org", "type_tag": "Regional CU", "product_scope": ["auto-loan"], "reason": "Palm Beach / south Florida CU active in auto lending." },
+      { "name": "MIDFLORIDA Credit Union", "domain": "midflorida.com", "type_tag": "Regional CU", "product_scope": ["auto-loan"], "reason": "Central/south Florida CU with competitive auto products reaching the Palm Beach market." }
+    ]
+  },
+  {
+    "client": "Community Resource Credit Union",
+    "client_domain": "crcu.org",
+    "market": "Texas — Baytown / east Houston metro (Crosby, Atascocita)",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Houston Federal Credit Union", "domain": "houstonfcu.org", "type_tag": "Local CU", "product_scope": ["savings","auto-loan"], "reason": "East Houston / Baytown competitor for savings and auto." },
+      { "name": "Members Choice Credit Union", "domain": "mccu.com", "type_tag": "Local CU", "product_scope": ["savings","auto-loan"], "reason": "Houston CU overlapping auto and savings products." },
+      { "name": "First Service Credit Union", "domain": "fscu.com", "type_tag": "Local CU", "product_scope": ["savings","auto-loan"], "reason": "Houston-area CU competing for consumer auto and deposit business." }
+    ]
+  },
+  {
+    "client": "UMassFive College FCU",
+    "client_domain": "umassfive.coop",
+    "market": "Massachusetts — Amherst / Pioneer Valley (Five College area)",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Florence Bank", "domain": "florencebank.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Pioneer Valley community bank competing for retail membership." },
+      { "name": "Greenfield Savings Bank", "domain": "greenfieldsavings.com", "type_tag": "Community Bank", "product_scope": ["all"], "reason": "Local mutual active in the Amherst / Northampton corridor." },
+      { "name": "Freedom Credit Union", "domain": "freedom.coop", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Springfield/Pioneer Valley CU competing for local members." }
+    ]
+  },
+  {
+    "client": "Stanford Federal Credit Union",
+    "client_domain": "stanfordfcu.org",
+    "market": "California — Palo Alto / Silicon Valley (Stanford community + open membership)",
+    "institution_type": "Local CU",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "Star One Credit Union", "domain": "starone.org", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "Direct Silicon Valley competitor for checking accounts." },
+      { "name": "Technology Credit Union", "domain": "techcu.com", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "Tech-focused CU competing in the Palo Alto / San Jose market." },
+      { "name": "Patelco Credit Union", "domain": "patelco.org", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "Bay Area CU with strong checking and digital offerings." }
+    ]
+  },
+  {
+    "client": "State Bank of India (California)",
+    "client_domain": "sbical.bank",
+    "market": "California — LA (Cerritos, Woodland Hills), San Diego, Fresno, Bay Area (Fremont, Sunnyvale); Indian-diaspora deposit focus",
+    "institution_type": "Regional Bank",
+    "curated": "2026-08-12",
+    "competitors": [
+      { "name": "East West Bank", "domain": "eastwestbank.com", "type_tag": "Regional Bank", "product_scope": ["cd","checking"], "reason": "Leading Asian-American bank advertising high-yield CDs and remittance across LA / Bay Area / Fresno." },
+      { "name": "Cathay Bank", "domain": "cathaybank.com", "type_tag": "Regional Bank", "product_scope": ["cd","checking"], "reason": "Competes for high-yield CD and remittance deposits in the same California diaspora markets." },
+      { "name": "Hanmi Bank", "domain": "hanmi.com", "type_tag": "Regional Bank", "product_scope": ["cd","checking"], "reason": "Asian-American-focused bank marketing CD and deposit products in LA / OC / Bay Area." },
+      { "name": "Bank of Hope", "domain": "bankofhope.com", "type_tag": "Regional Bank", "product_scope": ["cd","checking"], "reason": "Asian-American community bank competing for high-yield deposits statewide." },
+      { "name": "Preferred Bank", "domain": "preferredbank.com", "type_tag": "Regional Bank", "product_scope": ["cd"], "reason": "LA-based Asian-American bank advertising competitive CD rates to the same segment." }
+    ]
+  },
+  {
+    "client": "First National Bank",
+    "client_domain": "fnbforyou.com",
+    "market": "Tennessee (Pulaski / middle TN) + northern Alabama (Huntsville, Athens) — MULTI-MARKET: pick per metro",
+    "institution_type": "Community Bank",
+    "curated": "2026-08-12",
+    "multi_market": true,
+    "competitors": [
+      { "name": "First Farmers & Merchants Bank", "domain": "ffmb.com", "type_tag": "Community Bank", "product_scope": ["checking"], "reason": "Middle-TN competitor for checking in the Pulaski/Columbia market." },
+      { "name": "Bank Independent", "domain": "bankindependent.com", "type_tag": "Community Bank", "product_scope": ["checking"], "reason": "Northern Alabama / Shoals & Huntsville competitor for retail deposits." },
+      { "name": "Redstone Federal Credit Union", "domain": "redfcu.org", "type_tag": "Regional CU", "product_scope": ["checking"], "reason": "Huntsville AL's dominant institution — key competitor on the Alabama side." },
+      { "name": "Renasant Bank", "domain": "renasantbank.com", "type_tag": "Regional Bank", "product_scope": ["checking"], "reason": "Regional presence overlapping northern AL / southern TN (note: also a RAIN client)." }
+    ]
+  },
+  {
+    "client": "Utilities Employees Credit Union",
+    "client_domain": "uecu.org",
+    "market": "National affinity — utility-industry employees (HQ Reading, PA); no local market",
+    "institution_type": "Regional CU",
+    "curated": "2026-08-12",
+    "affinity_note": "National occupational-affinity CU. Search competitors are national rate/digital lenders a member would compare against, NOT local institutions. Consider refreshing against current Bankrate/DepositAccounts rate-leader rankings.",
+    "competitors": [
+      { "name": "PenFed Credit Union", "domain": "penfed.org", "type_tag": "Regional CU", "product_scope": ["mortgage","heloc","personal-loan"], "reason": "National open-membership CU and heavy HELOC/mortgage/personal-loan advertiser." },
+      { "name": "Alliant Credit Union", "domain": "alliantcreditunion.org", "type_tag": "Regional CU", "product_scope": ["checking","heloc","personal-loan"], "reason": "National digital-first CU competing on deposits and consumer lending." },
+      { "name": "Figure", "domain": "figure.com", "type_tag": "Digital Bank", "product_scope": ["heloc"], "reason": "National digital HELOC leader dominating home-equity search." },
+      { "name": "SoFi", "domain": "sofi.com", "type_tag": "Digital Bank", "product_scope": ["personal-loan","mortgage"], "reason": "National digital lender competing on personal loans and mortgage search." },
+      { "name": "Rocket Mortgage", "domain": "rocketmortgage.com", "type_tag": "Digital Bank", "product_scope": ["mortgage"], "reason": "National digital mortgage leader competing in every mortgage auction." }
+    ]
+  },
+  {
+    "client": "Firefighters First Credit Union",
+    "client_domain": "firefightersfirstcu.org",
+    "market": "National affinity — firefighters and families (HQ Los Angeles, CA); no local market",
+    "institution_type": "Regional CU",
+    "curated": "2026-08-12",
+    "affinity_note": "National firefighter-affinity CU advertising CDs/certificates. Search competitors are national high-yield deposit advertisers a member would compare against. Refresh against current Bankrate/DepositAccounts CD rate-leader rankings.",
+    "competitors": [
+      { "name": "Alliant Credit Union", "domain": "alliantcreditunion.org", "type_tag": "Regional CU", "product_scope": ["cd"], "reason": "National digital CU competing on certificate/CD rates." },
+      { "name": "PenFed Credit Union", "domain": "penfed.org", "type_tag": "Regional CU", "product_scope": ["cd"], "reason": "National open-membership CU competing on certificate rates." },
+      { "name": "Ally Bank", "domain": "ally.com", "type_tag": "Digital Bank", "product_scope": ["cd"], "reason": "National digital bank and a top high-yield CD search advertiser." },
+      { "name": "Marcus by Goldman Sachs", "domain": "marcus.com", "type_tag": "Digital Bank", "product_scope": ["cd"], "reason": "National high-yield savings/CD advertiser competing for the same rate-shoppers." }
+    ]
+  }
+]
