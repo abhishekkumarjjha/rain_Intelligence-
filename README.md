@@ -6,7 +6,9 @@ Competitive advertising evidence for RAIN. Two modes over one capture pipeline.
 npm install
 cp .env.example .env      # add SERPAPI_API_KEY and ANTHROPIC_API_KEY
 npm start                 # :3000
-npm test                  # pure logic + pipeline, no keys needed
+
+npm test                  # 88 tests — logic, pipeline, whole API, failure paths
+npm run test:ui           # 46 more, in a real browser (see Testing below)
 ```
 
 ---
@@ -107,9 +109,11 @@ things to check on the first real run:
    `displayads-formats.googleusercontent.com` preview link. The fixture already
    contains one preview-only creative; that ratio is likely much worse for
    image formats. The capture progress line reports it per advertiser.
-2. **Whether `simgad` images render cross-origin.** The wall loads them directly
-   from Google's CDN. If they are hotlink-blocked, the cards show a "could not
-   be loaded" state and the fix is a server-side image proxy.
+2. ~~**Whether `simgad` images render cross-origin.**~~ **Handled.** The wall no
+   longer hotlinks Google's CDN — creative images are served through
+   `GET /api/img`, same-origin, on a strict four-host allowlist. The direct URL
+   is still tried as a fallback before a card is marked unloadable, so a working
+   CDN costs nothing and a blocked one is invisible to the user.
 
 Also worth one check on a domain RAIN manages: **who does Google list as the
 verified advertiser?** If it is RAIN rather than the bank, the agency-attribution
@@ -127,8 +131,73 @@ lib/strategies.js     the gated interpretation pass
 lib/directory.js      RAIN's 40 curated clients (carried over)
 lib/products.js       the 12-code taxonomy (carried over — must stay in sync with the SEM tool)
 lib/store.js          run snapshots + extraction cache + creativeId diffing
+
+test/fixture-lab.js   a synthetic market: 8 advertisers, distinct pixels, known answers
+test/mock-net.js      preload that puts that market under the REAL server
+test/harness.js       server runner + assertions
+test/*.test.js        see Testing
 ```
 
 Provider responses die at the normalizer. Every commercial Transparency Center
 source is a reverse-engineered scraper, so swapping SerpApi for SearchApi (or
 adding Meta) should be a new file in the provider layer and nothing else.
+
+---
+
+## Testing
+
+`npm test` runs 88 assertions with **no API keys, no network and no browser**.
+`npm run test:ui` adds 46 more that drive the real UI in Chromium.
+
+| file | what it covers |
+| --- | --- |
+| `smoke.test.js` | pure logic — clustering, phrasing, product bucketing |
+| `pipeline.test.js` | the recorded SerpApi fixture through the provider layer |
+| `flow.test.js` | every endpoint, driven the way the UI drives it |
+| `degraded.test.js` | quota, bad key, timeout, unreadable creatives, blocked CDN, SSRF |
+| `ui.test.js` | the user flow in a browser, landing to strategies |
+
+### How the offline tests work
+
+`test/mock-net.js` is a `--import` preload, so the **real** `server.js`, the
+**real** provider adapter and the **real** Anthropic SDK all run unmodified —
+only the socket underneath them is fake. A test that stubs `lib/` modules proves
+the stubs work; this proves the app does.
+
+Two interception points, because the two clients differ. The provider adapter
+calls global `fetch`, which is replaced in-process. The Anthropic SDK binds
+`node-fetch` at module load and never consults global `fetch`, so it cannot be
+stubbed at all — it is pointed at a loopback HTTP server via
+`ANTHROPIC_BASE_URL` instead, which has the side benefit of exercising the real
+request path.
+
+The fake market in `test/fixture-lab.js` gives every creative **distinct pixels**
+and a **known** headline, offer and product. The recorded fixture cannot do this:
+all 21 of its creatives share one 1×1 png, so they collapse to a single vision
+call — perfect for testing dedupe, useless for testing any count downstream.
+
+Failure injection is by environment variable, so the unhappy paths need no code
+changes: `RI_MOCK_FAIL=quota|auth`, `RI_MOCK_FAIL_DOMAIN=`, `RI_MOCK_VISION_FAIL=1`,
+`RI_MOCK_IMG_403=1`.
+
+### Why the browser pass exists
+
+A capture completed, the payload was correct and complete, every server-side
+assertion passed — and the user saw nothing, because the results screen was
+rendered into a hidden section and never made visible. They sat on "Capturing"
+watching finished progress rows.
+
+No amount of API testing catches that. The only assertion that does is *after
+the capture finishes, is the results screen on screen?* — so that is now the
+loudest test in the file, along with checks that no card renders `undefined`,
+that longevity never reads as a continuous run, and that no uncaught exception
+reaches the console anywhere in the flow.
+
+Playwright is deliberately **not** a dependency — `npm install` stays small and
+`ui.test.js` exits 0 when it is missing. To run it:
+
+```
+npm i -D playwright && npx playwright install chromium
+npm run test:ui
+npm run shots ./shots     # screenshots of every screen
+```

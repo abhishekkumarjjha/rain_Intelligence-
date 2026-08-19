@@ -1,39 +1,54 @@
 /* =========================================================================
-   RAIN Intelligence — deep oceanic dark.
-   Reference: SimilarWeb's marketing surface — near-black navy canvas, a single
-   saturated blue doing all the accent work, generous whitespace, one big
-   pill-shaped input as the centre of gravity.
+   RAIN Intelligence — sapphire.
 
-   The restraint is deliberate: this screen gets shown to clients on a Zoom, so
-   every colour that is not carrying meaning is noise. Blue = interactive.
-   Amber = the reader should slow down. Green = confirmed. Nothing else.
+   The canvas is a deep saturated blue, not a near-black navy. That is the whole
+   change: the previous palette read as "dark mode" — the blue only showed up in
+   the accents, so the surface itself was almost black and the product looked
+   utilitarian rather than considered.
+
+   Here the blue carries the surface. Panels step up in luminance from the
+   canvas rather than sitting on top of black, which is what gives depth without
+   heavy borders or drop shadows.
+
+   Roles are unchanged and still strict, because this screen gets shown to
+   clients on a Zoom and every colour that is not carrying meaning is noise:
+     blue  = interactive
+     amber = the reader should slow down
+     green = confirmed
+   Nothing else.
+
+   CONTRAST: every text/background pair below clears WCAG AA (4.5:1). The two
+   blues are deliberately different tokens — --blue is legible AS TEXT on the
+   canvas (5.0:1), --grad is dark enough for WHITE TEXT to sit on it (5.0-6.7:1).
+   One blue cannot do both jobs, and using the accent blue as a button fill is
+   how you end up with a button nobody can read.
    ========================================================================= */
 
 :root {
-  --bg:        #050A1A;
-  --bg-2:      #070D22;
-  --panel:     #0C1530;
-  --panel-2:   #111C3D;
-  --panel-3:   #16234A;
-  --line:      #1B2A52;
-  --line-2:    #26386B;
+  --bg:        #0C1742;
+  --bg-2:      #112050;
+  --panel:     #17265E;
+  --panel-2:   #1F3175;
+  --panel-3:   #283C8C;
+  --line:      #2B3F80;
+  --line-2:    #3E58A8;
 
-  --ink:       #F2F6FF;
-  --ink-2:     #A9BADD;
-  --ink-3:     #6B7FA8;
+  --ink:       #F5F8FF;
+  --ink-2:     #C6D3F2;
+  --ink-3:     #93A5D2;
 
-  --blue:      #2E6BFF;
-  --blue-2:    #5B8CFF;
-  --blue-glow: rgba(46,107,255,.35);
-  --grad:      linear-gradient(96deg, #2E6BFF 0%, #4D8BFF 100%);
+  --blue:      #4C8DFF;
+  --blue-2:    #8FB6FF;
+  --blue-glow: rgba(76,141,255,.32);
+  --grad:      linear-gradient(96deg, #1E4FD6 0%, #2A66E8 100%);
 
-  --green:     #2FD98A;
-  --amber:     #F0B24B;
-  --red:       #FF6B5E;
+  --green:     #34D399;
+  --amber:     #FBBF24;
+  --red:       #FB7185;
 
   --r:         16px;
   --r-sm:      10px;
-  --shadow:    0 18px 50px rgba(0,0,0,.55);
+  --shadow:    0 20px 56px rgba(3,8,26,.55);
   --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -41,8 +56,9 @@
 html, body { margin: 0; padding: 0; }
 body {
   background:
-    radial-gradient(1200px 700px at 50% -15%, rgba(46,107,255,.18), transparent 62%),
-    radial-gradient(900px 500px at 88% 8%, rgba(46,107,255,.08), transparent 60%),
+    radial-gradient(1400px 820px at 50% -20%, rgba(96,158,255,.26), transparent 66%),
+    radial-gradient(960px 560px at 90% 4%, rgba(143,182,255,.13), transparent 62%),
+    radial-gradient(820px 820px at 4% 98%, rgba(42,102,232,.20), transparent 70%),
     var(--bg);
   background-attachment: fixed;
   color: var(--ink);
@@ -56,7 +72,7 @@ body {
   display: flex; align-items: center; gap: 14px;
   padding: 16px 30px;
   position: sticky; top: 0; z-index: 40;
-  background: rgba(5,10,26,.78);
+  background: rgba(12,23,66,.84);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--line);
 }
@@ -88,10 +104,17 @@ body {
   letter-spacing: -1.6px; margin: 0 0 18px;
 }
 .hero h1 .hl {
-  background: linear-gradient(96deg, #5B8CFF, #9CBBFF);
+  background: linear-gradient(96deg, #6FA0FF, #A9C6FF);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
-.lede { color: var(--ink-2); font-size: 16px; max-width: 620px; margin: 0 auto 34px; line-height: 1.6; }
+/* The tagline says what the product IS; the lede says what to do next. Two
+   different jobs, so they get two different weights rather than one paragraph
+   the eye slides off. */
+.tagline {
+  font-size: 19px; font-weight: 600; color: var(--ink);
+  margin: 0 auto 14px; max-width: 720px; line-height: 1.45; letter-spacing: -.2px;
+}
+.lede { color: var(--ink-2); font-size: 15.5px; max-width: 600px; margin: 0 auto 34px; line-height: 1.65; }
 
 .searchbar {
   display: flex; align-items: center; gap: 10px;
@@ -247,6 +270,9 @@ body {
 .samplingbar.clean { background: rgba(47,217,138,.06); border-color: rgba(47,217,138,.2); color: #9FE3C2; }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+/* Benchmark mode has no filter chips. An empty row still claimed its margin,
+   leaving a band of dead space above the table. */
+.filters:empty { display: none; }
 .fchip {
   font-family: var(--font); font-size: 12.5px; cursor: pointer;
   padding: 8px 15px; border-radius: 999px; color: var(--ink-2);
@@ -376,4 +402,66 @@ table.bench td.clientcol { background: rgba(47,217,138,.035); }
   .modegrid { grid-template-columns: 1fr; }
   .hero h1 { font-size: 36px; }
   .resstats { gap: 16px; }
+}
+
+
+/* ---------------- states the app can be in ---------------- */
+
+/* Errors live on the page. See showError() — alert() blocks the tab and cannot
+   be read back once dismissed. */
+.errbar {
+  background: rgba(251,113,133,.10);
+  border: 1px solid rgba(251,113,133,.34);
+  color: #FFC9CF;
+  border-radius: var(--r-sm);
+  padding: 13px 16px;
+  font-size: 13.5px;
+  margin-bottom: 22px;
+}
+
+/* What the wall is scoped to, and whether that scope was honoured. Deliberately
+   not styled as a warning — most of the time it is simply stating the scope. */
+.scopebar {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--r-sm);
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-bottom: 18px;
+}
+.scopebar b { color: var(--ink); }
+
+.runnote { margin-top: 20px; font-size: 13.5px; }
+.bad { color: var(--red); }
+.warn { color: var(--amber); }
+
+.empty.big { padding: 48px 20px; }
+.empty.big h3 { color: var(--ink); font-size: 19px; margin: 0 0 10px; }
+.empty.big p { max-width: 520px; margin: 0 auto 16px; }
+.empty.big .dim { color: var(--ink-3); font-size: 13px; }
+.whylist {
+  list-style: none; padding: 0; margin: 18px auto 20px; max-width: 520px;
+  text-align: left; font-size: 13px;
+}
+.whylist li {
+  padding: 10px 14px; margin-bottom: 8px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--r-sm); color: var(--ink-2);
+}
+.whylist b { color: var(--ink); }
+
+.linkbtn {
+  background: none; border: none; padding: 0;
+  color: var(--blue-2); font: inherit; cursor: pointer; text-decoration: underline;
+}
+
+/* A creative that would not load from either the proxy or the CDN. Says so
+   plainly rather than leaving a broken-image glyph. */
+.broken {
+  display: grid; place-items: center; text-align: center;
+  min-height: 120px; padding: 20px;
+  color: var(--ink-3); font-size: 12px; line-height: 1.5;
+  background: var(--panel-2);
 }

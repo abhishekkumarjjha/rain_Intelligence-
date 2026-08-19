@@ -8,3 +8,6 @@ runs/*
 
 npm-debug.log*
 .DS_Store
+
+# screenshots from `npm run shots`
+shots/

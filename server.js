@@ -69,14 +69,22 @@ app.post("/api/resolve", (req, res) => {
   const domain = normDomain(url);
   if (!domain) return res.status(400).json({ ok: false, reason: "bad_url" });
 
-  const { product, from } = productFromUrl(url);
+  // The URL is the default signal, not the only one. Once the user has set a
+  // product scope explicitly, competitor ranking has to be re-asked against
+  // THAT product — a competitor curated for "checking" should outrank a
+  // market-wide one the moment checking is what we are looking at.
+  const guessed = productFromUrl(url);
+  const override = String(req.body?.product || "").trim();
+  const product = override ? normalizeProduct(override) : guessed.product;
+  const from = override ? "explicit" : guessed.from;
+
   const dir = suggestCompetitors({ domain, product, limit: 8 });
   const row = findClient(domain);
 
   // A homepage tells us the institution but not the product. Say so rather than
   // silently analysing "other" — the whole benchmark is scoped by product, so a
   // wrong guess here quietly wrecks every count downstream.
-  const looksLikeHomepage = from === "none";
+  const looksLikeHomepage = guessed.from === "none" && !override;
 
   res.json({
     ok: true,
@@ -103,9 +111,14 @@ app.post("/api/capture", (req, res) => {
   const product = normalizeProduct(body.product || "");
   const days = Math.max(7, Math.min(365, Number(body.days) || DEFAULT_LOOKBACK_DAYS));
 
+  // Targets are keyed by domain in run.progress, so a repeated domain would
+  // overwrite its own progress row and be counted as two columns holding the
+  // same ads. In benchmark the client is already a target, so it cannot also be
+  // its own competitor. Deduped here rather than trusting the caller.
+  const claimed = new Set(mode === "benchmark" && clientDomain ? [clientDomain] : []);
   const competitors = (Array.isArray(body.competitors) ? body.competitors : [])
     .map((c) => ({ label: String(c.label || c.name || "").trim(), domain: normDomain(c.domain) }))
-    .filter((c) => c.domain)
+    .filter((c) => c.domain && !claimed.has(c.domain) && claimed.add(c.domain))
     .slice(0, 8);
 
   if (!clientDomain) return res.status(400).json({ ok: false, reason: "bad_client_domain" });
@@ -190,8 +203,24 @@ async function executeRun(run) {
       const cached = [], fresh = [];
       for (const img of cap.images) {
         const hit = getCachedExtraction(img.creativeId);
-        if (hit) cached.push({ ...hit, imageUrl: img.imageUrl, duplicateIds: img.duplicateIds || [] });
-        else fresh.push(img);
+        // The cache stores a TRANSCRIPTION, which never changes. Attribution is
+        // not part of it: the same creative retrieved under a different entered
+        // domain belongs to that domain now, so provider-side fields are always
+        // re-applied from this capture rather than replayed from the cache.
+        if (hit) {
+          cached.push({
+            ...hit,
+            imageUrl: img.imageUrl,
+            duplicateIds: img.duplicateIds || [],
+            institution: img.domain,
+            advertiser: img.advertiser || "",
+            advertiserId: img.advertiserId || "",
+            targetDomain: img.targetDomain || "",
+            firstShown: img.firstShown,
+            lastShown: img.lastShown,
+            totalDaysShown: img.totalDaysShown,
+          });
+        } else fresh.push(img);
       }
 
       const { ads, extractionFailed } = fresh.length
@@ -203,7 +232,12 @@ async function executeRun(run) {
       const all = [...cached, ...ads].map((a) => ({ ...a, isClient: !!target.isClient, institutionLabel: target.label }));
       run.ads.push(...all);
 
-      p.status = "done";
+      // Downloading creatives and then reading none of them is a failure with a
+      // cause, not a completed capture that happens to be empty. Reporting it as
+      // "done · 0 read" is how a broken vision path looks exactly like a
+      // competitor who simply is not advertising.
+      p.status = all.length ? "done" : "empty";
+      p.reason = all.length ? undefined : "extraction_failed";
       p.read = all.length;
       p.fromCache = cached.length;
       p.extractionFailed = extractionFailed;
@@ -225,6 +259,24 @@ async function executeRun(run) {
   };
   run.sampling = samplingNote(run.runs);
   saveRun(run);
+}
+
+/**
+ * Assemble the benchmark for a finished run.
+ *
+ * ONE definition, used by both the table and the gated strategy pass, because a
+ * strategy generated from a differently-assembled benchmark is a strategy about
+ * numbers the client never saw.
+ */
+function benchmarkFor(run) {
+  return buildBenchmark({
+    client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },
+    competitors: run.competitors.map((c) => ({
+      ...c, ads: run.ads.filter((a) => !a.isClient && a.institution === c.domain),
+    })),
+    product: run.product,
+    runs: run.runs,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -251,24 +303,37 @@ app.get("/api/run/:id", (req, res) => {
 
   if (run.mode === "creative") {
     const scoped = filterByProduct(competitorAds, run.product);
+
+    // A banner that says "Bank With Us" and nothing else classifies as "other",
+    // and that is the CORRECT classification — most display creatives carry no
+    // product signal at all. Scoping the wall strictly to one product therefore
+    // empties it routinely, which reads to the user as "retrieval is broken"
+    // when in fact seven creatives were read and shown to nobody.
+    //
+    // So the scope narrows the wall, it does not gate it: when the scoped set is
+    // empty and creatives exist, the wall falls back to everything captured and
+    // SAYS SO. The narrower claim is still available as a filter chip.
+    const fellBackToAll = scoped.length === 0 && competitorAds.length > 0;
+    const pool = fellBackToAll ? competitorAds : scoped;
+
     payload.creative = {
-      summary: creativeSummary(scoped),
+      productScope: run.product,
+      scopedCount: scoped.length,
+      capturedCount: competitorAds.length,
+      fellBackToAll,
+      summary: creativeSummary(pool),
       // The wall shows IDEAS, not every execution. Three near-identical rate
       // banners are one idea with three pieces of evidence, and presenting them
       // as three findings produces a wall nobody reads.
-      clusters: clusterAds(scoped),
+      clusters: clusterAds(pool),
+      byProduct: productBreakdown(pool),
       byCompetitor: run.competitors.map((c) => ({
         ...c,
-        count: scoped.filter((a) => a.institution === c.domain).length,
+        count: pool.filter((a) => a.institution === c.domain).length,
       })),
     };
   } else {
-    payload.benchmark = buildBenchmark({
-      client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },
-      competitors: run.competitors.map((c) => ({ ...c, ads: run.ads.filter((a) => a.institution === c.domain) })),
-      product: run.product,
-      runs: run.runs,
-    });
+    payload.benchmark = benchmarkFor(run);
     payload.strategies = run.strategies || null;
   }
 
@@ -279,6 +344,56 @@ app.get("/api/run/:id", (req, res) => {
 });
 
 app.get("/api/runs", (_req, res) => res.json({ runs: listRuns({ limit: 25 }) }));
+
+// ---------------------------------------------------------------------------
+// GET /api/img?u= — creative image proxy.
+//
+// The wall used to point <img> straight at Google's CDN. That works until it
+// does not: simgad URLs are served for the Transparency Center's own front end
+// and can be refused cross-origin, and when they are, every card on the wall
+// renders as "could not be loaded" and the tool looks broken rather than
+// hotlink-blocked. The bytes are already fetched server-side during capture, so
+// serving them through the same origin removes the whole failure class.
+//
+// STRICT HOST ALLOWLIST. A proxy that will fetch any URL a query string names is
+// an SSRF hole pointed at whatever else is reachable from this host, so only the
+// two CDNs the provider actually returns are permitted.
+// ---------------------------------------------------------------------------
+const IMAGE_HOSTS = new Set([
+  "tpc.googlesyndication.com",
+  "s0.2mdn.net",
+  "displayads-formats.googleusercontent.com",
+  "lh3.googleusercontent.com",
+]);
+
+app.get("/api/img", async (req, res) => {
+  let target;
+  try { target = new URL(String(req.query.u || "")); }
+  catch { return res.status(400).end(); }
+
+  if (target.protocol !== "https:" || !IMAGE_HOSTS.has(target.hostname)) {
+    return res.status(400).end();
+  }
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    const upstream = await fetch(target.href, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+    if (!upstream.ok) return res.status(502).end();
+
+    const ct = String(upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!/^image\/(png|jpeg|jpg|webp|gif)$/.test(ct)) return res.status(415).end();
+
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    // A creative's pixels never change, which is the same reason the extraction
+    // cache exists. Cache hard.
+    res.set("content-type", ct);
+    res.set("cache-control", "public, max-age=86400, immutable");
+    res.send(buf);
+  } catch {
+    res.status(504).end();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // POST /api/run/:id/strategies — the GATE.
@@ -293,12 +408,10 @@ app.post("/api/run/:id/strategies", async (req, res) => {
   if (run.mode !== "benchmark") return res.status(400).json({ ok: false, reason: "wrong_mode" });
 
   try {
-    const benchmark = buildBenchmark({
-      client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },
-      competitors: run.competitors.map((c) => ({ ...c, ads: run.ads.filter((a) => a.institution === c.domain) })),
-      product: run.product,
-      runs: run.runs,
-    });
+    // Built from the same function that produced the table the user is looking
+    // at. Two call sites that assemble the benchmark separately is how the
+    // strategy pass ends up reasoning over numbers nobody was shown.
+    const benchmark = benchmarkFor(run);
 
     const strategies = await generateStrategies({
       benchmark,

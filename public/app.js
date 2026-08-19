@@ -9,13 +9,25 @@ const S = {
   mode: "", days: 30,
   competitors: [],          // {label, domain, typeTag, reason, relevance, on}
   runId: "", run: null,
-  filter: "all",
+  filter: "all",            // competitor filter on the wall
+  productFilter: "all",     // product filter on the wall
   health: null,
 };
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* Errors belong on the page, next to the thing that failed. alert() blocks the
+   whole tab, cannot be read back, and is the first thing that makes a tool feel
+   unfinished when it is shown to a client. */
+function showError(msg) {
+  const bar = $("errBar");
+  bar.textContent = msg;
+  bar.classList.remove("hidden");
+  bar.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+function clearError() { $("errBar").classList.add("hidden"); }
 
 function show(id) {
   document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
@@ -67,7 +79,8 @@ async function resolve() {
       body: JSON.stringify({ url }),
     })).json();
 
-    if (!r.ok) { $("urlHint").innerHTML = `<span style="color:var(--amber)">That does not look like a URL.</span>`; return; }
+    if (!r.ok) { $("urlHint").innerHTML = `<span class="warn">That does not look like a URL. Try <b>yourbank.com/checking</b>.</span>`; return; }
+    clearError();
 
     S.url = url; S.domain = r.domain; S.product = r.product;
     S.productLabel = r.productLabel;
@@ -88,15 +101,53 @@ async function resolve() {
 
     buildProductSelect();
     show("s-mode");
+  } catch {
+    showError("Could not reach the server. Is it still running on this port?");
   } finally { $("analyzeBtn").disabled = false; }
 }
 
+/* The taxonomy comes from /api/health. If that request failed the selector must
+   still be usable, otherwise a transient blip on page load leaves the user
+   unable to set a product scope at all. */
+const FALLBACK_PRODUCTS = [
+  ["checking", "Checking"], ["savings", "Savings"], ["cd", "CD / Certificate"],
+  ["money-market", "Money Market"], ["credit-card", "Credit Card"], ["auto-loan", "Auto Loan"],
+  ["personal-loan", "Personal Loan"], ["mortgage", "Mortgage"], ["heloc", "HELOC"],
+  ["business", "Business"], ["wealth", "Wealth"], ["other", "Other"],
+].map(([code, label]) => ({ code, label }));
+
+function productList() {
+  return S.health?.products?.length ? S.health.products : FALLBACK_PRODUCTS;
+}
+const productLabel = (code) => productList().find((p) => p.code === code)?.label || code;
+
 function buildProductSelect() {
   const sel = $("productSel");
-  sel.innerHTML = (S.health?.products || []).map((p) =>
+  sel.innerHTML = productList().map((p) =>
     `<option value="${p.code}" ${p.code === S.product ? "selected" : ""}>${esc(p.label)}</option>`).join("");
-  sel.onchange = () => { S.product = sel.value; renderCompetitors(); };
+  // Competitor ordering is product-dependent — a competitor scoped to "checking"
+  // outranks a market-wide one — so changing the scope has to re-ask the
+  // directory rather than just re-render a stale list.
+  sel.onchange = () => { S.product = sel.value; S.productLabel = productLabel(S.product); refreshCompetitors(); };
   $("daysSel").onchange = () => { S.days = Number($("daysSel").value); renderCost(); };
+}
+
+async function refreshCompetitors() {
+  try {
+    const r = await (await fetch("/api/resolve", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: S.url, product: S.product }),
+    })).json();
+    if (r.ok && r.competitors?.length) {
+      // Keep whatever the user has already chosen; re-rank the rest.
+      const chosen = new Map(S.competitors.filter((c) => c.on).map((c) => [c.domain, c]));
+      const manual = S.competitors.filter((c) => c.typeTag === "Manual");
+      const fresh = r.competitors.map((c, i) => ({ ...c, on: chosen.has(c.domain) || (!chosen.size && i < 3) }));
+      const seen = new Set(fresh.map((c) => c.domain));
+      S.competitors = [...fresh, ...manual.filter((c) => !seen.has(c.domain))];
+    }
+  } catch { /* keep the list we already have */ }
+  renderCompetitors();
 }
 
 /* ---------------- mode ---------------- */
@@ -180,14 +231,17 @@ $("captureBtn").onclick = async () => {
   $("captureBtn").disabled = false;
 
   if (!r.ok) {
-    alert({
-      serpapi_not_configured: "SERPAPI_API_KEY is not set on the server.",
-      anthropic_not_configured: "ANTHROPIC_API_KEY is not set on the server.",
-      no_competitors: "Select at least one competitor.",
-    }[r.reason] || `Could not start: ${r.reason}`);
+    showError({
+      serpapi_not_configured: "SERPAPI_API_KEY is not set on the server, so no ads can be fetched.",
+      anthropic_not_configured: "ANTHROPIC_API_KEY is not set on the server, so creatives cannot be read.",
+      no_competitors: "Select at least one competitor before capturing.",
+      bad_client_domain: "That client domain could not be read. Re-enter the landing page URL.",
+    }[r.reason] || `Could not start the capture: ${r.reason}`);
     return;
   }
 
+  clearError();
+  $("runNote").textContent = "";
   S.runId = r.runId;
   $("progList").innerHTML = r.targets.map((t) => `
     <div class="progrow" data-d="${esc(t.domain)}">
@@ -199,9 +253,34 @@ $("captureBtn").onclick = async () => {
   poll();
 };
 
+/* A capture takes tens of seconds and the poll is the only thing driving the UI
+   forward. A single failed request used to end the loop silently, leaving the
+   user on a progress screen that would never move again — indistinguishable
+   from a hung capture. Transient failures are retried; a persistent one says so
+   on the page. */
+let pollMisses = 0;
+
 async function poll() {
-  const r = await (await fetch(`/api/run/${S.runId}`)).json();
-  if (!r.ok) return;
+  let r;
+  try {
+    const res = await fetch(`/api/run/${S.runId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    r = await res.json();
+    pollMisses = 0;
+  } catch (e) {
+    pollMisses++;
+    if (pollMisses >= 5) {
+      $("runNote").innerHTML = `<span class="bad">Lost contact with the server while capturing. The run may still be going — reload and it will be in the run list.</span>`;
+      return;
+    }
+    setTimeout(poll, 1400 * pollMisses);
+    return;
+  }
+
+  if (!r.ok) {
+    $("runNote").innerHTML = `<span class="bad">That run could not be read back: ${esc(r.reason || "unknown")}.</span>`;
+    return;
+  }
 
   for (const [domain, p] of Object.entries(r.progress || {})) {
     const row = document.querySelector(`.progrow[data-d="${CSS.escape(domain)}"]`);
@@ -211,7 +290,10 @@ async function poll() {
   }
 
   if (r.status === "done") { S.run = r; renderResults(); return; }
-  if (r.status === "error") { alert(`Capture failed: ${r.error}`); return; }
+  if (r.status === "error") {
+    $("runNote").innerHTML = `<span class="bad">Capture failed: ${esc(reasonText(r.error))}</span>`;
+    return;
+  }
   setTimeout(poll, 1400);
 }
 
@@ -235,6 +317,10 @@ const reasonText = (r) => ({
   timeout: "provider timed out", bad_domain: "invalid domain",
   no_ads: "no ads in this window", preview_only: "creatives are preview-only",
   not_configured: "provider not configured",
+  extraction_failed: "creatives found but none could be read",
+  unexpected: "unexpected error",
+  serpapi_not_configured: "SERPAPI_API_KEY is not set",
+  anthropic_not_configured: "ANTHROPIC_API_KEY is not set",
 }[r] || r || "failed");
 
 /* ---------------- results ---------------- */
@@ -247,7 +333,45 @@ function renderResults() {
   $("samplingBar").className = "samplingbar" + (s.complete ? " clean" : "");
   $("samplingBar").textContent = s.note || "";
 
-  if (r.mode === "creative") renderCreative(r); else renderBenchmark(r);
+  // Every target can legitimately come back with nothing — no ads in the window,
+  // preview-only creatives, a provider outage. That is a RESULT and it has to be
+  // rendered as one, with the per-target reasons still visible, rather than
+  // dropping the user onto an empty results screen.
+  if (!r.ads?.length) {
+    renderNothingCaptured(r);
+  } else if (r.mode === "creative") {
+    renderCreative(r);
+  } else {
+    renderBenchmark(r);
+  }
+
+  // The whole reason the results screen was never reached: this call did not
+  // exist. The capture finished, the payload arrived, everything rendered into
+  // a hidden section, and the user sat on "Capturing" watching completed rows.
+  show("s-results");
+}
+
+function renderNothingCaptured(r) {
+  $("resStats").innerHTML = "";
+  $("filters").innerHTML = "";
+  $("productFilters").innerHTML = "";
+  $("scopeBar").classList.add("hidden");
+
+  const rows = Object.entries(r.progress || {}).map(([domain, p]) => `
+    <li><b>${esc(p.label || domain)}</b> — ${
+      p.status === "failed" || p.status === "empty"
+        ? esc(reasonText(p.reason))
+        : `${p.read ?? 0} read`
+    }${p.found != null ? ` · ${Number(p.found).toLocaleString()} found` : ""}${
+      p.previewOnly ? ` · ${p.previewOnly} preview-only` : ""}</li>`).join("");
+
+  $("resultBody").innerHTML = `
+    <div class="empty big">
+      <h3>No creatives were read in this capture</h3>
+      <p>Nothing was invented to fill the gap. Here is what each advertiser returned:</p>
+      <ul class="whylist">${rows}</ul>
+      <p class="dim">A window of 30 days is often the cause — try 60 or 90, or check the advertiser is running Google ads at all.</p>
+    </div>`;
 }
 
 function renderCreative(r) {
@@ -257,30 +381,87 @@ function renderCreative(r) {
     <div class="st"><div class="v">${c.summary.total}</div><div class="k">Creatives</div></div>
     <div class="st"><div class="v">${c.summary.withOffer}</div><div class="k">With an offer</div></div>`;
 
-  const chips = [{ code: "all", label: "All", count: c.summary.total },
+  // When the product scope matched nothing, the server widened the wall rather
+  // than handing back an empty one. Saying so matters: "these are all the
+  // creatives captured" and "these are the checking creatives" are different
+  // claims and the user has to know which one they are looking at.
+  const scope = $("scopeBar");
+  if (c.fellBackToAll) {
+    scope.classList.remove("hidden");
+    scope.innerHTML = `No creative in this capture classified as <b>${esc(r.productLabel)}</b> — most display banners carry no product signal at all. Showing all <b>${c.capturedCount}</b> creatives captured instead.`;
+  } else if (c.scopedCount < c.capturedCount) {
+    scope.classList.remove("hidden");
+    scope.innerHTML = `Scoped to <b>${esc(r.productLabel)}</b>: <b>${c.scopedCount}</b> of <b>${c.capturedCount}</b> creatives captured.`;
+  } else {
+    scope.classList.add("hidden");
+  }
+
+  // Two independent filters. Product narrows what the wall is about; competitor
+  // narrows whose work it is.
+  const prodChips = [{ code: "all", label: "All products", count: c.summary.total },
+    ...(c.byProduct || []).map((x) => ({ code: x.code, label: x.label, count: x.count }))];
+  $("productFilters").innerHTML = prodChips.map((x) =>
+    `<button class="fchip ${S.productFilter === x.code ? "on" : ""}" data-f="${esc(x.code)}">${esc(x.label)}<span class="n">${x.count}</span></button>`).join("");
+  $("productFilters").querySelectorAll(".fchip").forEach((n) =>
+    n.onclick = () => { S.productFilter = n.dataset.f; renderCreative(r); });
+
+  const compChips = [{ code: "all", label: "All advertisers", count: c.summary.total },
     ...c.byCompetitor.filter((x) => x.count).map((x) => ({ code: x.domain, label: x.label, count: x.count }))];
-  $("filters").innerHTML = chips.map((x) =>
+  $("filters").innerHTML = compChips.map((x) =>
     `<button class="fchip ${S.filter === x.code ? "on" : ""}" data-f="${esc(x.code)}">${esc(x.label)}<span class="n">${x.count}</span></button>`).join("");
   $("filters").querySelectorAll(".fchip").forEach((n) =>
     n.onclick = () => { S.filter = n.dataset.f; renderCreative(r); });
 
-  const clusters = S.filter === "all" ? c.clusters : c.clusters.filter((a) => a.institution === S.filter);
+  const clusters = (c.clusters || [])
+    .filter((a) => S.filter === "all" || a.institution === S.filter)
+    .filter((a) => S.productFilter === "all" || a.product === S.productFilter);
+
   $("resultBody").innerHTML = clusters.length
     ? `<div class="wall">${clusters.map(adCard).join("")}</div>`
-    : `<div class="empty">No ${esc(r.productLabel.toLowerCase())} creatives in the ads captured for this selection.<br />Try widening the window or the product scope.</div>`;
+    : `<div class="empty">Nothing matches both filters. <button class="linkbtn" id="clearFilters">Clear filters</button></div>`;
 
+  const clear = $("clearFilters");
+  if (clear) clear.onclick = () => { S.filter = "all"; S.productFilter = "all"; renderCreative(r); };
+
+  wireImages();
+  // A card stands for an IDEA, so opening it must show every execution behind
+  // it, not just the one representative the wall happened to render.
   $("resultBody").querySelectorAll(".shot").forEach((n) =>
-    n.onclick = () => openEvidence([n.dataset.cid], "Creative"));
+    n.onclick = () => openEvidence((n.dataset.ids || "").split(",").filter(Boolean), "Creative"));
+}
+
+/* Creative images are served through the app's own origin.
+   simgad URLs are meant for the Transparency Center's front end and can be
+   refused cross-origin; when that happens every card reads "could not be
+   loaded" and the tool looks broken rather than hotlink-blocked. The proxy is
+   tried first, the original URL second, and only then is the card marked. */
+function wireImages(root) {
+  (root || document).querySelectorAll("img.cimg:not([data-wired])").forEach((img) => {
+    img.dataset.wired = "1";
+    img.onerror = () => {
+      if (img.dataset.stage === "proxy") {
+        img.dataset.stage = "direct";
+        img.src = img.dataset.direct;
+        return;
+      }
+      img.replaceWith(Object.assign(document.createElement("div"), {
+        className: "broken",
+        textContent: "Creative could not be loaded",
+      }));
+    };
+    img.dataset.stage = "proxy";
+    img.src = `/api/img?u=${encodeURIComponent(img.dataset.direct)}`;
+  });
 }
 
 function adCard(a) {
   const days = a.totalDaysShown != null
     ? `shown on ${a.totalDaysShown.toLocaleString()} days${a.firstShown ? ` since ${monthYear(a.firstShown)}` : ""}` : "";
+  const ids = [a.creativeId, ...(a.variationIds || [])].filter((v, i, arr) => v && arr.indexOf(v) === i);
   return `
   <div class="adcard">
-    <div class="shot" data-cid="${esc(a.creativeId)}">
-      <img src="${esc(a.imageUrl)}" alt="" loading="lazy"
-           onerror="this.outerHTML='<div class=broken>Creative could not be loaded<br>from Google\\'s CDN</div>'" />
+    <div class="shot" data-cid="${esc(a.creativeId)}" data-ids="${esc(ids.join(","))}">
+      <img class="cimg" data-direct="${esc(a.imageUrl)}" alt="" loading="lazy" />
     </div>
     <div class="meta">
       <div class="who">${esc(a.institutionLabel || a.institution)}</div>
@@ -304,6 +485,22 @@ function renderBenchmark(r) {
     <div class="st"><div class="v">${b.columns.filter((c) => !c.isClient).reduce((s, c) => s + c.adCount, 0)}</div><div class="k">Their ads</div></div>
     <div class="st"><div class="v">${b.columns.length - 1}</div><div class="k">Competitors</div></div>`;
   $("filters").innerHTML = "";
+  $("productFilters").innerHTML = "";
+
+  // A product scope that discards every captured ad produces a table of
+  // em-dashes that looks like "nobody advertises anything". Say what happened.
+  const captured = (r.ads || []).length;
+  const inTable = b.columns.reduce((s, c) => s + c.adCount, 0);
+  const scope = $("scopeBar");
+  if (captured && !inTable) {
+    scope.classList.remove("hidden");
+    scope.innerHTML = `<b>${captured}</b> ads were captured but none classified as <b>${esc(r.productLabel)}</b>, so every cell below is empty. Re-run with a different product scope.`;
+  } else if (inTable < captured) {
+    scope.classList.remove("hidden");
+    scope.innerHTML = `Scoped to <b>${esc(r.productLabel)}</b>: <b>${inTable}</b> of <b>${captured}</b> captured ads are in this table.`;
+  } else {
+    scope.classList.add("hidden");
+  }
 
   const findings = (b.findings || []).map((f) => `
     <div class="finding ${esc(f.kind)}">
@@ -353,8 +550,21 @@ function wireGate() {
   if (!btn) return;
   btn.onclick = async () => {
     btn.disabled = true; btn.textContent = "Reading the evidence…";
-    const r = await (await fetch(`/api/run/${S.runId}/strategies`, { method: "POST" })).json();
-    if (!r.ok) { btn.disabled = false; btn.textContent = "Generate recommended strategies"; alert(`Could not generate: ${r.reason}`); return; }
+    let r;
+    try {
+      r = await (await fetch(`/api/run/${S.runId}/strategies`, { method: "POST" })).json();
+    } catch {
+      btn.disabled = false; btn.textContent = "Generate recommended strategies";
+      showError("Could not reach the server to generate strategies.");
+      return;
+    }
+    if (!r.ok) {
+      btn.disabled = false; btn.textContent = "Generate recommended strategies";
+      showError(r.reason === "anthropic_not_configured"
+        ? "ANTHROPIC_API_KEY is not set on the server, so strategies cannot be generated."
+        : `Could not generate strategies: ${r.reason}`);
+      return;
+    }
     S.run.strategies = r.strategies;
     $("strategyZone").innerHTML = strategyHtml(r.strategies);
   };
@@ -393,8 +603,7 @@ function openEvidence(ids, title) {
   $("drawerTitle").textContent = `${title} · ${ads.length} ad${ads.length === 1 ? "" : "s"}`;
   $("drawerBody").innerHTML = ads.length ? ads.map((a) => `
     <div class="evcard">
-      <div class="shot"><img src="${esc(a.imageUrl)}" alt=""
-        onerror="this.outerHTML='<div style=color:#8B99B5;font-size:12px;padding:24px>Creative could not be loaded</div>'" /></div>
+      <div class="shot"><img class="cimg" data-direct="${esc(a.imageUrl)}" alt="" /></div>
       <div class="m">
         <b>${esc(a.institutionLabel || a.institution)}</b>${a.advertiser && a.advertiser !== a.institutionLabel
           ? ` <span style="color:var(--amber)">· verified advertiser: ${esc(a.advertiser)}</span>` : ""}<br />
@@ -405,6 +614,7 @@ function openEvidence(ids, title) {
         ${a.detailsLink ? `<a href="${esc(a.detailsLink)}" target="_blank" rel="noopener">View in Google Ads Transparency Center ↗</a>` : ""}
       </div>
     </div>`).join("") : `<div class="empty">No creatives matched.</div>`;
+  wireImages($("drawerBody"));
   $("drawer").classList.add("on"); $("drawerBg").classList.add("on");
 }
 
