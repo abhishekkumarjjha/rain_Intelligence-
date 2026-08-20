@@ -130,6 +130,43 @@ try {
       eq(idea.sizes.length, 2, "distinct sizes");
     });
 
+    // ---- the "55 found but only 2 shown" report ----------------------------
+    await check("EVERY captured creative is reachable from the wall, not just the scoped ones", () => {
+      // campusfederal ran 3 checking creatives and 1 savings; neighborsfcu ran
+      // 1 checking, 1 mortgage, 1 generic. Scoping to checking must not make
+      // the other three unreachable — the payload carries all 7.
+      const ids = new Set(creativeRun.creative.clusters.flatMap((c) => c.variationIds || [c.creativeId]));
+      eq(ids.size, 7, "creatives reachable from the wall");
+      eq(creativeRun.creative.capturedCount, 7, "capturedCount");
+      eq(creativeRun.creative.scopedCount, 4, "scopedCount");
+    });
+
+    await check("product chips count everything captured, not just the current slice", () => {
+      const total = creativeRun.creative.byProduct.reduce((n, p) => n + p.count, 0);
+      eq(total, 7, "product chip total");
+      ok(creativeRun.creative.byProduct.length > 1, "expected more than one product chip");
+    });
+
+    await check("the wall opens on the scoped product when it has something in it", () =>
+      eq(creativeRun.creative.defaultProductFilter, "checking", "defaultProductFilter"));
+
+    await check("the capture funnel reconciles listed -> read -> on-product", () => {
+      const f = creativeRun.creative.funnel;
+      ok(f, "funnel missing");
+      eq(f.read, 7, "read");
+      eq(f.onProduct, 4, "onProduct");
+      ok(f.listed >= f.read, `listed ${f.listed} < read ${f.read}`);
+      // Every step that lost creatives has to say why, or the strip is noise.
+      for (const st of f.steps) {
+        if (st.lost > 0) ok(st.why && st.why.length > 0, `step ${st.key} lost ${st.lost} with no explanation`);
+      }
+    });
+
+    await check("the sampling note never claims retrieval means reading", () => {
+      const note = creativeRun.sampling.note;
+      ok(/read|selected to read/i.test(note), `note gives no read count: ${note}`);
+    });
+
     await check("off-product creatives are reachable, not silently discarded", () => {
       // neighborsfcu ran a mortgage banner and a generic one. A capture that
       // read 7 creatives must be able to account for all 7 somewhere.
@@ -343,6 +380,40 @@ try {
     await check("the client cannot be entered as their own competitor", () => {
       ok(!started.ok || started.targets.filter((t) => t.domain === "lacapfcu.org").length === 1,
         "client domain appears twice in the target list");
+    });
+  }
+
+  // ------------------------------------------------ the provider rotates ads
+  section("captures are samples — consecutive runs are diffed");
+  {
+    const first = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    await S.awaitRun(first.body.runId);
+
+    const second = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    const run = await S.awaitRun(second.body.runId);
+
+    await check("a second comparable capture is diffed against the first", () => {
+      ok(run.diff, "no diff on the second run");
+      eq(run.diff.previousRunId, first.body.runId, "previous run id");
+    });
+    await check("an identical re-capture reports no new creatives", () => {
+      eq(run.diff.appeared, 0, "appeared");
+      eq(run.diff.stillRunning, 4, "seen in both");
+      eq(run.diff.noLongerObserved, 0, "no longer observed");
+    });
+    await check("a run with no comparable predecessor carries no diff", async () => {
+      const other = await S.post("/api/capture", {
+        mode: "creative", clientDomain: "lacapfcu.org", product: "mortgage", days: 30,
+        competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+      });
+      const r = await S.awaitRun(other.body.runId);
+      eq(r.diff, null, "diff on a differently-scoped run");
     });
   }
 

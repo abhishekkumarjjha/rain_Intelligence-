@@ -10,7 +10,7 @@ const S = {
   competitors: [],          // {label, domain, typeTag, reason, relevance, on}
   runId: "", run: null,
   filter: "all",            // competitor filter on the wall
-  productFilter: "all",     // product filter on the wall
+  productFilter: null,      // product filter; null = adopt the run's scope once
   health: null,
 };
 
@@ -56,11 +56,6 @@ function crumbs(id) {
       ? `<span class="bad">Not configured: ${missing.join(", ")}</span> · ${h.directorySize} clients in directory`
       : `${h.directorySize} clients in directory · reads up to ${h.maxReadPerAdvertiser} creatives per advertiser`;
 
-    const c = await (await fetch("/api/clients")).json();
-    $("quickClients").innerHTML = (c.clients || []).slice(0, 6)
-      .map((x) => `<span class="qc" data-d="${esc(x.domain)}">${esc(x.name)}</span>`).join("");
-    $("quickClients").querySelectorAll(".qc").forEach((n) =>
-      n.onclick = () => { $("urlInput").value = n.dataset.d; resolve(); });
   } catch { /* health is informational only */ }
 })();
 
@@ -337,6 +332,9 @@ function renderResults() {
   // preview-only creatives, a provider outage. That is a RESULT and it has to be
   // rendered as one, with the per-target reasons still visible, rather than
   // dropping the user onto an empty results screen.
+  renderFunnel(r.mode === "creative" ? r.creative?.funnel : r.funnel);
+  renderDiff(r.diff);
+
   if (!r.ads?.length) {
     renderNothingCaptured(r);
   } else if (r.mode === "creative") {
@@ -351,11 +349,70 @@ function renderResults() {
   show("s-results");
 }
 
+/* The reconciliation strip. Every step is a number computed in analyze.js —
+   nothing here is derived in the browser, so the chain shown is the chain that
+   actually happened. Collapsed to the numbers by default; the "why" expands. */
+function renderFunnel(f) {
+  const bar = $("funnelBar");
+  if (!f || !f.steps?.length) { bar.classList.add("hidden"); return; }
+  bar.classList.remove("hidden");
+
+  const steps = f.steps.map((st, i) => `
+    <div class="fstep ${i === f.steps.length - 1 ? "last" : ""}">
+      <div class="fv">${Number(st.value).toLocaleString()}</div>
+      <div class="fl">${esc(st.label)}</div>
+    </div>`).join("");
+
+  const lost = f.steps.filter((st) => st.lost > 0);
+  const why = lost.length ? `
+    <div class="flost hidden" id="funnelWhy">
+      <ul>${lost.map((st) => `<li><b>${Number(st.lost).toLocaleString()}</b> ${esc(st.why)}</li>`).join("")}</ul>
+    </div>` : "";
+
+  bar.innerHTML = `
+    <div class="fhead">
+      <span class="ftitle">Where the creatives went</span>
+      ${lost.length ? `<button class="ftoggle" id="funnelToggle">Why the drop?</button>` : ""}
+    </div>
+    <div class="fsteps">${steps}</div>
+    ${why}`;
+
+  const toggle = $("funnelToggle");
+  if (toggle) toggle.onclick = () => {
+    const box = $("funnelWhy");
+    const open = !box.classList.toggle("hidden");
+    toggle.textContent = open ? "Hide" : "Why the drop?";
+  };
+}
+
+/* The Transparency Center serves a rotating SAMPLE, so the same capture run
+   twice returns overlapping but different creatives. One run cannot say what a
+   competitor is running; two runs can say what we had not seen before. The
+   phrasing is deliberate — "no longer observed", never "stopped running". */
+function renderDiff(d) {
+  const bar = $("diffBar");
+  if (!d || !d.previousAt) { bar.classList.add("hidden"); return; }
+  bar.classList.remove("hidden");
+
+  const when = String(d.previousAt).slice(0, 10);
+  const bits = [];
+  if (d.appeared) bits.push(`<b>${d.appeared}</b> we had not captured before`);
+  if (d.stillRunning) bits.push(`<b>${d.stillRunning}</b> seen in both captures`);
+  if (d.noLongerObserved) bits.push(`<b>${d.noLongerObserved}</b> no longer observed`);
+
+  bar.innerHTML = `
+    <span class="dlabel">Since ${esc(when)}</span>
+    ${bits.join(" · ") || "no change against the previous capture"}
+    <span class="dnote">Each capture is a sample — an ad missing here may simply not have been sampled this time, not stopped.</span>`;
+}
+
 function renderNothingCaptured(r) {
   $("resStats").innerHTML = "";
   $("filters").innerHTML = "";
   $("productFilters").innerHTML = "";
   $("scopeBar").classList.add("hidden");
+  $("funnelBar").classList.add("hidden");
+  $("diffBar").classList.add("hidden");
 
   const rows = Object.entries(r.progress || {}).map(([domain, p]) => `
     <li><b>${esc(p.label || domain)}</b> — ${
@@ -376,28 +433,40 @@ function renderNothingCaptured(r) {
 
 function renderCreative(r) {
   const c = r.creative;
-  $("resStats").innerHTML = `
-    <div class="st"><div class="v">${c.summary.ideas}</div><div class="k">Ideas</div></div>
-    <div class="st"><div class="v">${c.summary.total}</div><div class="k">Creatives</div></div>
-    <div class="st"><div class="v">${c.summary.withOffer}</div><div class="k">With an offer</div></div>`;
 
-  // When the product scope matched nothing, the server widened the wall rather
-  // than handing back an empty one. Saying so matters: "these are all the
-  // creatives captured" and "these are the checking creatives" are different
-  // claims and the user has to know which one they are looking at.
+  // The product scope is the DEFAULT FILTER, not a gate — every captured
+  // creative is in hand and reachable. Applied once, then the user is in charge.
+  if (S.productFilter == null) S.productFilter = c.defaultProductFilter || "all";
+
+  const shown = (c.clusters || [])
+    .filter((a) => S.filter === "all" || a.institution === S.filter)
+    .filter((a) => S.productFilter === "all" || a.product === S.productFilter);
+
+  // The stats describe WHAT IS ON SCREEN. The capture totals live in the funnel
+  // above — showing "6 ideas" over three visible cards is the same category of
+  // confusion as "55 found" over a wall of two.
+  const shownExecutions = shown.reduce((n, a) => n + (a.variations || 1), 0);
+  $("resStats").innerHTML = `
+    <div class="st"><div class="v">${shown.length}</div><div class="k">Ideas shown</div></div>
+    <div class="st"><div class="v">${shownExecutions}</div><div class="k">Executions</div></div>
+    <div class="st"><div class="v">${shown.filter((a) => a.offer).length}</div><div class="k">With an offer</div></div>`;
+
+  // Which slice of the capture is on screen, and how to see the rest. The old
+  // wording implied the rest had been discarded; they are one chip away.
   const scope = $("scopeBar");
-  if (c.fellBackToAll) {
+  if (S.productFilter === "all" && c.scopedCount === 0 && c.capturedCount > 0) {
     scope.classList.remove("hidden");
-    scope.innerHTML = `No creative in this capture classified as <b>${esc(r.productLabel)}</b> — most display banners carry no product signal at all. Showing all <b>${c.capturedCount}</b> creatives captured instead.`;
-  } else if (c.scopedCount < c.capturedCount) {
+    scope.innerHTML = `No creative in this capture classified as <b>${esc(r.productLabel)}</b> — most display banners carry no product signal at all, so they read as <b>Other</b>. Showing all <b>${c.capturedCount}</b> creatives captured.`;
+  } else if (S.productFilter !== "all" && shown.length < c.summary.ideas) {
     scope.classList.remove("hidden");
-    scope.innerHTML = `Scoped to <b>${esc(r.productLabel)}</b>: <b>${c.scopedCount}</b> of <b>${c.capturedCount}</b> creatives captured.`;
+    scope.innerHTML = `Showing <b>${esc(productLabel(S.productFilter))}</b> only. <button class="linkbtn" id="showAllProducts">Show all ${c.capturedCount} creatives captured</button>`;
   } else {
     scope.classList.add("hidden");
   }
 
   // Two independent filters. Product narrows what the wall is about; competitor
-  // narrows whose work it is.
+  // narrows whose work it is. BOTH count over everything captured — chips that
+  // only count the current slice cannot be used to escape it.
   const prodChips = [{ code: "all", label: "All products", count: c.summary.total },
     ...(c.byProduct || []).map((x) => ({ code: x.code, label: x.label, count: x.count }))];
   $("productFilters").innerHTML = prodChips.map((x) =>
@@ -412,9 +481,7 @@ function renderCreative(r) {
   $("filters").querySelectorAll(".fchip").forEach((n) =>
     n.onclick = () => { S.filter = n.dataset.f; renderCreative(r); });
 
-  const clusters = (c.clusters || [])
-    .filter((a) => S.filter === "all" || a.institution === S.filter)
-    .filter((a) => S.productFilter === "all" || a.product === S.productFilter);
+  const clusters = shown;
 
   $("resultBody").innerHTML = clusters.length
     ? `<div class="wall">${clusters.map(adCard).join("")}</div>`
@@ -422,6 +489,8 @@ function renderCreative(r) {
 
   const clear = $("clearFilters");
   if (clear) clear.onclick = () => { S.filter = "all"; S.productFilter = "all"; renderCreative(r); };
+  const showAll = $("showAllProducts");
+  if (showAll) showAll.onclick = () => { S.productFilter = "all"; renderCreative(r); };
 
   wireImages();
   // A card stands for an IDEA, so opening it must show every execution behind
@@ -524,7 +593,8 @@ function renderBenchmark(r) {
     // The comparability caveat rides WITH its row, not in a footnote.
     const warn = row.comparability?.note
       ? `<tr><td colspan="${b.columns.length + 1}" class="comprow-note">${esc(row.comparability.note)}</td></tr>` : "";
-    return `<tr><td class="rl">${esc(row.label)}</td>${cells}</tr>${warn}`;
+    // Offer rows carry the emphasis colour — they are the reason for the table.
+    return `<tr class="${row.kind === "offer" ? "offerrow" : ""}"><td class="rl">${esc(row.label)}</td>${cells}</tr>${warn}`;
   }).join("");
 
   $("resultBody").innerHTML = `
@@ -541,7 +611,7 @@ function gateHtml() {
   <div class="gate">
     <h3>Strategies are not generated by default</h3>
     <p>The table above is evidence — what was advertised, by whom, over the same window. Recommendations are a separate, optional read that a strategist chooses to open.</p>
-    <button class="btn primary lg" id="genBtn">Generate recommended strategies</button>
+    <button class="btn primary secondary lg" id="genBtn">Generate recommended strategies</button>
   </div>`;
 }
 

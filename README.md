@@ -7,8 +7,8 @@ npm install
 cp .env.example .env      # add SERPAPI_API_KEY and ANTHROPIC_API_KEY
 npm start                 # :3000
 
-npm test                  # 88 tests — logic, pipeline, whole API, failure paths
-npm run test:ui           # 46 more, in a real browser (see Testing below)
+npm test                  # 96 tests — logic, pipeline, whole API, failure paths
+npm run test:ui           # 52 more, in a real browser (see Testing below)
 ```
 
 ---
@@ -132,6 +132,8 @@ lib/directory.js      RAIN's 40 curated clients (carried over)
 lib/products.js       the 12-code taxonomy (carried over — must stay in sync with the SEM tool)
 lib/store.js          run snapshots + extraction cache + creativeId diffing
 
+docs/UI-SPEC.md       full UI + copy specification, written to be handed to a reviewer
+
 test/fixture-lab.js   a synthetic market: 8 advertisers, distinct pixels, known answers
 test/mock-net.js      preload that puts that market under the REAL server
 test/harness.js       server runner + assertions
@@ -144,10 +146,37 @@ adding Meta) should be a new file in the provider layer and nothing else.
 
 ---
 
+## Why a capture of 55 can show 2
+
+Because six things happen between "listed by Google" and "on the wall", and each
+one is legitimate:
+
+```
+listed by Google        what the provider says exists for this domain and window
+  -> retrieved          one page of results; `num` is capped at 100
+  -> readable image     the rest are preview-only JS links with no image to read
+  -> selected to read   the RI_MAX_READ cap, because vision is priced per creative
+  -> read               minus duplicate artwork, failed downloads, unreadable creatives
+  -> on the product     minus everything classified as a different product
+```
+
+The results screen shows this chain as a strip, with a "Why the drop?" expander
+naming what was lost at each step. Every figure comes from the capture-run
+records in `analyze.js#captureFunnel`, so the chain always reconciles.
+
+The last step is the one that surprises people. **Most display banners carry no
+product signal at all** — a creative that says "Bank With Us" classifies as
+`other`, and that is the correct answer. So the product scope is a DEFAULT
+FILTER, never a gate: every captured creative is in the payload and reachable
+from a chip, and the chips count over the whole capture rather than the current
+slice.
+
+---
+
 ## Testing
 
-`npm test` runs 88 assertions with **no API keys, no network and no browser**.
-`npm run test:ui` adds 46 more that drive the real UI in Chromium.
+`npm test` runs 96 assertions with **no API keys, no network and no browser**.
+`npm run test:ui` adds 52 more that drive the real UI in Chromium.
 
 | file | what it covers |
 | --- | --- |

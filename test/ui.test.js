@@ -107,8 +107,36 @@ try {
       ok(/landing page|product page/i.test(await page.locator("#urlHint").innerText()), "no landing-page guidance");
     });
 
-    await check("directory shortcuts render", async () =>
-      ok((await page.locator("#quickClients .qc").count()) > 0, "no quick client chips"));
+    await check("the landing screen is the field and nothing else", async () => {
+      eq(await page.locator("#quickClients").count(), 0, "client shortcut chips still present");
+      ok(/\d+ clients in directory/.test(await page.locator("#healthLine").innerText()),
+        "directory size should still be stated");
+    });
+
+    await check("the palette uses blue, orange and green — not blue alone", async () => {
+      const t = await page.evaluate(() => {
+        const cs = getComputedStyle(document.documentElement);
+        return ["--bg", "--blue", "--amber", "--green", "--amber-fill", "--green-fill"]
+          .map((k) => [k, cs.getPropertyValue(k).trim()]);
+      });
+      for (const [k, v] of t) ok(v, `token ${k} is undefined`);
+    });
+
+    await check("no CSS variable referenced by the page is undefined", async () => {
+      const missing = await page.evaluate(() => {
+        const cs = getComputedStyle(document.documentElement);
+        const used = new Set();
+        for (const sheet of document.styleSheets) {
+          let rules; try { rules = sheet.cssRules; } catch { continue; }
+          for (const rule of rules) {
+            const text = rule.cssText || "";
+            for (const m of text.matchAll(/var\((--[a-z0-9-]+)\)/gi)) used.add(m[1]);
+          }
+        }
+        return [...used].filter((v) => !cs.getPropertyValue(v).trim());
+      });
+      ok(missing.length === 0, `undefined CSS variables: ${missing.join(", ")}`);
+    });
 
     await check("nothing on the landing screen overflows horizontally", async () => {
       const over = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
@@ -179,6 +207,46 @@ try {
       ok(Number(stats[1]) > 0, "creative count should not be zero");
     });
 
+    await check("the capture funnel is shown and reconciles to the wall", async () => {
+      ok(await page.locator("#funnelBar").isVisible(), "funnel strip missing");
+      const values = (await page.locator("#funnelBar .fstep .fv").allInnerTexts()).map((v) => Number(v.replace(/,/g, "")));
+      ok(values.length >= 2, `expected funnel steps, got ${values.length}`);
+      // Monotonically non-increasing: a funnel that goes back up is nonsense.
+      for (let i = 1; i < values.length; i++) {
+        ok(values[i] <= values[i - 1], `funnel rose from ${values[i - 1]} to ${values[i]}`);
+      }
+    });
+
+    await check("the funnel explains every drop when asked", async () => {
+      const toggle = page.locator("#funnelToggle");
+      if (!(await toggle.count())) return;              // nothing was lost
+      await toggle.click();
+      await page.waitForTimeout(200);
+      const why = await page.locator("#funnelWhy").innerText();
+      ok(why.trim().length > 0, "the 'why the drop' panel opened empty");
+      await toggle.click();
+    });
+
+    await check("the wall opens on the scoped product but says how to see the rest", async () => {
+      const scope = await page.locator("#scopeBar").innerText();
+      ok(/Checking/i.test(scope), `scope bar did not name the product: ${scope}`);
+      ok(await page.locator("#showAllProducts").isVisible(), "no way to reach the unscoped creatives");
+    });
+
+    await check("SHOWING ALL PRODUCTS REACHES EVERY CAPTURED CREATIVE", async () => {
+      const scoped = await page.locator(".wall .adcard").count();
+      await page.locator("#showAllProducts").click();
+      await page.waitForTimeout(300);
+      const all = await page.locator(".wall .adcard").count();
+      ok(all > scoped, `"show all" did not widen the wall: ${all} vs ${scoped}`);
+      // and back
+      await page.locator("#productFilters .fchip", { hasText: "Checking" }).first().click();
+      await page.waitForTimeout(300);
+      eq(await page.locator(".wall .adcard").count(), scoped, "returning to the scope");
+      await page.locator("#productFilters .fchip", { hasText: "All products" }).first().click();
+      await page.waitForTimeout(300);
+    });
+
     await check("the sampling note is shown on the results screen", async () =>
       ok((await page.locator("#samplingBar").innerText()).trim().length > 0, "sampling bar empty"));
 
@@ -207,6 +275,9 @@ try {
 
     // ------------------------------------------------------------- filters
     section("creative filters");
+    // The product checks above left the wall on "All products", so the baseline
+    // the advertiser filter is measured against has to be re-read here.
+    wallCount = await page.locator(".wall .adcard").count();
     await check("product filter chips are rendered", async () =>
       ok((await page.locator("#productFilters .fchip").count()) > 1,
         `got ${await page.locator("#productFilters .fchip").count()} product chips`));

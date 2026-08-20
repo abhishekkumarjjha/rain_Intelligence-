@@ -21,12 +21,12 @@ import { fileURLToPath } from "node:url";
 
 import { capture, hasKey, normDomain, MAX_READ_PER_ADVERTISER, DEFAULT_LOOKBACK_DAYS } from "./lib/atc-provider.js";
 import { extractCreatives } from "./lib/extract.js";
-import { clusterAds, productBreakdown, filterByProduct, buildBenchmark, creativeSummary, samplingNote } from "./lib/analyze.js";
+import { clusterAds, productBreakdown, filterByProduct, buildBenchmark, creativeSummary, samplingNote, captureFunnel } from "./lib/analyze.js";
 import { suggestCompetitors, findClient, listClients, DIRECTORY_SIZE } from "./lib/directory.js";
 import { productFromUrl, normalizeProduct, PRODUCT_LABELS, PRODUCT_CODES } from "./lib/products.js";
 import { generateStrategies } from "./lib/strategies.js";
 import { hasAnthropicKey } from "./lib/claude.js";
-import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction } from "./lib/store.js";
+import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, findPreviousRun, diffRuns } from "./lib/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -258,6 +258,20 @@ async function executeRun(run) {
     targetsTotal: run.targets.length,
   };
   run.sampling = samplingNote(run.runs);
+
+  // ---- what changed since the last comparable capture ----------------------
+  // The provider returns a rotating SAMPLE, not an inventory: the same query
+  // twice returns overlapping but different creatives. A single run therefore
+  // cannot say what a competitor is running — but two runs can say what we have
+  // and have not seen before, which is the honest version of the same question.
+  //
+  // Note the wording downstream: an ad missing from this capture is "no longer
+  // observed", never "stopped running". It may simply not have been sampled.
+  const prev = findPreviousRun(run);
+  if (prev) {
+    run.diff = { ...diffRuns(prev, run), previousRunId: prev.id, previousAt: prev.createdAt };
+  }
+
   saveRun(run);
 }
 
@@ -292,6 +306,7 @@ app.get("/api/run/:id", (req, res) => {
     product: run.product, productLabel: run.productLabel, days: run.days,
     client: run.client, competitors: run.competitors,
     progress: run.progress, sampling: run.sampling || null,
+    diff: run.diff || null,
     stats: run.stats || null,
     createdAt: run.createdAt,
   };
@@ -307,33 +322,40 @@ app.get("/api/run/:id", (req, res) => {
     // A banner that says "Bank With Us" and nothing else classifies as "other",
     // and that is the CORRECT classification — most display creatives carry no
     // product signal at all. Scoping the wall strictly to one product therefore
-    // empties it routinely, which reads to the user as "retrieval is broken"
-    // when in fact seven creatives were read and shown to nobody.
+    // empties it routinely, which reads as "retrieval is broken" when in fact
+    // the creatives were read and shown to nobody.
     //
-    // So the scope narrows the wall, it does not gate it: when the scoped set is
-    // empty and creatives exist, the wall falls back to everything captured and
-    // SAYS SO. The narrower claim is still available as a filter chip.
-    const fellBackToAll = scoped.length === 0 && competitorAds.length > 0;
-    const pool = fellBackToAll ? competitorAds : scoped;
-
+    // EVERY captured creative is sent, always. The product scope becomes the
+    // DEFAULT FILTER rather than a gate on the payload — previously the chips
+    // were computed over the scoped slice, so a capture that read 12 and scoped
+    // to 2 rendered a chip saying "All products 2" and the other 10 were
+    // unreachable from the UI. The counts a filter offers have to describe what
+    // is actually in hand.
     payload.creative = {
       productScope: run.product,
+      // Pre-select the scope only when it has something in it. Landing on an
+      // empty wall is the failure this whole path exists to avoid.
+      defaultProductFilter: scoped.length ? run.product : "all",
       scopedCount: scoped.length,
       capturedCount: competitorAds.length,
-      fellBackToAll,
-      summary: creativeSummary(pool),
+      summary: creativeSummary(competitorAds),
+      scopedSummary: creativeSummary(scoped),
       // The wall shows IDEAS, not every execution. Three near-identical rate
       // banners are one idea with three pieces of evidence, and presenting them
       // as three findings produces a wall nobody reads.
-      clusters: clusterAds(pool),
-      byProduct: productBreakdown(pool),
+      clusters: clusterAds(competitorAds),
+      byProduct: productBreakdown(competitorAds),
       byCompetitor: run.competitors.map((c) => ({
         ...c,
-        count: pool.filter((a) => a.institution === c.domain).length,
+        count: competitorAds.filter((a) => a.institution === c.domain).length,
       })),
+      // Where every creative went, listed -> on-product. See captureFunnel().
+      funnel: captureFunnel(run.runs, competitorAds, scoped.length),
     };
   } else {
     payload.benchmark = benchmarkFor(run);
+    payload.funnel = captureFunnel(run.runs, run.ads,
+      payload.benchmark.columns.reduce((n, c) => n + c.adCount, 0));
     payload.strategies = run.strategies || null;
   }
 
