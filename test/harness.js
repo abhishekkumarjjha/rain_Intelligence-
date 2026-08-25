@@ -77,6 +77,11 @@ export async function startServer(env = {}) {
       });
       return { status: r.status, body: await r.json() };
     },
+    /** Raw response, for endpoints that do not return JSON (media, images). */
+    async raw(p) {
+      const r = await fetch(base + p);
+      return { status: r.status, headers: Object.fromEntries(r.headers), buffer: Buffer.from(await r.arrayBuffer()) };
+    },
     /** Poll a run to completion. Returns the final payload. */
     async awaitRun(runId, ms = 20000) {
       const deadline = Date.now() + ms;

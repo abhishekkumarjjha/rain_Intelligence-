@@ -14,8 +14,10 @@
 
 import http from "node:http";
 import { listingFor, extractionFor, PNG_BY_ID, ID_BY_B64, MARKET } from "./fixture-lab.js";
+import { pageSearchResponse, adsResponse, jpegish, PAGE_BY_DOMAIN } from "./meta-fixture.js";
 
 process.env.SERPAPI_API_KEY ||= "test-serpapi-key";
+process.env.SEARCHAPI_API_KEY ||= "test-searchapi-key";
 process.env.ANTHROPIC_API_KEY ||= "test-anthropic-key";
 
 // Failure injection, so the unhappy paths are testable without editing code.
@@ -23,10 +25,14 @@ process.env.ANTHROPIC_API_KEY ||= "test-anthropic-key";
 //   RI_MOCK_FAIL_DOMAIN=x.com     that one domain times out
 //   RI_MOCK_VISION_FAIL=1         every vision call returns unparseable prose
 //   RI_MOCK_IMG_403=1             the image CDN hotlink-blocks every request
+//   RI_MOCK_META_FAIL=quota|auth  SearchApi fails that way
+//   RI_MOCK_META_MEDIA_403=1      the Meta CDN refuses the media download
 const FAIL = process.env.RI_MOCK_FAIL || "";
 const FAIL_DOMAIN = process.env.RI_MOCK_FAIL_DOMAIN || "";
 const VISION_FAIL = process.env.RI_MOCK_VISION_FAIL === "1";
 const IMG_403 = process.env.RI_MOCK_IMG_403 === "1";
+const META_FAIL = process.env.RI_MOCK_META_FAIL || "";
+const META_MEDIA_403 = process.env.RI_MOCK_META_MEDIA_403 === "1";
 
 // ---------------------------------------------------------------------------
 // 1. Provider + image CDN, over global fetch.
@@ -49,6 +55,38 @@ globalThis.fetch = async function mockFetch(input, init = {}) {
     if (domain === FAIL_DOMAIN) throw Object.assign(new Error("aborted"), { name: "AbortError" });
 
     return json(listingFor(domain in MARKET ? domain : "__unknown__", { format }));
+  }
+
+  // ---- SearchApi: Meta Ad Library -----------------------------------------
+  if (url.includes("searchapi.io")) {
+    const q = new URL(url).searchParams;
+    const engine = q.get("engine");
+
+    if (META_FAIL === "quota") return json({ error: "Plan limit exceeded." }, 429);
+    if (META_FAIL === "auth") return json({ error: "Invalid api key." }, 401);
+
+    if (engine === "meta_ad_library_page_search") {
+      return json(pageSearchResponse(q.get("q")));
+    }
+    if (engine === "meta_ad_library") {
+      // The union question is settled: `all` is a superset. A credit_ads call
+      // is a doubled bill for no new records, so it is an outright failure here
+      // rather than something a test has to remember to look for.
+      if (q.get("ad_type") !== "all") return json({ error: "test: ad_type must be all" }, 400);
+      return json(adsResponse(q.get("page_id"), q.get("next_page_token")));
+    }
+    return json({ error: "unknown engine" }, 400);
+  }
+
+  // ---- Meta CDN: signed, expiring media ------------------------------------
+  if (url.includes("fbcdn.net")) {
+    if (META_MEDIA_403) return new Response("forbidden", { status: 403 });
+    const m = url.match(/\/([0-9]+)_n\.jpg/);
+    const png = jpegish(m ? Number(m[1]) : 1);
+    return new Response(png, {
+      status: 200,
+      headers: { "content-type": "image/png", "content-length": String(png.length) },
+    });
   }
 
   if (url.includes("tpc.googlesyndication.com")) {
@@ -88,7 +126,27 @@ const anthropic = http.createServer((req, res) => {
       } else {
         const id = ID_BY_B64.get(img.source.data);
         const rec = id ? extractionFor(id) : null;
-        text = rec ? JSON.stringify(rec) : "{}";
+        if (rec) {
+          text = JSON.stringify(rec);
+        } else if (String(body.system || "").includes("Facebook or Instagram")) {
+          // The Meta fallback prompt. Answers ONLY what the free tiers could not
+          // resolve — and deliberately answers with a LOW-confidence "other",
+          // because the fixture routes to vision exactly the creatives that
+          // carry no product signal. A confident product here would hide the
+          // fact that the deterministic tiers are what do the real work.
+          text = JSON.stringify({
+            headlineInArt: "Built by the community",
+            offer: { present: false, type: "none", value: "", unit: "none", term: "", minimum: "", qualifier: "" },
+            product: "other",
+            productConfidence: 0.3,
+            visualStyle: "photo",
+            hasPeople: true,
+            tone: "warm local",
+            legible: true,
+          });
+        } else {
+          text = "{}";
+        }
       }
     } else {
       // The gated strategy pass. Digit-free on purpose: the contract is that

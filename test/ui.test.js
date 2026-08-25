@@ -174,10 +174,15 @@ try {
 
     await chooseCompetitors(page, MARKET_TWO);
 
-    await check("the cost line states credits before anything is spent", async () => {
+    // The cost line used to count advertisers and search credits. It now reads
+    // the per-advertiser capture cache, so it states the SOURCE, what will
+    // actually be spent, and what is being reused — the numbers that change
+    // depending on who else on the team ran this competitor that week.
+    await check("the cost line states what will be spent before anything is spent", async () => {
       const cost = (await page.locator("#costNote").innerText()).trim();
-      ok(/2 advertisers/.test(cost), `cost line was: ${cost}`);
-      ok(/search credits/.test(cost), `cost line was: ${cost}`);
+      ok(/Google display/.test(cost), `cost line was: ${cost}`);
+      ok(/\d+ requests?|nothing to spend/.test(cost), `cost line was: ${cost}`);
+      ok(/reused for \d+ days/.test(cost), `cost line was: ${cost}`);
     });
 
     await page.click("#captureBtn");

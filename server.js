@@ -1,13 +1,21 @@
 // =============================================================================
 // server.js — RAIN Intelligence
 //
-// Two modes over ONE capture pipeline:
-//   CREATIVE   — what are competitors making? (image creatives, inspiration wall)
+// Two modes:
+//   CREATIVE   — what are competitors making? (inspiration wall)
 //   BENCHMARK  — how do our ads compare to theirs? (ads vs ads, counted facts)
 //
-// They are not two products. They are two readings of the same evidence store,
-// which is why the capture path below branches on exactly one thing — the
-// creative format requested — and nothing else.
+// Three SOURCES underneath them:
+//   google_display — SerpApi, Transparency Center, image creatives
+//   google_search  — SerpApi, Transparency Center, text creatives (Benchmark only)
+//   meta           — SearchApi, Meta Ad Library, cards
+//
+// A source is a provider AND a surface AND a set of temporal semantics. Creative
+// may capture Google display, Meta, or both — but "both" means TWO RUNS, not one
+// run holding two kinds of record. That is deliberate and load-bearing: separate
+// runs make it structurally impossible for a Google count and a Meta count to
+// end up in the same denominator, or for a Meta capture to be diffed against a
+// Google one. The results screen renders them as sibling tabs.
 //
 // Capture is asynchronous with polling rather than a blocking POST, for one
 // reason: a run touches N+1 advertisers concurrently and the user needs to see
@@ -19,9 +27,18 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { capture, hasKey, normDomain, MAX_READ_PER_ADVERTISER, DEFAULT_LOOKBACK_DAYS } from "./lib/atc-provider.js";
-import { extractCreatives } from "./lib/extract.js";
+import { capture, hasKey, normDomain, buildDomainLink, MAX_READ_PER_ADVERTISER, DEFAULT_LOOKBACK_DAYS } from "./lib/atc-provider.js";
+import { extractCreatives, extractMetaMessages } from "./lib/extract.js";
 import { clusterAds, productBreakdown, filterByProduct, buildBenchmark, creativeSummary, samplingNote, captureFunnel } from "./lib/analyze.js";
+import { captureMeta, hasSearchApiKey, MAX_META_PAGES, MAX_META_READ, DEFAULT_META_LOOKBACK_DAYS } from "./lib/meta-provider.js";
+import {
+  dedupeMessages, enrichDeterministic, metaProductBreakdown, filterMetaByProduct,
+  metaCreativeSummary, metaFunnel, metaSamplingNote,
+} from "./lib/meta-analyze.js";
+import { storeMessageMedia, readMedia } from "./lib/media-store.js";
+import * as captureCache from "./lib/capture-cache.js";
+import { SOURCES, SOURCE_LABELS, resolveSources, googleFormatFor, isMeta, WINDOW_OPTIONS, defaultWindowFor } from "./lib/sources.js";
+import { listIdentities, saveIdentity } from "./lib/platform-identity.js";
 import { suggestCompetitors, findClient, listClients, DIRECTORY_SIZE } from "./lib/directory.js";
 import { productFromUrl, normalizeProduct, PRODUCT_LABELS, PRODUCT_CODES } from "./lib/products.js";
 import { generateStrategies } from "./lib/strategies.js";
@@ -46,11 +63,57 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     serpapi: hasKey(),
+    searchapi: hasSearchApiKey(),
     anthropic: hasAnthropicKey(),
     directorySize: DIRECTORY_SIZE,
     maxReadPerAdvertiser: MAX_READ_PER_ADVERTISER,
     defaultLookbackDays: DEFAULT_LOOKBACK_DAYS,
+    // Availability is PER SOURCE. A missing SearchApi key must not disable
+    // Google display, and a missing SerpApi key must not disable a Meta-only
+    // capture — the two providers fail independently because they are
+    // independent, and one unpaid invoice should not take the product down.
+    sources: [
+      { key: SOURCES.GOOGLE_DISPLAY, label: SOURCE_LABELS.google_display, available: hasKey(), needs: "SERPAPI_API_KEY" },
+      { key: SOURCES.META, label: SOURCE_LABELS.meta, available: hasSearchApiKey(), needs: "SEARCHAPI_API_KEY" },
+    ],
+    windows: WINDOW_OPTIONS,
+    meta: {
+      maxPages: MAX_META_PAGES,
+      maxRead: MAX_META_READ,
+      defaultLookbackDays: DEFAULT_META_LOOKBACK_DAYS,
+      identities: Object.keys(listIdentities()).length,
+    },
+    cacheTtlDays: captureCache.TTL_DAYS,
     products: PRODUCT_CODES.map((c) => ({ code: c, label: PRODUCT_LABELS[c] })),
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/cost — what a capture would spend, BEFORE spending it.
+//
+// Reads the per-advertiser cache without touching a provider, so the competitor
+// screen can say "1 request, 3 from cache" while the user is still choosing.
+// ---------------------------------------------------------------------------
+app.post("/api/cost", (req, res) => {
+  const body = req.body || {};
+  const mode = body.mode === "benchmark" ? "benchmark" : "creative";
+  const sources = resolveSources({ mode, sources: body.sources });
+  const force = !!body.force;
+
+  const domains = (Array.isArray(body.competitors) ? body.competitors : [])
+    .map((c) => ({ domain: normDomain(c.domain), label: c.label || c.name || c.domain }))
+    .filter((c) => c.domain);
+  if (mode === "benchmark" && normDomain(body.clientDomain)) {
+    domains.unshift({ domain: normDomain(body.clientDomain), label: body.clientLabel || body.clientDomain });
+  }
+
+  res.json({
+    ok: true,
+    plans: sources.map((source) => captureCache.planCost({
+      source, domains,
+      days: Number(body.days?.[source] ?? body.days) || defaultWindowFor(source),
+      force,
+    })),
   });
 });
 
@@ -109,7 +172,11 @@ app.post("/api/capture", (req, res) => {
   const mode = body.mode === "benchmark" ? "benchmark" : "creative";
   const clientDomain = normDomain(body.clientDomain);
   const product = normalizeProduct(body.product || "");
-  const days = Math.max(7, Math.min(365, Number(body.days) || DEFAULT_LOOKBACK_DAYS));
+  const force = !!body.force;
+
+  // Benchmark is pinned to Google search inside resolveSources, so no caller can
+  // quietly change what that table is comparing.
+  const sources = resolveSources({ mode, sources: body.sources });
 
   // Targets are keyed by domain in run.progress, so a repeated domain would
   // overwrite its own progress row and be counted as two columns holding the
@@ -123,47 +190,79 @@ app.post("/api/capture", (req, res) => {
 
   if (!clientDomain) return res.status(400).json({ ok: false, reason: "bad_client_domain" });
   if (!competitors.length) return res.status(400).json({ ok: false, reason: "no_competitors" });
-  if (!hasKey()) return res.status(400).json({ ok: false, reason: "serpapi_not_configured" });
   if (!hasAnthropicKey()) return res.status(400).json({ ok: false, reason: "anthropic_not_configured" });
 
-  // CREATIVE reads image creatives — display work, which is what the creative
-  // team asked to see. BENCHMARK reads text creatives, because a paid-search
-  // campaign is diagnosed against paid-search ads. The format is the only thing
-  // the mode changes about capture.
-  const format = mode === "creative" ? "image" : "text";
+  // Per-source key checks. A missing SearchApi key refuses the Meta source only
+  // and leaves a Google capture in the same request running normally.
+  const usable = [], refused = [];
+  for (const source of sources) {
+    if (isMeta(source) && !hasSearchApiKey()) refused.push({ source, reason: "searchapi_not_configured" });
+    else if (!isMeta(source) && !hasKey()) refused.push({ source, reason: "serpapi_not_configured" });
+    else usable.push(source);
+  }
+  if (!usable.length) {
+    return res.status(400).json({ ok: false, reason: refused[0]?.reason || "not_configured", refused });
+  }
 
-  const run = {
-    id: newRunId(),
-    mode, format, product, days,
-    productLabel: PRODUCT_LABELS[product],
-    createdAt: new Date().toISOString(),
-    status: "running",
-    client: { label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain },
-    competitors,
-    // BENCHMARK captures the client's own ads through the identical path. That
-    // is what makes it ads vs ads rather than ads vs a live rate page — the
-    // comparison a consumer actually makes when they choose which link to click.
-    targets: mode === "benchmark"
-      ? [{ ...{ label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain }, isClient: true }, ...competitors.map((c) => ({ ...c, isClient: false }))]
-      : competitors.map((c) => ({ ...c, isClient: false })),
-    progress: {},
-    ads: [],
-    runs: [],
-  };
+  // ONE RUN PER SOURCE. Two sources means two runs with separate ids, separate
+  // funnels, separate sampling notes and separate diffs — which is what makes a
+  // merged denominator impossible rather than merely discouraged.
+  const runs = usable.map((source) => {
+    const days = Math.max(7, Math.min(365,
+      Number(body.days?.[source] ?? body.days) || defaultWindowFor(source)));
 
-  for (const t of run.targets) run.progress[t.domain] = { status: "queued", label: t.label };
-  ACTIVE.set(run.id, run);
+    const run = {
+      id: newRunId(),
+      mode, source, product, days, force,
+      sourceLabel: SOURCE_LABELS[source],
+      format: isMeta(source) ? null : googleFormatFor(source),
+      productLabel: PRODUCT_LABELS[product],
+      createdAt: new Date().toISOString(),
+      status: "running",
+      client: { label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain },
+      competitors,
+      // BENCHMARK captures the client's own ads through the identical path. That
+      // is what makes it ads vs ads rather than ads vs a live rate page — the
+      // comparison a consumer actually makes when they choose which link to click.
+      targets: mode === "benchmark"
+        ? [{ label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain, isClient: true },
+           ...competitors.map((c) => ({ ...c, isClient: false }))]
+        : competitors.map((c) => ({ ...c, isClient: false })),
+      progress: {},
+      ads: [],
+      messages: [],
+      runs: [],
+      requests: 0,
+    };
+    for (const t of run.targets) run.progress[t.domain] = { status: "queued", label: t.label };
+    ACTIVE.set(run.id, run);
+    return run;
+  });
 
-  res.json({ ok: true, runId: run.id, targets: run.targets.map((t) => ({ domain: t.domain, label: t.label, isClient: !!t.isClient })) });
+  res.json({
+    ok: true,
+    // `runId` and `targets` stay for the single-source callers that predate
+    // multi-source capture; `runs` is what the current UI reads.
+    runId: runs[0].id,
+    targets: runs[0].targets.map((t) => ({ domain: t.domain, label: t.label, isClient: !!t.isClient })),
+    runs: runs.map((r) => ({
+      source: r.source, sourceLabel: r.sourceLabel, runId: r.id, days: r.days,
+      targets: r.targets.map((t) => ({ domain: t.domain, label: t.label, isClient: !!t.isClient })),
+    })),
+    refused,
+  });
 
   // Fire and forget. Every failure path below lands in run.progress rather than
   // throwing, because one competitor with no ads must never take down a capture
   // that succeeded for the other two.
-  executeRun(run).catch((e) => {
-    run.status = "error";
-    run.error = e?.code === "NO_API_KEY" ? "anthropic_not_configured" : String(e?.message || e);
-    saveRun(run);
-  });
+  for (const run of runs) {
+    const exec = isMeta(run.source) ? executeMetaRun : executeRun;
+    exec(run).catch((e) => {
+      run.status = "error";
+      run.error = e?.code === "NO_API_KEY" ? "anthropic_not_configured" : String(e?.message || e);
+      saveRun(run);
+    });
+  }
 });
 
 async function executeRun(run) {
@@ -172,8 +271,33 @@ async function executeRun(run) {
   await Promise.all(run.targets.map(async (target) => {
     const p = run.progress[target.domain];
     try {
+      // ---- cache first ------------------------------------------------------
+      // Keyed on (source, domain, window) and NOT on product, because capture is
+      // product-agnostic: one LaCap capture serves every product scope the team
+      // tests that week. Bank creative moves on a compliance cycle measured in
+      // weeks, so a fresh entry is the right answer far more often than a fetch.
+      const ck = { source: run.source, domain: target.domain, days: run.days };
+      const cached = captureCache.get({ ...ck, force: run.force });
+      if (cached) {
+        p.status = "done";
+        p.fromCaptureCache = true;
+        p.captureAgeDays = cached._cache.ageDays;
+        p.found = cached.run?.providerTotal;
+        p.renderable = cached.run?.renderable;
+        p.previewOnly = cached.run?.previewOnly;
+        p.advertisers = cached.run?.advertisers;
+        p.multipleAdvertisers = cached.run?.multipleAdvertisers;
+        p.read = (cached.ads || []).length;
+        if (cached.run) run.runs.push(cached.run);
+        run.ads.push(...(cached.ads || []).map((a) => ({
+          ...a, isClient: !!target.isClient, institutionLabel: target.label,
+        })));
+        return;
+      }
+
       p.status = "fetching";
       const cap = await capture(target.domain, { format: run.format, days: run.days });
+      run.requests += 1;
 
       if (!cap.ok) {
         p.status = "failed";
@@ -200,7 +324,7 @@ async function executeRun(run) {
 
       // Extraction cache: a creative's transcription never changes, so it is
       // bought once and reused for every future run and refresh.
-      const cached = [], fresh = [];
+      const cachedExtractions = [], fresh = [];
       for (const img of cap.images) {
         const hit = getCachedExtraction(img.creativeId);
         // The cache stores a TRANSCRIPTION, which never changes. Attribution is
@@ -208,7 +332,7 @@ async function executeRun(run) {
         // domain belongs to that domain now, so provider-side fields are always
         // re-applied from this capture rather than replayed from the cache.
         if (hit) {
-          cached.push({
+          cachedExtractions.push({
             ...hit,
             imageUrl: img.imageUrl,
             duplicateIds: img.duplicateIds || [],
@@ -229,7 +353,7 @@ async function executeRun(run) {
 
       for (const ad of ads) putCachedExtraction(ad.creativeId, ad);
 
-      const all = [...cached, ...ads].map((a) => ({ ...a, isClient: !!target.isClient, institutionLabel: target.label }));
+      const all = [...cachedExtractions, ...ads].map((a) => ({ ...a, isClient: !!target.isClient, institutionLabel: target.label }));
       run.ads.push(...all);
 
       // Downloading creatives and then reading none of them is a failure with a
@@ -239,7 +363,16 @@ async function executeRun(run) {
       p.status = all.length ? "done" : "empty";
       p.reason = all.length ? undefined : "extraction_failed";
       p.read = all.length;
-      p.fromCache = cached.length;
+      p.fromCache = cachedExtractions.length;
+
+      // Only a capture that actually produced readable evidence is cached. An
+      // empty or failed one must be retried next time, not remembered for a week.
+      if (all.length) {
+        captureCache.put(ck, {
+          run: cap.run,
+          ads: all.map(({ isClient, institutionLabel, ...a }) => a),
+        });
+      }
       p.extractionFailed = extractionFailed;
       p.capped = cap.run.capped;
     } catch (e) {
@@ -275,6 +408,146 @@ async function executeRun(run) {
   saveRun(run);
 }
 
+// ---------------------------------------------------------------------------
+// META EXECUTION — its own path, on purpose.
+//
+// Shares no state with executeRun above. The two produce different record types
+// with different grains and different temporal semantics, and a shared function
+// with `if (isMeta)` branches is how those differences leak into each other.
+// ---------------------------------------------------------------------------
+async function executeMetaRun(run) {
+  await Promise.all(run.targets.map(async (target) => {
+    const p = run.progress[target.domain];
+    const ck = { source: run.source, domain: target.domain, days: run.days };
+    try {
+      const cached = captureCache.get({ ...ck, force: run.force });
+      if (cached) {
+        p.status = "done";
+        p.fromCaptureCache = true;
+        p.captureAgeDays = cached._cache.ageDays;
+        applyMetaCapture(run, target, p, cached);
+        return;
+      }
+
+      p.status = "resolving";
+      const cap = await captureMeta({
+        domain: target.domain, label: target.label,
+        days: run.days, maxPages: MAX_META_PAGES,
+      });
+      run.requests += cap.requests || 0;
+      p.requests = cap.requests || 0;
+
+      if (!cap.ok) {
+        // A Page we could not resolve and a Page with no ads are DIFFERENT
+        // facts, and the UI renders them differently. Collapsing them turns a
+        // lookup failure into a claim about a competitor's advertising.
+        p.status = cap.reason === "needs_confirmation" ? "needs_confirmation" : "failed";
+        p.reason = cap.reason;
+        p.pageResolved = !!cap.pageResolved;
+        p.candidates = cap.candidates || null;
+        return;
+      }
+
+      p.pageResolved = true;
+      p.pageId = cap.run.pageId;
+      p.pageName = cap.run.pageName;
+      p.pageGrade = cap.run.pageGrade;
+      p.found = cap.run.providerTotal;
+      p.retrieved = cap.run.retrieved;
+      p.pagesFetched = cap.run.pagesFetched;
+      p.moreAvailable = cap.run.moreAvailable;
+
+      if (!cap.units.length) {
+        p.status = "empty";
+        p.reason = "no_ads";
+        p.read = 0;
+        run.runs.push(cap.run);
+        return;
+      }
+
+      p.status = "reading";
+
+      // ---- dedupe BEFORE anything is paid for ------------------------------
+      // 420 cards behind 111 probed ads, most of them the same copy rendered at
+      // different sizes. Reading every asset would buy the same answer several
+      // times over.
+      const messages = dedupeMessages(cap.units);
+      p.rawUnits = cap.units.length;
+      p.messages = messages.length;
+
+      // ---- tiers 1 and 2: free -------------------------------------------
+      const det = enrichDeterministic(messages);
+      p.fromUrl = det.fromUrl;
+      p.fromText = det.fromText;
+
+      // ---- media: download now, because these URLs expire -----------------
+      const media = await storeMessageMedia(messages);
+      p.mediaStored = media.stored;
+      p.mediaFailed = media.failed;
+
+      // ---- tier 3: vision, only on what is still unresolved ---------------
+      const needing = det.needsVision.filter((m) => m.mediaStored).slice(0, MAX_META_READ);
+      for (const m of needing) {
+        const stored = readMedia(m.mediaHash);
+        if (stored) { m._mediaData = stored.buffer.toString("base64"); m._mediaType = stored.contentType; }
+      }
+      const vision = needing.length ? await extractMetaMessages(needing) : { read: 0, failed: 0 };
+      for (const m of messages) { delete m._mediaData; delete m._mediaType; }
+
+      p.visionRead = vision.read;
+      p.visionFailed = vision.failed;
+      p.read = messages.length;
+      p.rainManaged = messages.filter((m) => m.rainManaged).length;
+
+      run.runs.push({ ...cap.run, visionRead: vision.read });
+      run.messages.push(...messages.map((m) => ({
+        ...m, isClient: !!target.isClient, institutionLabel: target.label,
+      })));
+      p.status = "done";
+
+      captureCache.put(ck, {
+        run: { ...cap.run, visionRead: vision.read },
+        messages: messages.map(({ isClient, institutionLabel, ...m }) => m),
+      });
+    } catch (e) {
+      if (e?.code === "NO_API_KEY") throw e;
+      p.status = "failed";
+      p.reason = "unexpected";
+      p.detail = String(e?.message || e).slice(0, 200);
+    }
+  }));
+
+  run.status = "done";
+  run.completedAt = new Date().toISOString();
+  run.stats = {
+    messagesRead: run.messages.length,
+    targetsOk: Object.values(run.progress).filter((x) => x.status === "done").length,
+    targetsTotal: run.targets.length,
+    requests: run.requests,
+  };
+  run.sampling = metaSamplingNote(run.runs);
+  saveRun(run);
+}
+
+function applyMetaCapture(run, target, p, cached) {
+  const messages = cached.messages || [];
+  p.found = cached.run?.providerTotal;
+  p.retrieved = cached.run?.retrieved;
+  p.rawUnits = cached.run?.rawUnits;
+  p.messages = messages.length;
+  p.read = messages.length;
+  p.pageResolved = true;
+  p.pageId = cached.run?.pageId;
+  p.pageName = cached.run?.pageName;
+  p.pageGrade = cached.run?.pageGrade;
+  p.moreAvailable = cached.run?.moreAvailable;
+  p.rainManaged = messages.filter((m) => m.rainManaged).length;
+  if (cached.run) run.runs.push(cached.run);
+  run.messages.push(...messages.map((m) => ({
+    ...m, isClient: !!target.isClient, institutionLabel: target.label,
+  })));
+}
+
 /**
  * Assemble the benchmark for a finished run.
  *
@@ -303,15 +576,51 @@ app.get("/api/run/:id", (req, res) => {
   const payload = {
     ok: true,
     id: run.id, mode: run.mode, status: run.status, error: run.error || null,
+    source: run.source || SOURCES.GOOGLE_DISPLAY,
+    sourceLabel: run.sourceLabel || SOURCE_LABELS[run.source] || SOURCE_LABELS.google_display,
     product: run.product, productLabel: run.productLabel, days: run.days,
     client: run.client, competitors: run.competitors,
     progress: run.progress, sampling: run.sampling || null,
     diff: run.diff || null,
     stats: run.stats || null,
+    requests: run.requests || 0,
     createdAt: run.createdAt,
   };
 
   if (run.status !== "done") return res.json(payload);
+
+  // ---- META ---------------------------------------------------------------
+  // Its own branch, its own payload shape, its own counts. Nothing here is ever
+  // merged with, compared to, or summed alongside a Google run.
+  if (isMeta(run.source)) {
+    const all = run.messages.filter((m) => !m.isClient);
+    // RAIN-managed work stays IN the wall, badged. Most RAIN clients compete in
+    // different markets, so a client's own agency-run creative appearing as a
+    // "competitor" is rare — and the creative team gains from seeing prior work.
+    // Flagged, never hidden, and never silently counted as an external
+    // competitor's strategy.
+    const scoped = filterMetaByProduct(all, run.product);
+
+    payload.meta = {
+      productScope: run.product,
+      defaultProductFilter: scoped.length ? run.product : "all",
+      scopedCount: scoped.length,
+      capturedCount: all.length,
+      messages: all,
+      summary: metaCreativeSummary(all),
+      scopedSummary: metaCreativeSummary(scoped),
+      byProduct: metaProductBreakdown(all),
+      byCompetitor: run.competitors.map((c) => ({
+        ...c,
+        count: all.filter((m) => m.institution === c.domain).length,
+        rainManaged: all.filter((m) => m.institution === c.domain && m.rainManaged).length,
+      })),
+      rainManaged: all.filter((m) => m.rainManaged).length,
+      funnel: metaFunnel(run.runs, all, scoped.length,
+        run.runs.reduce((n, r) => n + (Number(r?.visionRead) || 0), 0)),
+    };
+    return res.json(payload);
+  }
 
   const competitorAds = run.ads.filter((a) => !a.isClient);
   payload.breakdown = productBreakdown(competitorAds);
@@ -361,7 +670,19 @@ app.get("/api/run/:id", (req, res) => {
 
   // The evidence itself, keyed for the drawer. Base64 was discarded after
   // extraction; the URL is what lets the UI show the ad Google actually served.
-  payload.ads = run.ads.map(({ data, ...a }) => a);
+  //
+  // `domainLink` is added here and becomes the PRIMARY "view source" link.
+  // The provider's own details_link opens /advertiser/AR…/creative/CR…, which
+  // is titled with whoever Google verified as the advertiser — frequently a
+  // media agency rather than the bank. On a screen share that reads as the tool
+  // having pulled the wrong institution. The domain-scoped view is titled with
+  // the domain that was entered and shows every advertiser account pointing at
+  // it, which is both less confusing and more complete. details_link stays as
+  // the secondary "this exact creative" link in the drawer.
+  payload.ads = run.ads.map(({ data, ...a }) => ({
+    ...a,
+    domainLink: buildDomainLink(a.institution, { days: run.days, format: run.format }),
+  }));
   res.json(payload);
 });
 
@@ -415,6 +736,43 @@ app.get("/api/img", async (req, res) => {
   } catch {
     res.status(504).end();
   }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/media/:hash — locally stored Meta creative.
+//
+// Not a proxy. The bytes were downloaded during capture, while the signed
+// fbcdn.net URL was still valid, and stored by content hash. This serves what
+// we own — which is the only reason a Meta wall still renders a week later.
+// ---------------------------------------------------------------------------
+app.get("/api/media/:hash", (req, res) => {
+  const stored = readMedia(req.params.hash);
+  if (!stored) return res.status(404).end();
+  res.set("content-type", stored.contentType || "image/jpeg");
+  res.set("cache-control", "public, max-age=604800, immutable");
+  res.send(stored.buffer);
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/meta/confirm-page — a human settles an ambiguous Page match.
+//
+// The Chase case: a name score of 1.0 with a margin of 0.0033 over the next
+// candidate means many Pages share that name, so the resolver refuses to guess
+// and asks. Once confirmed the mapping is persisted and nobody is asked again.
+// ---------------------------------------------------------------------------
+app.post("/api/meta/confirm-page", (req, res) => {
+  const domain = normDomain(req.body?.domain);
+  const pageId = String(req.body?.pageId || "").trim();
+  if (!domain || !pageId) return res.status(400).json({ ok: false, reason: "bad_request" });
+
+  const saved = saveIdentity(domain, {
+    metaPageId: pageId,
+    metaPageName: String(req.body?.pageName || "").trim(),
+    resolvedBy: "manual",
+    confidence: "high",
+    note: "confirmed by a strategist in the capture flow",
+  });
+  res.json({ ok: saved, domain, pageId });
 });
 
 // ---------------------------------------------------------------------------
