@@ -39,6 +39,7 @@ import { storeMessageMedia, readMedia } from "./lib/media-store.js";
 import * as captureCache from "./lib/capture-cache.js";
 import { SOURCES, SOURCE_LABELS, resolveSources, googleFormatFor, isMeta, WINDOW_OPTIONS, defaultWindowFor } from "./lib/sources.js";
 import { listIdentities, saveIdentity } from "./lib/platform-identity.js";
+import { withNationals, isNational, captureOptionsFor, NATIONAL_BENCHMARKS, NATIONAL_TTL_DAYS, NATIONAL_READ_CAP } from "./lib/national-tier.js";
 import { suggestCompetitors, findClient, listClients, DIRECTORY_SIZE } from "./lib/directory.js";
 import { productFromUrl, normalizeProduct, PRODUCT_LABELS, PRODUCT_CODES } from "./lib/products.js";
 import { generateStrategies } from "./lib/strategies.js";
@@ -84,6 +85,11 @@ app.get("/api/health", (_req, res) => {
       identities: Object.keys(listIdentities()).length,
     },
     cacheTtlDays: captureCache.TTL_DAYS,
+    nationals: {
+      benchmarks: NATIONAL_BENCHMARKS.map(({ label, domain, role, why }) => ({ label, domain, role, why })),
+      ttlDays: NATIONAL_TTL_DAYS,
+      readCap: NATIONAL_READ_CAP,
+    },
     products: PRODUCT_CODES.map((c) => ({ code: c, label: PRODUCT_LABELS[c] })),
   });
 });
@@ -100,17 +106,27 @@ app.post("/api/cost", (req, res) => {
   const sources = resolveSources({ mode, sources: body.sources });
   const force = !!body.force;
 
-  const domains = (Array.isArray(body.competitors) ? body.competitors : [])
+  const picked = (Array.isArray(body.competitors) ? body.competitors : [])
     .map((c) => ({ domain: normDomain(c.domain), label: c.label || c.name || c.domain }))
     .filter((c) => c.domain);
-  if (mode === "benchmark" && normDomain(body.clientDomain)) {
-    domains.unshift({ domain: normDomain(body.clientDomain), label: body.clientLabel || body.clientDomain });
-  }
+
+  // Quote the cost of what will ACTUALLY be captured, nationals included. A
+  // cost line that omits two advertisers the capture is about to fetch is
+  // exactly the surprise this endpoint exists to prevent.
+  const domainsFor = (source) => {
+    const withTier = (mode === "creative" && source === SOURCES.GOOGLE_DISPLAY && body.includeNationals !== false)
+      ? withNationals(picked).map((c) => ({ ...c, ttlDays: isNational(c.domain) ? NATIONAL_TTL_DAYS : undefined }))
+      : picked.map((c) => ({ ...c, tier: "local" }));
+    if (mode === "benchmark" && normDomain(body.clientDomain)) {
+      return [{ domain: normDomain(body.clientDomain), label: body.clientLabel || body.clientDomain, tier: "local" }, ...withTier];
+    }
+    return withTier;
+  };
 
   res.json({
     ok: true,
     plans: sources.map((source) => captureCache.planCost({
-      source, domains,
+      source, domains: domainsFor(source),
       days: Number(body.days?.[source] ?? body.days) || defaultWindowFor(source),
       force,
     })),
@@ -183,13 +199,47 @@ app.post("/api/capture", (req, res) => {
   // same ads. In benchmark the client is already a target, so it cannot also be
   // its own competitor. Deduped here rather than trusting the caller.
   const claimed = new Set(mode === "benchmark" && clientDomain ? [clientDomain] : []);
-  const competitors = (Array.isArray(body.competitors) ? body.competitors : [])
+  const chosen = (Array.isArray(body.competitors) ? body.competitors : [])
     .map((c) => ({ label: String(c.label || c.name || "").trim(), domain: normDomain(c.domain) }))
     .filter((c) => c.domain && !claimed.has(c.domain) && claimed.add(c.domain))
     .slice(0, 8);
 
+  /* THE STANDING NATIONALS — appended per source, not globally.
+   *
+   * Mirrors RAIN's six-column analysis, where slots 4 and 5 are Chase and
+   * Capital One and never change. The user does not choose them.
+   *
+   * GOOGLE DISPLAY ONLY, on evidence:
+   *
+   *   · Benchmark — that mode compares the client's own ads to peers on one
+   *     product. A national ceiling dropped into that table sits in a column
+   *     the client reads as a peer, which is a different and wrong claim.
+   *
+   *   · Meta — the live probe found Chase's Meta presence is influencer and
+   *     brand content (#Chasepartner), with 1 of 36 ads product-classifiable
+   *     and Page resolution graded LOW at a 0.0033 margin. Injecting it would
+   *     spend a page-search request to land in needs_confirmation, and if
+   *     confirmed would fill the wall with creator posts rather than product
+   *     advertising. Filling an empty wall with the wrong ads is not filling it.
+   *     Revisit when a national's Meta coverage has actually been tested.
+   *
+   * `includeNationals: false` turns it off for a caller that wants only what
+   * was selected.
+   */
+  const nationalsAllowed = (source) =>
+    mode === "creative" && source === SOURCES.GOOGLE_DISPLAY && body.includeNationals !== false;
+
+  const competitorsFor = (source) =>
+    withNationals(chosen, { enabled: nationalsAllowed(source) })
+      .filter((c) => !claimed.has(c.domain) || chosen.some((x) => x.domain === c.domain));
+
   if (!clientDomain) return res.status(400).json({ ok: false, reason: "bad_client_domain" });
-  if (!competitors.length) return res.status(400).json({ ok: false, reason: "no_competitors" });
+  // Validated against what the USER CHOSE, not the final list. The standing
+  // nationals are always appended, so checking the final list would let a
+  // capture with nothing selected proceed on Chase and Capital One alone — a
+  // wall of two national brands and no local evidence, which answers a question
+  // nobody asked.
+  if (!chosen.length) return res.status(400).json({ ok: false, reason: "no_competitors" });
   if (!hasAnthropicKey()) return res.status(400).json({ ok: false, reason: "anthropic_not_configured" });
 
   // Per-source key checks. A missing SearchApi key refuses the Meta source only
@@ -210,6 +260,7 @@ app.post("/api/capture", (req, res) => {
   const runs = usable.map((source) => {
     const days = Math.max(7, Math.min(365,
       Number(body.days?.[source] ?? body.days) || defaultWindowFor(source)));
+    const competitors = competitorsFor(source);
 
     const run = {
       id: newRunId(),
@@ -276,8 +327,12 @@ async function executeRun(run) {
       // product-agnostic: one LaCap capture serves every product scope the team
       // tests that week. Bank creative moves on a compliance cycle measured in
       // weeks, so a fresh entry is the right answer far more often than a fetch.
+      // Per-tier options: a national is read deeper and kept far longer,
+      // because that capture is shared by every client rather than bought per
+      // analysis. See lib/national-tier.js.
+      const opts = captureOptionsFor(target.domain, {});
       const ck = { source: run.source, domain: target.domain, days: run.days };
-      const cached = captureCache.get({ ...ck, force: run.force });
+      const cached = captureCache.get({ ...ck, force: run.force, ttlDays: opts.ttlDays });
       if (cached) {
         p.status = "done";
         p.fromCaptureCache = true;
@@ -288,15 +343,16 @@ async function executeRun(run) {
         p.advertisers = cached.run?.advertisers;
         p.multipleAdvertisers = cached.run?.multipleAdvertisers;
         p.read = (cached.ads || []).length;
+        p.tier = target.tier || "local";
         if (cached.run) run.runs.push(cached.run);
         run.ads.push(...(cached.ads || []).map((a) => ({
-          ...a, isClient: !!target.isClient, institutionLabel: target.label,
+          ...a, isClient: !!target.isClient, institutionLabel: target.label, tier: target.tier || "local",
         })));
         return;
       }
 
       p.status = "fetching";
-      const cap = await capture(target.domain, { format: run.format, days: run.days });
+      const cap = await capture(target.domain, { format: run.format, days: run.days, max: opts.max });
       run.requests += 1;
 
       if (!cap.ok) {
@@ -353,7 +409,10 @@ async function executeRun(run) {
 
       for (const ad of ads) putCachedExtraction(ad.creativeId, ad);
 
-      const all = [...cachedExtractions, ...ads].map((a) => ({ ...a, isClient: !!target.isClient, institutionLabel: target.label }));
+      const all = [...cachedExtractions, ...ads].map((a) => ({
+        ...a, isClient: !!target.isClient, institutionLabel: target.label, tier: target.tier || "local",
+      }));
+      p.tier = target.tier || "local";
       run.ads.push(...all);
 
       // Downloading creatives and then reading none of them is a failure with a
@@ -370,7 +429,9 @@ async function executeRun(run) {
       if (all.length) {
         captureCache.put(ck, {
           run: cap.run,
-          ads: all.map(({ isClient, institutionLabel, ...a }) => a),
+          // Per-run framing is stripped: the same Chase capture is reused for
+          // every client, so nothing client-specific may be baked into it.
+          ads: all.map(({ isClient, institutionLabel, tier, ...a }) => a),
         });
       }
       p.extractionFailed = extractionFailed;
@@ -656,8 +717,28 @@ app.get("/api/run/:id", (req, res) => {
       byProduct: productBreakdown(competitorAds),
       byCompetitor: run.competitors.map((c) => ({
         ...c,
+        tier: c.tier || "local",
         count: competitorAds.filter((a) => a.institution === c.domain).length,
       })),
+      // The wall renders these as two groups. Volume asymmetry is the reason:
+      // a community bank might contribute four cards while Chase contributes
+      // forty, and an undifferentiated wall is then a Chase wall with the local
+      // evidence — the part that answers "who takes our customers" — buried.
+      // Fixing an empty wall by burying the local signal is not a fix.
+      tiers: {
+        local: {
+          label: "Local and regional",
+          note: "Who actually competes for this client's customers.",
+          domains: run.competitors.filter((c) => (c.tier || "local") === "local").map((c) => c.domain),
+          count: competitorAds.filter((a) => (a.tier || "local") === "local").length,
+        },
+        national: {
+          label: "National benchmarks",
+          note: "Chase and Capital One are in every analysis as a fixed national ceiling, not because they compete locally.",
+          domains: run.competitors.filter((c) => c.tier === "national").map((c) => c.domain),
+          count: competitorAds.filter((a) => a.tier === "national").length,
+        },
+      },
       // Where every creative went, listed -> on-product. See captureFunnel().
       funnel: captureFunnel(run.runs, competitorAds, scoped.length),
     };

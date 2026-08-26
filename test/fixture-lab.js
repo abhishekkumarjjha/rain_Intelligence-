@@ -111,6 +111,46 @@ export const MARKET = {
       offer: { present: true, type: "rate", value: "5.49% APR", unit: "APR", term: "60-month", minimum: "", qualifier: "" },
       daysShown: 150, first: ago(180), last: ago(5), w: 300, h: 250 },
   ],
+  // ---- THE STANDING NATIONALS ---------------------------------------------
+  // Deep inventory, because that is the point of the tier: a community bank
+  // contributes four creatives and a national contributes dozens. The wall's
+  // tiering exists so this volume fills the screen without burying the local
+  // evidence underneath it.
+  //
+  // "Open An Account Today" is here deliberately: lacapfcu.org runs a creative
+  // with the SAME headline and product. Before clustering was scoped to the
+  // advertiser, those two collapsed into one card and La Capitol's evidence
+  // vanished from the wall — the exact failure that gets worse the more
+  // competitors are added, since generic national copy overlaps with everyone.
+  "chase.com": [
+    { id: "CHS1", headline: "Open An Account Today", product: "checking",
+      offer: { present: true, type: "bonus", value: "$300", unit: "USD", term: "", minimum: "", qualifier: "new accounts" },
+      daysShown: 640, first: ago(700), last: ago(1), w: 728, h: 90 },
+    { id: "CHS2", headline: "Mortgages Made Straightforward", product: "mortgage",
+      offer: { present: true, type: "rate", value: "6.375% APR", unit: "APR", term: "30-year fixed", minimum: "", qualifier: "" },
+      daysShown: 410, first: ago(500), last: ago(1), w: 300, h: 250 },
+    { id: "CHS3", headline: "Cash Back On Everything", product: "credit-card",
+      offer: { present: true, type: "bonus", value: "$200", unit: "USD", term: "", minimum: "", qualifier: "" },
+      daysShown: 880, first: ago(900), last: ago(2), w: 300, h: 600 },
+    { id: "CHS4", headline: "Banking That Travels With You", product: "other",
+      offer: { present: false }, daysShown: 1200, first: ago(1300), last: ago(1), w: 970, h: 250 },
+    { id: "CHS5", headline: "Save Automatically", product: "savings",
+      offer: { present: true, type: "rate", value: "4.10% APY", unit: "APY", term: "", minimum: "", qualifier: "" },
+      daysShown: 200, first: ago(240), last: ago(3), w: 160, h: 600 },
+  ],
+  "capitalone.com": [
+    { id: "CAP1", headline: "No Fees. No Minimums.", product: "checking",
+      offer: { present: false }, daysShown: 990, first: ago(1100), last: ago(1), w: 728, h: 90 },
+    { id: "CAP2", headline: "Earn More On Your Savings", product: "savings",
+      offer: { present: true, type: "rate", value: "4.25% APY", unit: "APY", term: "", minimum: "", qualifier: "" },
+      daysShown: 520, first: ago(600), last: ago(1), w: 300, h: 250 },
+    { id: "CAP3", headline: "Auto Financing, Pre-Qualified", product: "auto-loan",
+      offer: { present: true, type: "rate", value: "5.99% APR", unit: "APR", term: "", minimum: "", qualifier: "" },
+      daysShown: 330, first: ago(380), last: ago(2), w: 300, h: 600 },
+    { id: "CAP4", headline: "What's In Your Wallet", product: "credit-card",
+      offer: { present: false }, daysShown: 1400, first: ago(1500), last: ago(1), w: 970, h: 250 },
+  ],
+
   "silentbank.com": [],
   "previewonly.com": [
     { id: "PRV1", headline: "", product: "other", offer: { present: false }, previewOnly: true, daysShown: 30, first: ago(40), last: ago(5) },

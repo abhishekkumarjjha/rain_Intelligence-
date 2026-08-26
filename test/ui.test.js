@@ -263,18 +263,18 @@ try {
       ok((await page.locator(".wall .varbadge").count()) > 0, "no variation badge on the wall"));
 
     await check("longevity reads as days shown, never as a continuous run", async () => {
-      const t = await page.locator(".wall").innerText();
+      const t = (await page.locator(".wall").allInnerTexts()).join("\n");
       ok(/shown on [\d,]+ days/i.test(t), "expected 'shown on N days' phrasing");
       ok(!/continuously|running for \d/i.test(t), "found an overclaiming longevity phrase");
     });
 
     await check("no performance language leaks onto the wall", async () => {
-      const t = await page.locator(".wall").innerText();
+      const t = (await page.locator(".wall").allInnerTexts()).join("\n");
       ok(!/best[- ]performing|top[- ]performing|winning ad/i.test(t), "found performance language");
     });
 
     await check("no card rendered undefined, NaN or [object Object]", async () => {
-      const t = await page.locator(".wall").innerText();
+      const t = (await page.locator(".wall").allInnerTexts()).join("\n");
       ok(!/undefined|NaN|\[object/.test(t), `wall contained a rendering artifact: ${t.slice(0, 200)}`);
     });
 
@@ -445,9 +445,19 @@ try {
 
     await check("it explains what each advertiser returned rather than showing a blank page", async () => {
       const body = await page.locator("#resultBody").innerText();
-      ok(/No creatives were read/i.test(body), `body was: ${body.slice(0, 200)}`);
+      ok(/No local creatives were read/i.test(body), `body was: ${body.slice(0, 200)}`);
       ok(/Silent Bank/.test(body), "the advertiser is not named");
       ok(/no ads in this window/i.test(body), "the reason is not stated");
+    });
+
+    await check("national benchmarks never stand in for an empty local market", async () => {
+      // The failure this guards: nationals are appended to every capture, so a
+      // capture whose local competitors returned NOTHING still renders a full
+      // wall of Chase and Capital One. Without the caveat that reads as the
+      // client's market, which is the one claim this tool must never make.
+      const body = await page.locator("#resultBody").innerText();
+      ok(/national benchmark/i.test(body), "the national tier is not labelled as such");
+      ok(/not this client's market/i.test(body), `the disclaimer is missing: ${body.slice(0, 200)}`);
     });
 
     await page.close();

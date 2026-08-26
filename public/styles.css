@@ -617,3 +617,29 @@ table.bench td.clientcol { background: rgba(87,227,168,.07); }
 .cand:hover { border-color: var(--blue); }
 .cand .cn { font-weight: 600; font-size: 13.5px; flex: 1; }
 .cand .cm { font-size: 11.5px; color: var(--ink-3); }
+
+/* ---- national benchmark tier -------------------------------------------- */
+/* Local and national are two answers to two questions, so the wall separates
+   them rather than interleaving by volume. Muted styling on the national side
+   on purpose: it is a reference ceiling, not the client's market. */
+.tierhead { margin: 26px 0 14px; }
+.tierhead:first-child { margin-top: 0; }
+.tierhead h3 {
+  margin: 0 0 4px; font-size: 15px; font-weight: 700;
+  display: flex; align-items: center; gap: 10px;
+}
+.tierhead .tiern {
+  font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+  background: var(--panel-2); color: var(--ink-2);
+}
+.tierhead p { margin: 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.55; }
+.tierhead.nat { padding-top: 22px; border-top: 1px solid var(--line); }
+.tierhead.nat h3 { color: var(--ink-2); }
+
+.tag.natbadge { color: #E8CB98; border-color: rgba(240,178,75,.28); background: rgba(240,178,75,.07); }
+
+.chipdiv {
+  align-self: center; font-size: 10.5px; font-weight: 600; letter-spacing: .7px;
+  text-transform: uppercase; color: var(--ink-3); padding: 0 6px 0 12px;
+  border-left: 1px solid var(--line); margin-left: 6px; cursor: help;
+}

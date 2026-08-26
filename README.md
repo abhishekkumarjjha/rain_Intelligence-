@@ -8,7 +8,7 @@ cp .env.example .env      # SERPAPI_API_KEY + ANTHROPIC_API_KEY, and
                           # SEARCHAPI_API_KEY if you want the Meta source
 npm start                 # :3000
 
-npm test                  # 139 tests — logic, pipeline, whole API, failure paths
+npm test                  # 157 tests — logic, pipeline, whole API, failure paths
 npm run test:ui           # 52 more, in a real browser (see Testing below)
 ```
 
@@ -26,6 +26,11 @@ groups near-identical executions into ideas and shows longevity; Meta collapses
 DCO cards into distinct messages. Chosen on the competitor screen, before
 anything is spent.
 
+Every Google display capture also includes **two standing national
+benchmarks** — J.P. Morgan Chase and Capital One — appended without the user
+selecting them, mirroring RAIN's six-column analysis where slots 4 and 5 never
+change. See *The national tier* below.
+
 **Campaign Benchmark** — *"How did our ads compare to theirs?"*
 Captures `creative_format=text` for the client **and** every competitor over the
 same window, then puts them side by side. Ads against ads. Google search only —
@@ -35,6 +40,48 @@ comparing.
 **Proposal Evidence** is stubbed in the UI and not built. It needs live
 competitor discovery for prospects who are not in the directory, which is a
 genuinely different problem from the two above.
+
+---
+
+## The national tier
+
+Local institutions run very little display. A three-competitor capture can come
+back with under ten cards after clustering, which reads as a broken tool rather
+than a thin market.
+
+So **Chase and Capital One are in every Google display capture**, appended
+automatically. This mirrors how RAIN's competitor analysis has always worked:
+slots 1–3 answer *"who actually takes our customers"* and are picked per
+subject; slots 4–5 answer *"how do we compare to the ceiling"* and never change.
+They are not there because they compete with a Baton Rouge credit union — they
+almost never do.
+
+**They are shared, not re-bought.** The capture cache is keyed on
+`(source, domain, window)` rather than on the client, so one Chase capture
+serves every analysis. TTL is 30 days rather than 7, and the read cap is 30
+rather than 18 — the cost is paid once a month and amortised across every
+client, which is exactly why reading *more* of them is the right call.
+
+**They are tiered, never merged.** A community bank contributes four cards while
+Chase contributes forty. Interleaved by volume, the screen becomes a Chase
+screen and the local evidence — the part the strategist was actually asked
+about — sits below the fold. Solving an empty wall by burying the local signal
+is not solving it. So the wall renders **Local and regional** first, then
+**National benchmarks** under a divider, and when the local set is thin the page
+says so rather than letting the national section stand in for a market read.
+
+**Scope.** Google display only. Benchmark is excluded because a national ceiling
+in that table would sit in a column the client reads as a peer. Meta is excluded
+on evidence: the live probe found Chase's Meta presence is influencer and brand
+content, 1 of 36 ads product-classifiable, with Page resolution graded *low* at
+a 0.0033 margin. Filling an empty wall with the wrong ads is not filling it.
+
+**One prerequisite this exposed.** Clustering was keyed on
+`[headline, offer, product]` with no advertiser, so two banks running the same
+generic line collapsed into a single card credited to whichever ran longer. That
+is invisible with three local competitors and severe once national copy is in
+the mix — generic national headlines overlap with everyone. The key is now
+advertiser-scoped, and a test holds it there.
 
 ---
 
@@ -261,7 +308,7 @@ slice.
 
 ## Testing
 
-`npm test` runs 139 assertions with **no API keys, no network and no browser**.
+`npm test` runs 157 assertions with **no API keys, no network and no browser**.
 `npm run test:ui` adds 52 more that drive the real UI in Chromium.
 
 | file | what it covers |
@@ -271,6 +318,7 @@ slice.
 | `flow.test.js` | every endpoint, driven the way the UI drives it |
 | `degraded.test.js` | quota, bad key, timeout, unreadable creatives, blocked CDN, SSRF |
 | `meta.test.js` | the Meta source — templates, dedupe, Page states, cache, source isolation |
+| `nationals.test.js` | the standing tier — injection, sharing, tiering, and scope |
 | `ui.test.js` | the user flow in a browser, landing to strategies |
 
 ### How the offline tests work
