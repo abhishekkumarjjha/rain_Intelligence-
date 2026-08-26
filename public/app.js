@@ -6,17 +6,49 @@
 
 const S = {
   url: "", domain: "", clientLabel: "", product: "other", productLabel: "",
-  mode: "", days: 30,
+  mode: "", days: 30, metaDays: 90,
+  sourceChoice: "google_display",   // google_display | meta | both
+  force: false,
   competitors: [],          // {label, domain, typeTag, reason, relevance, on}
   runId: "", run: null,
   filter: "all",            // competitor filter on the wall
   productFilter: null,      // product filter; null = adopt the run's scope once
   health: null,
+
+  // ONE STATE TREE PER SOURCE, keyed by source name.
+  //
+  // Not one array with a `source` field and a filter over it. The tab switches
+  // which tree is rendered; it does not filter a combined collection. That is
+  // what makes it structurally impossible for a Google count and a Meta count
+  // to end up in the same denominator, or for one source's filter selection to
+  // silently apply to the other's data.
+  bySource: {},             // { [source]: { runId, status, run, filter, productFilter } }
+  activeSource: null,
 };
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* esc() makes a string safe as TEXT or as an attribute VALUE. It does not make
+   it safe as a URL: it leaves `javascript:` and `data:` untouched, because
+   neither contains a character worth escaping.
+   
+   Every URL rendered into an href here comes from a provider, and two of them
+   are chosen by the advertiser rather than observed about them — a Meta card's
+   `link_url` is whatever the buyer typed. So the scheme is checked before the
+   link is built, not escaped afterwards, and anything that is not plain http(s)
+   renders as no link at all rather than as a link that runs. */
+const safeUrl = (u) => {
+  const s = String(u ?? "").trim();
+  if (!s) return "";
+  // Relative paths are ours (/api/media/…), so they never need a scheme check.
+  if (s.startsWith("/") && !s.startsWith("//")) return s;
+  try {
+    const parsed = new URL(s, location.origin);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") ? parsed.href : "";
+  } catch { return ""; }
+};
 
 /* Errors belong on the page, next to the thing that failed. alert() blocks the
    whole tab, cannot be read back, and is the first thing that makes a tool feel
@@ -149,6 +181,16 @@ async function refreshCompetitors() {
 document.querySelectorAll(".modecard[data-mode]").forEach((card) => {
   card.onclick = () => {
     S.mode = card.dataset.mode;
+    // Benchmark has exactly one legal source, so offering a chooser would imply
+    // a decision that does not exist.
+    const isBench = S.mode === "benchmark";
+    $("sourceSel").closest(".scopebox").querySelectorAll("#sourceSel, #sourceSel + label").forEach(() => {});
+    $("sourceSel").parentElement && ($("sourceSel").style.display = isBench ? "none" : "");
+    document.querySelectorAll('.scopebox label').forEach((l) => {
+      if (l.textContent.trim() === "Sources") l.style.display = isBench ? "none" : "";
+    });
+    $("winMetaWrap").classList.toggle("hidden", isBench || S.sourceChoice === "google_display");
+    $("winGoogleWrap").classList.toggle("hidden", !isBench && S.sourceChoice === "meta");
     renderCompetitors();
     show("s-comp");
   };
@@ -203,31 +245,41 @@ $("addBtn").onclick = () => {
   renderCompetitors();
 };
 
+/* Delegates to refreshCost(), which asks the server what the per-advertiser
+   cache already holds. The old version multiplied competitors by one credit
+   each, which was right before the cache existed and is now an overstatement
+   every time somebody re-tests a competitor the team already captured. */
 function renderCost() {
-  const n = S.competitors.filter((c) => c.on).length + (S.mode === "benchmark" ? 1 : 0);
-  const max = S.health?.maxReadPerAdvertiser || 18;
-  $("costNote").innerHTML = n
-    ? `${n} advertiser${n > 1 ? "s" : ""} · <b>${n}</b> search credit${n > 1 ? "s" : ""} · up to ${n * max} creatives read`
-    : `Select at least one competitor.`;
   $("captureBtn").disabled = !S.competitors.some((c) => c.on);
+  refreshCost();
 }
 
 /* ---------------- capture ---------------- */
-$("captureBtn").onclick = async () => {
+$("captureBtn").onclick = () => startCapture({ force: $("forceChk").checked });
+
+async function startCapture({ force = false } = {}) {
   const competitors = S.competitors.filter((c) => c.on).map((c) => ({ label: c.label || c.name, domain: c.domain }));
+  const sources = S.mode === "benchmark"
+    ? ["google_search"]
+    : (S.sourceChoice === "both" ? ["google_display", "meta"] : [S.sourceChoice]);
+
   $("captureBtn").disabled = true;
   const r = await (await fetch("/api/capture", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({
       mode: S.mode, clientDomain: S.domain, clientLabel: S.clientLabel,
-      product: S.product, days: S.days, competitors,
+      product: S.product, competitors, sources, force,
+      // Per-source windows, because "last 30 days" means a served window on
+      // Google and a start-date filter on Meta.
+      days: { google_display: S.days, google_search: S.days, meta: S.metaDays },
     }),
   })).json();
   $("captureBtn").disabled = false;
 
   if (!r.ok) {
     showError({
-      serpapi_not_configured: "SERPAPI_API_KEY is not set on the server, so no ads can be fetched.",
+      serpapi_not_configured: "SERPAPI_API_KEY is not set on the server, so Google ads cannot be fetched.",
+      searchapi_not_configured: "SEARCHAPI_API_KEY is not set on the server, so Meta ads cannot be fetched.",
       anthropic_not_configured: "ANTHROPIC_API_KEY is not set on the server, so creatives cannot be read.",
       no_competitors: "Select at least one competitor before capturing.",
       bad_client_domain: "That client domain could not be read. Re-enter the landing page URL.",
@@ -237,63 +289,199 @@ $("captureBtn").onclick = async () => {
 
   clearError();
   $("runNote").textContent = "";
-  S.runId = r.runId;
-  $("progList").innerHTML = r.targets.map((t) => `
-    <div class="progrow" data-d="${esc(t.domain)}">
-      <div class="lamp"></div>
-      <div class="pn">${esc(t.label)}${t.isClient ? ' <span class="tag client">Your client</span>' : ""}</div>
-      <div class="ps">queued</div>
-    </div>`).join("");
+
+  // A source refused for a missing key does NOT stop the others. The user is
+  // told which one dropped out and why, and the rest of the capture proceeds.
+  if (r.refused?.length) {
+    $("runNote").innerHTML = r.refused.map((x) =>
+      `<span class="bad">${esc(SRC_LABEL[x.source] || x.source)} skipped — ${esc(reasonText(x.reason))}.</span>`).join("<br>");
+  }
+
+  S.bySource = {};
+  S.activeSource = r.runs[0].source;
+  S.runId = r.runs[0].runId;
+
+  for (const run of r.runs) {
+    S.bySource[run.source] = {
+      source: run.source, sourceLabel: run.sourceLabel, runId: run.runId,
+      days: run.days, status: "running", run: null,
+      filter: "all", productFilter: null,
+    };
+  }
+
+  // Progress rows are grouped per source when there is more than one, because
+  // the same competitor appears once per source and two rows with the same name
+  // and different numbers is unreadable otherwise.
+  const multi = r.runs.length > 1;
+  $("progList").innerHTML = r.runs.map((run) => `
+    ${multi ? `<div class="proghead">${esc(run.sourceLabel)}</div>` : ""}
+    ${run.targets.map((t) => `
+      <div class="progrow" data-s="${esc(run.source)}" data-d="${esc(t.domain)}">
+        <div class="lamp"></div>
+        <div class="pn">${esc(t.label)}${t.isClient ? ' <span class="tag client">Your client</span>' : ""}</div>
+        <div class="ps">queued</div>
+      </div>`).join("")}
+  `).join("");
+
   show("s-run");
-  poll();
-};
+  for (const run of r.runs) poll(run.source);
+}
+
+const SRC_LABEL = { google_display: "Google display", google_search: "Google search", meta: "Meta" };
 
 /* A capture takes tens of seconds and the poll is the only thing driving the UI
    forward. A single failed request used to end the loop silently, leaving the
    user on a progress screen that would never move again — indistinguishable
    from a hung capture. Transient failures are retried; a persistent one says so
    on the page. */
-let pollMisses = 0;
+const pollMisses = {};
 
-async function poll() {
+async function poll(source) {
+  const st = S.bySource[source];
+  if (!st) return;
   let r;
   try {
-    const res = await fetch(`/api/run/${S.runId}`);
+    const res = await fetch(`/api/run/${st.runId}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     r = await res.json();
-    pollMisses = 0;
-  } catch (e) {
-    pollMisses++;
-    if (pollMisses >= 5) {
-      $("runNote").innerHTML = `<span class="bad">Lost contact with the server while capturing. The run may still be going — reload and it will be in the run list.</span>`;
+    pollMisses[source] = 0;
+  } catch {
+    pollMisses[source] = (pollMisses[source] || 0) + 1;
+    if (pollMisses[source] >= 5) {
+      $("runNote").innerHTML = `<span class="bad">Lost contact with the server while capturing ${esc(SRC_LABEL[source] || source)}. The run may still be going — reload and it will be in the run list.</span>`;
+      st.status = "lost";
+      maybeShowResults();
       return;
     }
-    setTimeout(poll, 1400 * pollMisses);
+    setTimeout(() => poll(source), 1400 * pollMisses[source]);
     return;
   }
 
   if (!r.ok) {
+    st.status = "error";
     $("runNote").innerHTML = `<span class="bad">That run could not be read back: ${esc(r.reason || "unknown")}.</span>`;
+    maybeShowResults();
     return;
   }
 
   for (const [domain, p] of Object.entries(r.progress || {})) {
-    const row = document.querySelector(`.progrow[data-d="${CSS.escape(domain)}"]`);
+    const row = document.querySelector(`.progrow[data-s="${CSS.escape(source)}"][data-d="${CSS.escape(domain)}"]`);
     if (!row) continue;
-    row.className = "progrow " + ({ done: "ok", failed: "bad", empty: "bad" }[p.status] || "run");
-    row.querySelector(".ps").innerHTML = progressLine(p);
+    row.className = "progrow " + ({
+      done: "ok", failed: "bad", empty: "bad", needs_confirmation: "bad",
+    }[p.status] || "run");
+    row.querySelector(".ps").innerHTML = progressLine(p, source);
   }
 
-  if (r.status === "done") { S.run = r; renderResults(); return; }
+  if (r.status === "done") { st.status = "done"; st.run = r; maybeShowResults(); return; }
   if (r.status === "error") {
-    $("runNote").innerHTML = `<span class="bad">Capture failed: ${esc(reasonText(r.error))}</span>`;
+    st.status = "error";
+    $("runNote").innerHTML = `<span class="bad">${esc(SRC_LABEL[source] || source)} capture failed: ${esc(reasonText(r.error))}</span>`;
+    maybeShowResults();
     return;
   }
-  setTimeout(poll, 1400);
+  setTimeout(() => poll(source), 1400);
 }
 
-function progressLine(p) {
+/* Show results as soon as the FIRST source finishes rather than waiting for
+   both. With "Both" selected, Google typically lands well before Meta — making
+   someone stare at a finished Google wall they cannot see, because a second
+   provider is still paginating, is a worse experience than a tab that fills in.
+   The still-running tab shows a pulse. */
+function maybeShowResults() {
+  const states = Object.values(S.bySource);
+  const anyDone = states.some((x) => x.status === "done");
+  const allSettled = states.every((x) => x.status !== "running");
+  if (!anyDone && !allSettled) return;
+
+  if (!S.activeSource || S.bySource[S.activeSource]?.status !== "done") {
+    S.activeSource = (states.find((x) => x.status === "done") || states[0]).source;
+  }
+  renderSourceTabs();
+  const active = S.bySource[S.activeSource];
+  if (active?.run) { S.run = active.run; renderResults(); }
+}
+
+/* The tabs. Switching one swaps the ENTIRE rendered dataset — a different run,
+   different counts, different filters, different date vocabulary. */
+function renderSourceTabs() {
+  const el = $("srcTabs");
+  const states = Object.values(S.bySource);
+  if (states.length < 2) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+
+  el.innerHTML = states.map((x) => {
+    const n = x.status === "done" ? countFor(x.run) : null;
+    const dead = x.status === "error" || x.status === "lost";
+    return `<button class="srctab ${x.source === S.activeSource ? "on" : ""} ${dead ? "dead" : ""}" data-s="${esc(x.source)}">
+      ${esc(x.sourceLabel)}
+      ${x.status === "running" ? '<span class="spin"></span>' : ""}
+      ${n != null ? `<span class="n">${n}</span>` : ""}
+      ${dead ? '<span class="n">failed</span>' : ""}
+    </button>`;
+  }).join("");
+
+  el.querySelectorAll(".srctab").forEach((n) => {
+    n.onclick = () => {
+      const st = S.bySource[n.dataset.s];
+      if (!st || st.status !== "done") return;
+      S.activeSource = n.dataset.s;
+      S.run = st.run;
+      // Filters live PER SOURCE, so switching tabs restores that source's own
+      // selection instead of carrying a Google product chip onto a Meta wall
+      // where the counts behind it are different.
+      S.filter = st.filter; S.productFilter = st.productFilter;
+      renderSourceTabs();
+      renderResults();
+    };
+  });
+}
+
+function countFor(run) {
+  if (!run) return null;
+  if (run.source === "meta") return run.meta?.capturedCount ?? 0;
+  if (run.mode === "creative") return run.creative?.capturedCount ?? (run.ads?.length || 0);
+  return run.ads?.length || 0;
+}
+
+function progressLine(p, source) {
   if (p.status === "queued") return "queued";
+
+  // A capture served entirely from cache never touched a provider, and saying so
+  // is the difference between "this is fast" and "this is stale". The age is
+  // always shown so the reader can decide whether it is fresh enough.
+  if (p.fromCaptureCache) {
+    const age = p.captureAgeDays;
+    const when = age == null ? "cached"
+      : age < 1 ? "captured today"
+      : age < 2 ? "captured yesterday"
+      : `captured ${Math.round(age)} days ago`;
+    return `<b>${p.read}</b> ${source === "meta" ? "messages" : "read"} · <span style="color:var(--green)">${when}, no request spent</span>`;
+  }
+
+  if (source === "meta") {
+    if (p.status === "resolving") return "resolving the Meta Page…";
+    if (p.status === "reading") return `reading <b>${p.messages ?? "…"}</b> messages…`;
+    if (p.status === "needs_confirmation") {
+      return `<span style="color:var(--amber)">several Pages share this name — needs confirmation</span>`;
+    }
+    if (p.status === "failed") return `<span style="color:var(--amber)">${esc(reasonText(p.reason))}</span>`;
+    if (p.status === "empty") {
+      // A resolved Page with no ads is a REAL ANSWER about the competitor.
+      // A Page we could not resolve is a failure of ours. Never the same line.
+      return p.pageResolved
+        ? `<span style="color:var(--amber)">Page resolved · no Meta ads in this window</span>`
+        : `<span style="color:var(--amber)">${esc(reasonText(p.reason))}</span>`;
+    }
+    const bits = [`<b>${p.messages}</b> messages`];
+    if (p.rawUnits) bits.push(`from ${p.rawUnits} cards`);
+    if (p.found != null) bits.push(`of ${Number(p.found).toLocaleString()} ads`);
+    if (p.visionRead) bits.push(`${p.visionRead} read by vision`);
+    if (p.rainManaged) bits.push(`<span style="color:#C9A6E8">${p.rainManaged} RAIN-managed</span>`);
+    if (p.moreAvailable) bits.push(`<span style="color:var(--amber)">more pages available</span>`);
+    return bits.join(" · ");
+  }
+
   if (p.status === "fetching") return "fetching creatives…";
   if (p.status === "reading") return `reading <b>${p.downloading}</b> creatives…`;
   if (p.status === "failed") return `<span style="color:var(--amber)">${esc(reasonText(p.reason))}</span>`;
@@ -321,7 +509,8 @@ const reasonText = (r) => ({
 /* ---------------- results ---------------- */
 function renderResults() {
   const r = S.run;
-  $("resEyebrow").textContent = r.mode === "creative" ? "Creative Inspiration" : "Campaign Benchmark";
+  $("resEyebrow").textContent = (r.mode === "creative" ? "Creative Inspiration" : "Campaign Benchmark")
+    + (r.sourceLabel ? ` · ${r.sourceLabel}` : "");
   $("resTitle").textContent = `${r.client.label} · ${r.productLabel}`;
 
   const s = r.sampling || {};
@@ -332,10 +521,15 @@ function renderResults() {
   // preview-only creatives, a provider outage. That is a RESULT and it has to be
   // rendered as one, with the per-target reasons still visible, rather than
   // dropping the user onto an empty results screen.
-  renderFunnel(r.mode === "creative" ? r.creative?.funnel : r.funnel);
+  renderFunnel(r.source === "meta" ? r.meta?.funnel : (r.mode === "creative" ? r.creative?.funnel : r.funnel));
   renderDiff(r.diff);
 
-  if (!r.ads?.length) {
+  if (r.source === "meta") {
+    // Meta has its own renderer end to end. It shares the card styling and
+    // nothing else: different grain (messages, not creatives), different counts
+    // and different date vocabulary.
+    renderMeta(r);
+  } else if (!r.ads?.length) {
     renderNothingCaptured(r);
   } else if (r.mode === "creative") {
     renderCreative(r);
@@ -681,7 +875,7 @@ function openEvidence(ids, title) {
         ${a.offer ? `<b>${esc(a.offer.value)}</b>${a.offer.term || a.offer.minimum ? ` — ${esc([a.offer.term, a.offer.minimum, a.offer.qualifier].filter(Boolean).join(" · "))}` : " — no term or minimum printed on this creative"}<br />` : ""}
         ${a.totalDaysShown != null ? `Shown on ${a.totalDaysShown.toLocaleString()} days${a.firstShown ? ` since ${monthYear(a.firstShown)}` : ""}` : ""}
         ${a.lastShown ? ` · last observed ${esc(a.lastShown)}` : ""}<br />
-        ${a.detailsLink ? `<a href="${esc(a.detailsLink)}" target="_blank" rel="noopener">View in Google Ads Transparency Center ↗</a>` : ""}
+        ${safeUrl(a.detailsLink) ? `<a href="${esc(safeUrl(a.detailsLink))}" target="_blank" rel="noopener">View in Google Ads Transparency Center ↗</a>` : ""}
       </div>
     </div>`).join("") : `<div class="empty">No creatives matched.</div>`;
   wireImages($("drawerBody"));
@@ -696,4 +890,224 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawe
 function monthYear(iso) {
   const d = new Date(iso + "T00:00:00Z");
   return isNaN(d) ? iso : d.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   META RENDERING
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function renderMeta(r) {
+  const m = r.meta;
+  const st = S.bySource[r.source];
+
+  if (S.productFilter === null) S.productFilter = m.defaultProductFilter || "all";
+
+  $("resStats").innerHTML = `
+    <div class="st"><div class="v">${m.summary.messages}</div><div class="k">Messages</div></div>
+    <div class="st"><div class="v">${m.summary.adRecords}</div><div class="k">Ad records</div></div>
+    <div class="st"><div class="v">${m.summary.withOffer}</div><div class="k">With an offer</div></div>`;
+
+  renderPageStates(r);
+
+  // ---- product chips, over the FULL captured set ---------------------------
+  const chips = [{ code: "all", label: "All products", count: m.capturedCount }, ...m.byProduct];
+  $("productFilters").innerHTML = chips.map((x) =>
+    `<button class="fchip ${S.productFilter === x.code ? "on" : ""}" data-p="${esc(x.code)}">${esc(x.label)}<span class="n">${x.count}</span></button>`
+  ).join("");
+  $("productFilters").querySelectorAll(".fchip").forEach((n) =>
+    n.onclick = () => { S.productFilter = n.dataset.p; if (st) st.productFilter = S.productFilter; renderMeta(r); });
+
+  // ---- competitor chips ----------------------------------------------------
+  const comps = [{ code: "all", label: "All", count: m.capturedCount },
+    ...m.byCompetitor.filter((c) => c.count).map((c) => ({ code: c.domain, label: c.label, count: c.count }))];
+  $("filters").innerHTML = comps.map((x) =>
+    `<button class="fchip ${S.filter === x.code ? "on" : ""}" data-f="${esc(x.code)}">${esc(x.label)}<span class="n">${x.count}</span></button>`
+  ).join("");
+  $("filters").querySelectorAll(".fchip").forEach((n) =>
+    n.onclick = () => { S.filter = n.dataset.f; if (st) st.filter = S.filter; renderMeta(r); });
+
+  // ---- the wall ------------------------------------------------------------
+  let msgs = m.messages;
+  if (S.productFilter && S.productFilter !== "all") msgs = msgs.filter((x) => (x.product || "other") === S.productFilter);
+  if (S.filter !== "all") msgs = msgs.filter((x) => x.institution === S.filter);
+
+  const rainCount = msgs.filter((x) => x.rainManaged).length;
+
+  $("resultBody").innerHTML = msgs.length
+    ? `${rainCount ? `<div class="scopebar" style="display:block">
+         <b>${rainCount}</b> of these ${rainCount === 1 ? "is" : "are"} RAIN-managed — the destination carries RAIN campaign tracking,
+         so ${rainCount === 1 ? "it is" : "they are"} work RAIN runs rather than independent competitor activity. Badged below, and never counted as a competitor's own strategy.
+       </div>` : ""}
+       <div class="wall">${msgs.map(metaCard).join("")}</div>`
+    : `<div class="empty">No Meta messages match this filter.<br />
+       ${m.capturedCount} were captured in total — try All products, or widen the window and re-run.</div>`;
+
+  $("resultBody").querySelectorAll(".shot").forEach((n) =>
+    n.onclick = () => openMetaEvidence(n.dataset.mid));
+}
+
+/* Page resolution is a SEPARATE reported step, so "we could not find them" and
+   "they are not advertising" never collapse into one sentence. */
+function renderPageStates(r) {
+  const rows = Object.entries(r.progress || {})
+    .filter(([, p]) => p.status === "needs_confirmation" || (p.status === "empty" && p.pageResolved));
+  const host = $("scopeBar");
+  if (!rows.length) { host.classList.add("hidden"); return; }
+  host.classList.remove("hidden");
+  host.innerHTML = rows.map(([domain, p]) => {
+    if (p.status === "needs_confirmation") {
+      return `<div class="pagestate">
+        <h4>${esc(p.label || domain)} — several Facebook Pages share this name</h4>
+        <p>Picking one automatically would risk showing another company's ads under this competitor's name, so nothing was fetched. Confirm which Page is theirs and it will be remembered.</p>
+        <div class="candlist">${(p.candidates || []).map((c) => `
+          <div class="cand" data-domain="${esc(domain)}" data-pid="${esc(c.pageId)}" data-pname="${esc(c.pageName)}">
+            <div class="cn">${esc(c.pageName)}</div>
+            <div class="cm">${esc(c.category || "")}${c.likes ? ` · ${Number(c.likes).toLocaleString()} likes` : ""}</div>
+          </div>`).join("")}</div>
+      </div>`;
+    }
+    return `<div class="pagestate">
+      <h4>${esc(p.label || domain)} — Page found, no Meta ads in this window</h4>
+      <p>Their Facebook Page resolved cleanly${p.pageName ? ` (${esc(p.pageName)})` : ""} and returned nothing for this window. That is a result about their advertising, not a lookup failure.</p>
+    </div>`;
+  }).join("");
+
+  host.querySelectorAll(".cand").forEach((n) => {
+    n.onclick = async () => {
+      n.style.opacity = ".5";
+      await fetch("/api/meta/confirm-page", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ domain: n.dataset.domain, pageId: n.dataset.pid, pageName: n.dataset.pname }),
+      });
+      n.outerHTML = `<div class="cand" style="border-color:var(--green)"><div class="cn">Saved — re-run to capture ${esc(n.dataset.pname)}</div></div>`;
+    };
+  });
+}
+
+function metaCard(m) {
+  const src = m.mediaHash ? `/api/media/${encodeURIComponent(m.mediaHash)}` : safeUrl(m.imageUrl);
+  const prov = { url: "from link", provider_text: "from copy", vision: "read from artwork", unresolved: "unclassified" }[m.productFrom] || "";
+  return `
+  <div class="adcard">
+    <div class="shot ${m.isVideo ? "vid" : ""}" data-mid="${esc(m.messageId)}">
+      ${src
+        ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=broken>Creative could not be loaded</div>'" />`
+        : `<div class="broken">No creative stored for this message</div>`}
+    </div>
+    <div class="meta">
+      <div class="who">${esc(m.institutionLabel || m.institution)}</div>
+      <div class="hl">${esc(m.title || m.headlineInArt || "(no headline)")}</div>
+      ${m.body ? `<div class="sh">${esc(m.body.slice(0, 150))}${m.body.length > 150 ? "…" : ""}</div>` : ""}
+      ${m.offer ? `<div class="offer">${esc(m.offer.value)}${m.offer.term ? ` · ${esc(m.offer.term)}` : ""}</div>` : ""}
+      <div class="foot">
+        ${m.platforms?.length ? `<span class="plat">${esc(m.platforms.join(" · "))}</span>` : ""}
+        ${m.isActive ? `<span class="live">${esc(metaTiming(m))}</span>` : `<span>${esc(metaTiming(m))}</span>`}
+        ${m.adRecordCount > 1 ? `<span class="tag varbadge">${m.adRecordCount} ad records</span>` : ""}
+        ${m.assetCount > 1 ? `<span class="tag varbadge">${m.assetCount} assets</span>` : ""}
+        ${m.isVideo ? `<span class="tag badge-video">video</span>` : ""}
+        ${m.rainManaged ? `<span class="badge-rain">RAIN-managed</span>` : ""}
+        ${prov ? `<span class="badge-prov">${esc(prov)}</span>` : ""}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* Meta timing copy, mirroring lib/meta-analyze.js metaTimingLabel().
+   NEVER a closed range for a live ad, and NEVER a day count: every probed ad was
+   is_active=true while carrying an end_date already in the past, so end_date is
+   a rolling last-observed stamp rather than a stop date, and end-minus-start is
+   not the days-served measurement Google's column means. */
+function metaTiming(m) {
+  const d = m.startDate ? new Date(String(m.startDate).slice(0, 10) + "T00:00:00Z") : null;
+  const started = d && !isNaN(d) ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "";
+  if (m.isActive) return started ? `Active · started ${started}` : "Active";
+  return started ? `Started ${started}` : "";
+}
+
+function openMetaEvidence(messageId) {
+  const m = (S.run?.meta?.messages || []).find((x) => x.messageId === messageId);
+  if (!m) return;
+  const src = m.mediaHash ? `/api/media/${encodeURIComponent(m.mediaHash)}` : safeUrl(m.imageUrl);
+  const provLabel = { url: "the destination link", provider_text: "the ad copy", vision: "the artwork", unresolved: "not resolved" }[m.productFrom] || "—";
+
+  $("drawerTitle").textContent = "Meta evidence";
+  $("drawerBody").innerHTML = `
+    <div class="evcard">
+      <div class="shot">${src ? `<img src="${esc(src)}" alt="" />` : `<div style="padding:24px;color:#8B99B5">No stored creative</div>`}</div>
+      <div class="m">
+        <b>${esc(m.institutionLabel || m.institution)}</b> · ${esc(m.pageName || "")}<br />
+        ${m.title ? `${esc(m.title)}<br />` : ""}
+        ${m.body ? `<span style="color:var(--ink-3)">${esc(m.body)}</span><br />` : ""}
+        ${m.offer
+          ? `<b>${esc(m.offer.value)}</b>${(m.offer.term || m.offer.minimum || m.offer.qualifier)
+              ? ` — ${esc([m.offer.term, m.offer.minimum, m.offer.qualifier].filter(Boolean).join(" · "))}`
+              : " — no term or minimum printed"} <span class="badge-prov">${esc(m.offerFrom === "vision" ? "read from artwork" : "from ad copy")}</span><br />`
+          : ""}
+        <br />
+        Product: <b>${esc(m.product || "unresolved")}</b> <span class="badge-prov">${esc(provLabel)}</span><br />
+        ${esc(metaTiming(m))}<br />
+        Platforms: ${esc((m.platforms || []).join(", ") || "—")} · Format: ${esc(m.displayFormat || "—")}<br />
+        ${m.adRecordCount > 1 ? `Served under ${m.adRecordCount} Meta ad records<br />` : ""}
+        ${m.assetCount > 1 ? `${m.assetCount} asset variants of this message<br />` : ""}
+        ${m.rainManaged ? `<span class="badge-rain">RAIN-managed</span> — the destination carries RAIN campaign tracking.<br />` : ""}
+        <br />
+        <span style="color:var(--ink-3)">Meta ad IDs: ${esc((m.sourceAdIds || []).join(", "))}</span><br />
+        ${safeUrl(m.destinationUrl) ? `<a href="${esc(safeUrl(m.destinationUrl))}" target="_blank" rel="noopener">Destination ↗</a> · ` : ""}
+        <a href="https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=US&view_all_page_id=${encodeURIComponent(m.pageId || "")}" target="_blank" rel="noopener">All ads for this Page ↗</a>
+        <br /><br />
+        <span style="color:var(--ink-3);font-size:11px">Provider end date (metadata, not a stop date): ${esc(m.providerEndDate || "—")}</span>
+      </div>
+    </div>`;
+  $("drawer").classList.add("on"); $("drawerBg").classList.add("on");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NEW CONTROLS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+$("sourceSel").onchange = () => {
+  S.sourceChoice = $("sourceSel").value;
+  const showG = S.sourceChoice !== "meta";
+  const showM = S.sourceChoice !== "google_display";
+  $("winGoogleWrap").classList.toggle("hidden", !showG);
+  $("winMetaWrap").classList.toggle("hidden", !showM);
+  refreshCost();
+};
+$("metaDaysSel").onchange = () => { S.metaDays = Number($("metaDaysSel").value); refreshCost(); };
+$("forceChk").onchange = () => { S.force = $("forceChk").checked; refreshCost(); };
+$("reanalyzeBtn").onclick = () => startCapture({ force: true });
+
+/* The cost line reads the per-advertiser cache before anything is spent, so
+   "3 from cache, 1 request" is visible at the moment of choosing rather than
+   discovered afterwards on an invoice. */
+let costTimer = null;
+async function refreshCost() {
+  clearTimeout(costTimer);
+  costTimer = setTimeout(async () => {
+    const competitors = S.competitors.filter((c) => c.on).map((c) => ({ label: c.label || c.name, domain: c.domain }));
+    if (!competitors.length) { $("costNote").textContent = "Select at least one competitor."; return; }
+
+    const sources = S.mode === "benchmark"
+      ? ["google_search"]
+      : (S.sourceChoice === "both" ? ["google_display", "meta"] : [S.sourceChoice]);
+    try {
+      const r = await (await fetch("/api/cost", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: S.mode, sources, competitors, force: S.force,
+          clientDomain: S.domain,
+          days: { google_display: S.days, google_search: S.days, meta: S.metaDays },
+        }),
+      })).json();
+      if (!r.ok) return;
+
+      $("costNote").innerHTML = r.plans.map((p) => {
+        const bits = [`<b>${SRC_LABEL[p.source]}</b>`];
+        if (p.willFetch) bits.push(`<span class="fetch">${p.willFetch} request${p.willFetch > 1 ? "s" : ""}</span>`);
+        if (p.fromCache) bits.push(`<span class="cached">${p.fromCache} from cache</span>`);
+        if (!p.willFetch) bits.push(`<span class="cached">nothing to spend</span>`);
+        return bits.join(" · ");
+      }).join("<br>") + `<br><span class="cacheage">Captures are reused for ${r.plans[0]?.ttlDays ?? 7} days. Tick “Force fresh capture” to ignore them.</span>`;
+    } catch { /* the cost line is advisory; a failure must not block capture */ }
+  }, 120);
 }

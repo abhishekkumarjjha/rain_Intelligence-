@@ -536,3 +536,84 @@ table.bench td.clientcol { background: rgba(87,227,168,.07); }
   color: var(--green);
 }
 .diffbar .dnote { display: block; margin-top: 5px; font-size: 12px; color: var(--ink-3); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   META SOURCE — added with the SearchApi integration.
+   Same visual language as the Google wall on purpose: a creative person should
+   not have to relearn the screen. What differs is the SEMANTICS on the cards —
+   no days-shown, no closed date ranges — never the styling.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.winwrap { display: inline-flex; align-items: center; gap: 9px; }
+.actionright { display: flex; align-items: center; gap: 16px; }
+.forcetoggle { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-3); cursor: pointer; user-select: none; }
+.forcetoggle input { accent-color: var(--blue); cursor: pointer; }
+.forcetoggle:hover { color: var(--ink-2); }
+.resright { display: flex; align-items: center; gap: 18px; }
+
+/* cost line: cached vs will-fetch, stated before spending */
+.costnote .cached { color: var(--green); }
+.costnote .fetch { color: var(--ink); font-weight: 600; }
+.costnote .cacheage { color: var(--ink-3); }
+
+/* ---- source tabs -------------------------------------------------------- */
+.srctabs { display: flex; gap: 6px; margin-bottom: 22px; border-bottom: 1px solid var(--line); }
+.srctab {
+  font-family: var(--font); font-size: 13.5px; font-weight: 600; cursor: pointer;
+  padding: 11px 18px; color: var(--ink-3); background: transparent;
+  border: 0; border-bottom: 2px solid transparent; transition: .15s;
+  display: flex; align-items: center; gap: 8px;
+}
+.srctab:hover { color: var(--ink-2); }
+.srctab.on { color: var(--ink); border-bottom-color: var(--blue); }
+.srctab .n {
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  background: var(--panel-2); color: var(--ink-2);
+}
+.srctab.on .n { background: var(--blue); color: #fff; }
+.srctab .spin { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); animation: pulse 1.1s infinite; }
+.srctab.dead { opacity: .45; cursor: default; }
+
+/* ---- meta card ---------------------------------------------------------- */
+.adcard .plat {
+  font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 600;
+}
+.adcard .live {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--green);
+}
+.adcard .live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.badge-rain {
+  font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  color: #C9A6E8; background: rgba(170,120,220,.1); border: 1px solid rgba(170,120,220,.28);
+}
+.badge-video { color: var(--blue); border-color: rgba(91,140,255,.3); }
+.badge-prov {
+  font-size: 10px; color: var(--ink-3); border: 1px solid var(--line);
+  border-radius: 999px; padding: 2px 8px; background: var(--bg-2);
+}
+.adcard .shot.vid { position: relative; }
+.adcard .shot.vid::after {
+  content: "▶"; position: absolute; right: 10px; bottom: 10px;
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(5,10,26,.72); color: #fff; font-size: 10px;
+}
+
+/* ---- page resolution states -------------------------------------------- */
+.pagestate {
+  background: var(--panel); border: 1px solid var(--line);
+  border-left: 3px solid var(--amber); border-radius: var(--r-sm);
+  padding: 16px 18px; margin-bottom: 12px;
+}
+.pagestate h4 { margin: 0 0 6px; font-size: 14px; }
+.pagestate p { margin: 0 0 12px; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+.candlist { display: grid; gap: 8px; }
+.cand {
+  display: flex; align-items: center; gap: 12px; cursor: pointer;
+  background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: 11px 14px; transition: .15s;
+}
+.cand:hover { border-color: var(--blue); }
+.cand .cn { font-weight: 600; font-size: 13.5px; flex: 1; }
+.cand .cm { font-size: 11.5px; color: var(--ink-3); }

@@ -143,8 +143,28 @@ Three cards. Each: icon, title, the question in italic blue, a description, tags
 Eyebrow: client name. H2: **Confirm competitors**. Sub: market · institution type,
 e.g. *Louisiana — Baton Rouge core, statewide targeting · Regional CU*.
 
-Right: **Product scope** (12 codes) and **Window** (30/60/90 days). Changing the
-product **re-asks the directory**, because competitor ranking is product-dependent.
+Right: **Product scope** (12 codes), **Sources**, and one or two **Window**
+selectors. Changing the product **re-asks the directory**, because competitor
+ranking is product-dependent.
+
+**Sources** — `Google display` / `Meta` / `Both`. Chosen here, before anything is
+spent, because a creative team working on display does not need Meta requests and
+should not pay for them. Hidden entirely in Benchmark mode, which has exactly one
+legal source, so offering a chooser would imply a decision that does not exist.
+
+**Two windows, labelled differently on purpose.**
+
+| | Control | Options | Default |
+|---|---|---|---|
+| Google | *served in* | 30 / 90 days | 30 |
+| Meta | *started in* | 30 days / 3 months / 6 months | 3 months |
+
+Same number, different question. Google's filter asks whether a creative was
+*shown* in the window. SearchApi's `start_date` asks whether the ad *began* on or
+after that date — so an ad that started two years ago and is still running today
+is **excluded** by a 30-day Meta window and **included** by a 30-day Google one.
+Giving them one shared control reading "Last 30 days" would be a lie of symmetry.
+Meta defaults wider because Meta flights are short and 30 days comes back thin.
 
 Rows are toggleable. Each shows a green tick when on, name, domain, the curated
 reason ("Baton Rouge CU serving the same nine-parish core"), a type tag, and a
@@ -154,10 +174,20 @@ In **Benchmark** mode a fixed non-toggleable row sits at the top for the client:
 *Their own ads are captured the same way, over the same window — so the comparison
 is ads against ads.*
 
-Below: a manual add row (name + domain). Then the cost line —
-*3 advertisers · **3** search credits · up to 54 creatives read* — and **Capture ads**.
+Below: a manual add row (name + domain). Then the cost line, a **Force fresh
+capture** checkbox, and **Capture ads**.
 
-**The cost is always stated before anything is spent.**
+**The cost line reads the cache live**, so it states what will actually be spent
+rather than the theoretical maximum:
+
+```
+Google display · 1 request · 3 from cache
+Meta · 2 requests
+Captures are reused for 7 days. Tick "Force fresh capture" to ignore them.
+```
+
+**The cost is always stated before anything is spent.** A capture the team
+already paid for this week costs nothing and says so.
 
 **States.** No curated competitors → *No curated competitors for this client yet.
 Add them below.* Homepage URL → an amber note that no product was detected.
@@ -165,6 +195,40 @@ Add them below.* Homepage URL → an amber note that no product was detected.
 ### Screen 4 — Capturing
 
 H2: **Capturing**. Sub: *All advertisers are fetched at once.*
+
+With **Both** selected, rows are grouped under a source heading — the same
+competitor appears once per source, and two rows with the same name and different
+numbers is unreadable otherwise.
+
+**Meta status lines** use Meta's own vocabulary, never Google's:
+
+```
+resolving the Meta Page…
+14 messages · from 42 cards · of 153 ads · 3 read by vision · 9 RAIN-managed
+Page resolved · no Meta ads in this window
+several Pages share this name — needs confirmation
+```
+
+**A cache hit says so, with its age**, because "this is fast" and "this is stale"
+must not look identical:
+
+```
+14 messages · captured 2 days ago, no request spent
+```
+
+**Three page states that must never collapse into one sentence:**
+
+| State | Copy | Meaning |
+|---|---|---|
+| resolved, ads found | the counts line | working |
+| resolved, zero ads | *Page resolved · no Meta ads in this window* | a fact about the competitor |
+| ambiguous | *several Pages share this name — needs confirmation* | a failure of ours |
+
+The third renders a candidate list on the results screen. Confirming one persists
+the mapping and nobody is asked again. Nothing is fetched from a guessed Page —
+the live probe found a national brand scoring 1.0 with a 0.0033 margin over the
+runner-up, which means many Pages share that name, and picking the first would
+put an unrelated company's ads under a competitor's name.
 
 One row per advertiser: status lamp (pulsing blue → green done / red failed),
 name (+ `Your client` tag), and a live status line that must always reconcile:
@@ -239,6 +303,73 @@ Checking leaves 4 of 7, the bar says *Showing **Checking** only. **Show all 7
 creatives captured***. If the scope matches nothing at all: *No creative in this
 capture classified as **Checking** — most display banners carry no product signal
 at all, so they read as **Other**. Showing all 12 creatives captured.*
+
+#### 5a-ii. Source tabs
+
+When more than one source was captured, tabs sit above the filters:
+
+```
+Google display  12      Meta  14 ●
+```
+
+**These switch the entire dataset, not a filter over a combined one.** Each tab
+is its own run, its own counts, its own funnel, its own filters and its own date
+vocabulary. A pulsing dot means that source is still capturing — results appear
+as soon as the *first* source lands rather than waiting for both, because Google
+typically finishes well before Meta paginates and making someone stare at a
+finished wall they cannot see is worse than a tab that fills in.
+
+Switching tabs restores that source's own filter selection. A product chip chosen
+on the Google wall must not silently apply to the Meta wall, where the counts
+behind it are different.
+
+**No number ever crosses a tab.**
+
+#### 5a-iii. Creative Inspiration — the Meta wall
+
+Same card styling as Google, deliberately: a creative person should not have to
+relearn the screen. What differs is the semantics.
+
+Stats: **Messages · Ad records · With an offer**.
+
+Cards are **messages, not creatives**. A Meta ad can carry seven cards and eight
+assets; cards sharing copy and destination collapse into one message. Two counts
+appear as separate badges because they mean different things:
+
+- `3 ad records` — Meta served this message under three ad objects
+- `6 assets` — one message rendered six ways
+
+Calling both "variations" would make the wall unreadable.
+
+**Footer differences from Google:**
+
+| | Google | Meta |
+|---|---|---|
+| timing | *shown on 412 days since Apr 2025* | *Active · started Aug 18* |
+| placement | sizes (`728x90`) | platforms (`FACEBOOK · INSTAGRAM`) |
+| provenance | — | `from link` / `from copy` / `read from artwork` |
+
+**Meta never renders a day count and never renders a closed date range for a live
+ad.** Every ad in the live probe was `is_active: true` while carrying an
+`end_date` already in the past, so that field is a rolling last-observed stamp,
+not a stop date. `end − start` is not the days-served measurement Google's column
+means, and displaying it as one would put two different measurements in the same
+sentence.
+
+A `provider end date (metadata, not a stop date)` line appears in the evidence
+drawer only, clearly labelled.
+
+**RAIN-managed.** A purple badge on any message whose destination carries RAIN
+campaign tracking, plus a line above the wall:
+
+> **9** of these are RAIN-managed — the destination carries RAIN campaign
+> tracking, so they are work RAIN runs rather than independent competitor
+> activity. Badged below, and never counted as a competitor's own strategy.
+
+They are **flagged, not hidden**. The creative team gains from seeing prior work,
+and most RAIN clients compete in different markets so the overlap is rare. The
+wording says *managed*, never *authored* — a tracking parameter proves whose
+campaign it is, not who designed the creative.
 
 #### 5b. Campaign Benchmark — the table
 

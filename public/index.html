@@ -93,12 +93,31 @@
       <div class="scopebox">
         <label>Product scope</label>
         <select id="productSel"></select>
-        <label>Window</label>
-        <select id="daysSel">
-          <option value="30">Last 30 days</option>
-          <option value="60">Last 60 days</option>
-          <option value="90">Last 90 days</option>
+        <!-- Chosen BEFORE anything is spent, so the cost line below can be
+             accurate. Creative work on display does not need Meta requests. -->
+        <label>Sources</label>
+        <select id="sourceSel">
+          <option value="google_display">Google display</option>
+          <option value="meta">Meta</option>
+          <option value="both">Both</option>
         </select>
+        <!-- Two windows, because the two filters ask different questions.
+             Google: served during the window. Meta: started within it. -->
+        <span class="winwrap" id="winGoogleWrap">
+          <label>Google · served in</label>
+          <select id="daysSel">
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </span>
+        <span class="winwrap hidden" id="winMetaWrap">
+          <label>Meta · started in</label>
+          <select id="metaDaysSel">
+            <option value="30">Last 30 days</option>
+            <option value="90" selected>Last 3 months</option>
+            <option value="180">Last 6 months</option>
+          </select>
+        </span>
       </div>
     </div>
 
@@ -112,7 +131,12 @@
 
     <div class="actionbar">
       <div class="costnote" id="costNote"></div>
-      <button class="btn primary lg" id="captureBtn">Capture ads</button>
+      <div class="actionright">
+        <label class="forcetoggle" title="Ignore cached captures and fetch everything fresh">
+          <input type="checkbox" id="forceChk" /> <span>Force fresh capture</span>
+        </label>
+        <button class="btn primary lg" id="captureBtn">Capture ads</button>
+      </div>
     </div>
   </section>
 
@@ -130,8 +154,16 @@
         <div class="eyebrow" id="resEyebrow">—</div>
         <h2 id="resTitle">—</h2>
       </div>
-      <div class="resstats" id="resStats"></div>
+      <div class="resright">
+        <div class="resstats" id="resStats"></div>
+        <button class="btn ghost sm" id="reanalyzeBtn" title="Ignore the cache and capture again">↻ Re-analyze</button>
+      </div>
     </div>
+
+    <!-- Source tabs. These switch the ENTIRE dataset, they are not a filter
+         over a combined one: each tab is its own run, its own counts and its
+         own temporal vocabulary. -->
+    <div class="srctabs hidden" id="srcTabs"></div>
 
     <div class="samplingbar" id="samplingBar"></div>
     <div class="funnel hidden" id="funnelBar"></div>

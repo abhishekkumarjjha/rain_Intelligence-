@@ -1,0 +1,37 @@
+{
+  "_comment": "Domain-keyed platform identity registry. Kept SEPARATE from competitor-directory.json on purpose: the same competitor domain appears under several RAIN clients there (penfed.org, patelco.org, alliantcreditunion.org and others recur), so storing a Meta Page ID inside each occurrence would create several sources of truth that can silently disagree. One domain, one identity, here.",
+  "_schema": {
+    "metaPageId": "Facebook Page ID used for the ads query",
+    "metaPageName": "Page name as the provider reported it",
+    "resolvedBy": "manual | page_search | page_info",
+    "confidence": "high | medium | low — from the resolver's score AND margin",
+    "verifiedAt": "ISO timestamp of the last human confirmation",
+    "note": "why this mapping is what it is, when non-obvious"
+  },
+  "identities": {
+    "lacapfcu.org": {
+      "metaPageId": "174192912618532",
+      "metaPageName": "La Capitol Federal Credit Union",
+      "resolvedBy": "page_search",
+      "confidence": "high",
+      "verifiedAt": "2026-08-25T02:16:51Z",
+      "note": "Single candidate, exact name match, 99.7% of ad destinations resolve to lacapfcu.org."
+    },
+    "campusfederal.org": {
+      "metaPageId": "149316115110912",
+      "metaPageName": "Campus Federal",
+      "resolvedBy": "page_search",
+      "confidence": "high",
+      "verifiedAt": "2026-08-25T02:16:51Z",
+      "note": "15 candidates but a 0.459 margin over the runner-up; 76.7% destination match."
+    },
+    "neighborsfcu.org": {
+      "metaPageId": "350277005066162",
+      "metaPageName": "Neighbors Federal Credit Union",
+      "resolvedBy": "page_search",
+      "confidence": "high",
+      "verifiedAt": "2026-08-25T02:16:51Z",
+      "note": "Resolved cleanly; returned ZERO ads in the 180-day probe. Resolution and emptiness are different facts and this registry records only the first."
+    }
+  }
+}
