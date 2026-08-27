@@ -95,8 +95,8 @@
         <select id="productSel"></select>
         <!-- Chosen BEFORE anything is spent, so the cost line below can be
              accurate. Creative work on display does not need Meta requests. -->
-        <label>Sources</label>
-        <select id="sourceSel">
+        <label class="lead">Sources</label>
+        <select id="sourceSel" class="primary-select">
           <option value="google_display">Google display</option>
           <option value="meta">Meta</option>
           <option value="both">Both</option>
@@ -122,6 +122,21 @@
     </div>
 
     <div class="complist" id="compList"></div>
+
+    <!-- The standing nationals. On by default, mirroring RAIN's six-column
+         analysis where slots 4 and 5 never change — but visible and switchable,
+         because they cost two SerpApi requests on a cold cache and a strategist
+         asking a purely local question is entitled to say so. Google display
+         only, so the row hides itself for Meta and Benchmark. -->
+    <label class="natrow" id="natRow">
+      <input type="checkbox" id="nationalsChk" checked />
+      <span class="nattick" aria-hidden="true"></span>
+      <span class="natbody">
+        <span class="natname">Include national benchmarks<span class="natbadge2">Always on by default</span></span>
+        <span class="natwho">J.P. Morgan Chase · Capital One</span>
+        <span class="natwhy" id="natWhy">A fixed national ceiling added to every display capture, shown in their own section below the local results — not as local competitors.</span>
+      </span>
+    </label>
 
     <div class="addrow">
       <input type="text" id="addName" placeholder="Competitor name" />

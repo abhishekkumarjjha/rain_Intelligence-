@@ -206,6 +206,60 @@ body {
   border-radius: var(--r-sm); padding: 9px 12px; outline: none; cursor: pointer;
 }
 
+/* The source control is the most consequential choice on this screen — it
+   decides which provider is billed and which wall gets built — so it is styled
+   as an accent control rather than as one more grey select beside the window
+   pickers. Blue-as-text on a tinted fill: loud enough to find, quiet enough
+   that it does not compete with the primary Capture button. */
+.scopebox label.lead { color: var(--blue); font-weight: 600; }
+.scopebox select.primary-select {
+  color: var(--blue); font-weight: 600; font-size: 13.5px;
+  background: rgba(37,89,201,.16);
+  border: 1px solid var(--blue);
+  box-shadow: 0 0 0 3px rgba(37,89,201,.13);
+  padding: 10px 14px;
+}
+.scopebox select.primary-select:hover { background: rgba(37,89,201,.26); }
+.scopebox select.primary-select:focus-visible {
+  outline: 2px solid var(--blue); outline-offset: 2px;
+}
+
+/* ---------------- the standing national tier ---------------- */
+/* Reads as a competitor row because it behaves like one — it puts two more
+   advertisers into the capture. Amber rather than blue so it is visibly a
+   different KIND of inclusion from the local competitors above it. */
+.natrow {
+  display: flex; align-items: flex-start; gap: 14px; margin-top: 10px;
+  background: var(--panel); border: 1px dashed var(--line-2);
+  border-radius: var(--r-sm); padding: 15px 18px;
+  cursor: pointer; user-select: none; transition: .15s;
+}
+.natrow:hover { border-color: var(--amber); }
+.natrow input { position: absolute; opacity: 0; width: 0; height: 0; }
+.natrow .nattick {
+  flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 6px;
+  border: 1px solid var(--line-2); display: grid; place-items: center;
+  transition: .15s;
+}
+.natrow .nattick::after {
+  content: "✓"; font-size: 12px; font-weight: 700; color: var(--on-amber);
+  opacity: 0; transition: .15s;
+}
+.natrow:has(input:checked) { border-style: solid; border-color: var(--amber); background: var(--panel-2); }
+.natrow:has(input:checked) .nattick { background: var(--amber-fill); border-color: var(--amber-fill); }
+.natrow:has(input:checked) .nattick::after { opacity: 1; }
+.natrow:has(input:focus-visible) { outline: 2px solid var(--amber); outline-offset: 2px; }
+.natbody { display: grid; gap: 3px; }
+.natname { font-size: 14px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.natbadge2 {
+  font-size: 10px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase;
+  color: var(--amber); background: rgba(255,159,26,.12);
+  border: 1px solid rgba(255,159,26,.3); border-radius: 999px; padding: 2px 8px;
+}
+.natwho { font-size: 12.5px; color: var(--amber); font-weight: 600; }
+.natwhy { font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+.natrow.hidden { display: none; }
+
 /* ---------------- competitor list ---------------- */
 .complist { display: grid; gap: 10px; }
 .comprow {
@@ -617,3 +671,29 @@ table.bench td.clientcol { background: rgba(87,227,168,.07); }
 .cand:hover { border-color: var(--blue); }
 .cand .cn { font-weight: 600; font-size: 13.5px; flex: 1; }
 .cand .cm { font-size: 11.5px; color: var(--ink-3); }
+
+/* ---- national benchmark tier -------------------------------------------- */
+/* Local and national are two answers to two questions, so the wall separates
+   them rather than interleaving by volume. Muted styling on the national side
+   on purpose: it is a reference ceiling, not the client's market. */
+.tierhead { margin: 26px 0 14px; }
+.tierhead:first-child { margin-top: 0; }
+.tierhead h3 {
+  margin: 0 0 4px; font-size: 15px; font-weight: 700;
+  display: flex; align-items: center; gap: 10px;
+}
+.tierhead .tiern {
+  font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+  background: var(--panel-2); color: var(--ink-2);
+}
+.tierhead p { margin: 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.55; }
+.tierhead.nat { padding-top: 22px; border-top: 1px solid var(--line); }
+.tierhead.nat h3 { color: var(--ink-2); }
+
+.tag.natbadge { color: #E8CB98; border-color: rgba(240,178,75,.28); background: rgba(240,178,75,.07); }
+
+.chipdiv {
+  align-self: center; font-size: 10.5px; font-weight: 600; letter-spacing: .7px;
+  text-transform: uppercase; color: var(--ink-3); padding: 0 6px 0 12px;
+  border-left: 1px solid var(--line); margin-left: 6px; cursor: help;
+}

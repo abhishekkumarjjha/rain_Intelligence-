@@ -1,0 +1,223 @@
+// =============================================================================
+// test/nationals.test.js — the standing national tier.
+//
+// The problem this feature solves is an EMPTY WALL: local competitors often run
+// a handful of display creatives, and after clustering into ideas a three-
+// competitor capture can produce under ten cards.
+//
+// The problem it could CREATE is a wall that is nothing but Chase. These tests
+// hold both ends: the wall fills, and the local evidence survives.
+// =============================================================================
+
+import { check, section, summary, eq, ok, startServer } from "./harness.js";
+import { withNationals, isNational, captureOptionsFor, NATIONAL_TTL_DAYS, NATIONAL_READ_CAP } from "../lib/national-tier.js";
+import { clusterAds } from "../lib/analyze.js";
+
+section("pure logic — the tier");
+
+await check("the two standing nationals are appended without being chosen", () => {
+  const out = withNationals([{ label: "Local CU", domain: "localcu.org" }]);
+  eq(out.length, 3, "1 chosen + 2 standing");
+  ok(out.find((c) => c.domain === "chase.com")?.auto, "Chase added automatically");
+  ok(out.find((c) => c.domain === "capitalone.com")?.auto, "Capital One added automatically");
+  eq(out[0].tier, "local", "the chosen one is local");
+});
+
+await check("a national picked by hand is tiered, not duplicated", () => {
+  const out = withNationals([{ label: "Chase", domain: "chase.com" }]);
+  eq(out.filter((c) => c.domain === "chase.com").length, 1, "no duplicate");
+  eq(out.find((c) => c.domain === "chase.com").tier, "national", "still tiered national");
+  eq(out.length, 2, "Capital One still appended");
+});
+
+await check("nationals read deeper and cache far longer", () => {
+  const nat = captureOptionsFor("chase.com", {});
+  eq(nat.max, NATIONAL_READ_CAP, "deeper read");
+  eq(nat.ttlDays, NATIONAL_TTL_DAYS, "longer TTL");
+  ok(NATIONAL_TTL_DAYS >= 30, "at least a month");
+  // A local competitor keeps the defaults: its cost is per client per run,
+  // while a national's is bought once and shared by everyone.
+  eq(Object.keys(captureOptionsFor("localcu.org", {})).length, 0, "locals unchanged");
+});
+
+await check("clustering is advertiser-scoped, so a national cannot absorb a local card", () => {
+  const mk = (institution, id, days) => ({
+    creativeId: id, institution, headline: "Open An Account Today",
+    product: "checking", offer: null, totalDaysShown: days, width: 728, height: 90,
+  });
+  // Chase ran it longer. Without the advertiser in the key, the local card is
+  // swallowed and credited to Chase.
+  const out = clusterAds([mk("lacapfcu.org", "L1", 40), mk("chase.com", "C1", 640)]);
+  eq(out.length, 2, "two competitors making the same bet is a finding, not a variation");
+  ok(out.some((c) => c.institution === "lacapfcu.org"), "the local evidence survives");
+});
+
+// ---------------------------------------------------------------------------
+section("live server — the wall fills, the local signal survives");
+
+const S = await startServer();
+try {
+  let run;
+  {
+    const { body } = await S.post("/api/capture", {
+      mode: "creative", sources: ["google_display"],
+      clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
+      competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
+    });
+    await check("one chosen competitor becomes three captured advertisers", () => {
+      eq(body.targets.length, 3, "1 local + 2 standing nationals");
+    });
+    run = await S.awaitRun(body.runs[0].runId);
+  }
+
+  await check("every ad carries its tier", () => {
+    ok(run.ads.every((a) => a.tier === "local" || a.tier === "national"), "tier present on all");
+    ok(run.ads.some((a) => a.tier === "national"), "nationals captured");
+    ok(run.ads.some((a) => a.tier === "local"), "locals captured");
+  });
+
+  await check("the payload groups the two tiers separately", () => {
+    const t = run.creative.tiers;
+    ok(t.local.count > 0, "local tier populated");
+    ok(t.national.count > 0, "national tier populated");
+    ok(t.national.domains.includes("chase.com"), "Chase in the national tier");
+    ok(t.national.note.includes("not because they compete locally"), "the note explains why they are there");
+  });
+
+  await check("the nationals are what fill the wall", () => {
+    const nat = run.creative.clusters.filter((c) => c.tier === "national").length;
+    const loc = run.creative.clusters.filter((c) => c.tier === "local").length;
+    ok(nat > loc, `nationals ${nat} vs locals ${loc} — this is the emptiness fix`);
+    ok(nat + loc >= 8, `wall has ${nat + loc} cards`);
+  });
+
+  await check("but no local card was absorbed by a national one", () => {
+    // lacapfcu and chase both run "Open An Account Today" in the fixture.
+    const local = run.creative.clusters.filter((c) => c.tier === "local");
+    ok(local.length > 0, "local cards still on the wall");
+    const byComp = run.creative.byCompetitor.find((c) => c.domain === "neighborsfcu.org");
+    ok(byComp.count > 0, "the chosen competitor still has creatives of its own");
+  });
+
+  await check("competitor chips carry the tier so the UI can group them", () => {
+    const chips = run.creative.byCompetitor;
+    eq(chips.filter((c) => c.tier === "national").length, 2, "two national chips");
+    eq(chips.filter((c) => c.tier === "local").length, 1, "one local chip");
+  });
+
+  // -------------------------------------------------------------------------
+  section("live server — nationals are shared, not re-bought");
+
+  {
+    // A DIFFERENT client, a different product. Chase's display advertising is
+    // identical either way, so it must come from cache: it is not per-client
+    // evidence and should never be bought per client.
+    const { body } = await S.post("/api/capture", {
+      mode: "creative", sources: ["google_display"],
+      clientDomain: "campusfederal.org", clientLabel: "Campus Federal", product: "mortgage",
+      competitors: [{ label: "Pelican State CU", domain: "pelicanstatecu.com" }],
+    });
+    const second = await S.awaitRun(body.runs[0].runId);
+    await check("a second client reuses the same national capture", () => {
+      ok(second.progress["chase.com"].fromCaptureCache, "Chase from cache");
+      ok(second.progress["capitalone.com"].fromCaptureCache, "Capital One from cache");
+      ok(!second.progress["pelicanstatecu.com"].fromCaptureCache, "the local competitor is fetched fresh");
+    });
+    await check("so only the local competitor cost a request", () => {
+      eq(second.requests, 1, "one request for three advertisers");
+    });
+  }
+
+  {
+    const { body } = await S.post("/api/cost", {
+      mode: "creative", sources: ["google_display"],
+      clientDomain: "efcufinancial.org",
+      competitors: [{ label: "Unseen Bank", domain: "silentbank.com" }],
+      days: 30,
+    });
+    await check("the cost line quotes the nationals it is about to capture", () => {
+      const plan = body.plans[0];
+      eq(plan.total, 3, "1 chosen + 2 nationals");
+      eq(plan.fromCache, 2, "both nationals already held");
+      eq(plan.willFetch, 1, "only the unseen local costs a request");
+      eq(plan.nationalWillFetch, 0, "no national spend");
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  section("live server — scope");
+
+  {
+    const { body } = await S.post("/api/capture", {
+      mode: "benchmark",
+      clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
+      competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
+    });
+    await check("Benchmark never gets a national column", () => {
+      const domains = body.targets.map((t) => t.domain);
+      ok(!domains.includes("chase.com"), "no Chase");
+      ok(!domains.includes("capitalone.com"), "no Capital One");
+      eq(body.targets.length, 2, "client + the one chosen peer");
+    });
+  }
+
+  {
+    const { body } = await S.post("/api/capture", {
+      mode: "creative", sources: ["meta"],
+      clientDomain: "lacaptest.org", clientLabel: "La Cap Test", product: "checking",
+      competitors: [{ label: "Summit Credit Union", domain: "summitcu.test" }],
+    });
+    await check("Meta does not get nationals — their coverage is unproven there", () => {
+      const domains = body.runs[0].targets.map((t) => t.domain);
+      ok(!domains.includes("chase.com"), "no Chase on Meta");
+      eq(body.runs[0].targets.length, 1, "only the chosen competitor");
+    });
+  }
+
+  {
+    const { status, body } = await S.post("/api/capture", {
+      mode: "creative", sources: ["google_display"],
+      clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
+      competitors: [],
+    });
+    await check("nationals alone are not a capture", () => {
+      eq(status, 400, "refused");
+      eq(body.reason, "no_competitors", "validated on what the user chose");
+    });
+  }
+
+  {
+    const { body } = await S.post("/api/capture", {
+      mode: "creative", sources: ["google_display"], includeNationals: false,
+      clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
+      competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
+    });
+    await check("a caller can opt out of the tier", () => {
+      eq(body.targets.length, 1, "only what was chosen");
+    });
+  }
+
+  /* The cost quote and the capture must agree about the tier. If the quote
+     ignored the opt-out it would price two advertisers the capture is not going
+     to fetch — the mirror of the surprise this endpoint exists to prevent. */
+  {
+    const on = await S.post("/api/cost", {
+      mode: "creative", sources: ["google_display"],
+      clientDomain: "lacapfcu.org",
+      competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
+    });
+    const off = await S.post("/api/cost", {
+      mode: "creative", sources: ["google_display"], includeNationals: false,
+      clientDomain: "lacapfcu.org",
+      competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
+    });
+    await check("the cost quote honours the opt-out", () => {
+      eq(on.body.plans[0].total, 3, "quoted with the tier on");
+      eq(off.body.plans[0].total, 1, "quoted with the tier off");
+    });
+  }
+} finally {
+  await S.stop();
+}
+
+summary();

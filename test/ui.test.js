@@ -52,6 +52,21 @@ async function newPage() {
   return page;
 }
 
+/** The cost line is debounced and re-fires on every selection change, so read
+    it only once it has stopped moving — otherwise an assertion can catch the
+    value from a selection two clicks ago. */
+async function settledCostLine(page, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  let last = null;
+  for (;;) {
+    const now = await page.locator("#costNote").innerText();
+    if (now === last) return now.trim();
+    last = now;
+    if (Date.now() > deadline) return now.trim();
+    await page.waitForTimeout(200);
+  }
+}
+
 /** Select exactly `want` on the competitor screen, deselecting everything else. */
 async function chooseCompetitors(page, want) {
   const rows = page.locator("#compList .comprow");
@@ -178,8 +193,40 @@ try {
     // the per-advertiser capture cache, so it states the SOURCE, what will
     // actually be spent, and what is being reused — the numbers that change
     // depending on who else on the team ran this competitor that week.
+    await check("the national tier is on by default and says who it adds", async () => {
+      ok(await page.locator("#natRow").isVisible(), "the nationals row is not on the competitor screen");
+      eq(await page.locator("#nationalsChk").isChecked(), true, "the tier should default to ON");
+      const t = await page.locator("#natRow").innerText();
+      ok(/Chase/.test(t) && /Capital One/.test(t), `the row must name both: ${t}`);
+    });
+
+    await check("the tier hides itself where it cannot apply", async () => {
+      // Nationals are Google-display only. A checkbox sitting next to a Meta
+      // capture it cannot affect is worse than no checkbox — and the choice
+      // must survive the round trip rather than being reset by the hiding.
+      await page.selectOption("#sourceSel", "meta");
+      eq(await page.locator("#natRow").isVisible(), false, "still showing for Meta");
+      await page.selectOption("#sourceSel", "both");
+      ok(await page.locator("#natRow").isVisible(), "hidden for Both, where Google display still runs");
+      await page.selectOption("#sourceSel", "google_display");
+      eq(await page.locator("#nationalsChk").isChecked(), true, "the preference was reset by hiding");
+    });
+
+    await check("switching the tier off re-quotes the cost downward", async () => {
+      // The control is only real if the price follows it. Two advertisers
+      // dropped from the capture must be two advertisers dropped from the quote.
+      const before = await settledCostLine(page);
+      const nBefore = Number((before.match(/(\d+) requests?/) || [])[1] || 0);
+      await page.click("#natRow");
+      const after = await settledCostLine(page);
+      const nAfter = Number((after.match(/(\d+) requests?/) || [])[1] || 0);
+      ok(nAfter === nBefore - 2, `expected two fewer requests, got ${nBefore} -> ${nAfter}`);
+      await page.click("#natRow");                       // back on for the capture below
+      eq(await page.locator("#nationalsChk").isChecked(), true, "restored");
+    });
+
     await check("the cost line states what will be spent before anything is spent", async () => {
-      const cost = (await page.locator("#costNote").innerText()).trim();
+      const cost = await settledCostLine(page);
       ok(/Google display/.test(cost), `cost line was: ${cost}`);
       ok(/\d+ requests?|nothing to spend/.test(cost), `cost line was: ${cost}`);
       ok(/reused for \d+ days/.test(cost), `cost line was: ${cost}`);
@@ -263,18 +310,18 @@ try {
       ok((await page.locator(".wall .varbadge").count()) > 0, "no variation badge on the wall"));
 
     await check("longevity reads as days shown, never as a continuous run", async () => {
-      const t = await page.locator(".wall").innerText();
+      const t = (await page.locator(".wall").allInnerTexts()).join("\n");
       ok(/shown on [\d,]+ days/i.test(t), "expected 'shown on N days' phrasing");
       ok(!/continuously|running for \d/i.test(t), "found an overclaiming longevity phrase");
     });
 
     await check("no performance language leaks onto the wall", async () => {
-      const t = await page.locator(".wall").innerText();
+      const t = (await page.locator(".wall").allInnerTexts()).join("\n");
       ok(!/best[- ]performing|top[- ]performing|winning ad/i.test(t), "found performance language");
     });
 
     await check("no card rendered undefined, NaN or [object Object]", async () => {
-      const t = await page.locator(".wall").innerText();
+      const t = (await page.locator(".wall").allInnerTexts()).join("\n");
       ok(!/undefined|NaN|\[object/.test(t), `wall contained a rendering artifact: ${t.slice(0, 200)}`);
     });
 
@@ -445,9 +492,19 @@ try {
 
     await check("it explains what each advertiser returned rather than showing a blank page", async () => {
       const body = await page.locator("#resultBody").innerText();
-      ok(/No creatives were read/i.test(body), `body was: ${body.slice(0, 200)}`);
+      ok(/No local creatives were read/i.test(body), `body was: ${body.slice(0, 200)}`);
       ok(/Silent Bank/.test(body), "the advertiser is not named");
       ok(/no ads in this window/i.test(body), "the reason is not stated");
+    });
+
+    await check("national benchmarks never stand in for an empty local market", async () => {
+      // The failure this guards: nationals are appended to every capture, so a
+      // capture whose local competitors returned NOTHING still renders a full
+      // wall of Chase and Capital One. Without the caveat that reads as the
+      // client's market, which is the one claim this tool must never make.
+      const body = await page.locator("#resultBody").innerText();
+      ok(/national benchmark/i.test(body), "the national tier is not labelled as such");
+      ok(/not this client's market/i.test(body), `the disclaimer is missing: ${body.slice(0, 200)}`);
     });
 
     await page.close();

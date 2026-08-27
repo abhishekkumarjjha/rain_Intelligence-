@@ -9,6 +9,7 @@ const S = {
   mode: "", days: 30, metaDays: 90,
   sourceChoice: "google_display",   // google_display | meta | both
   force: false,
+  includeNationals: true,   // the standing tier; on unless switched off
   competitors: [],          // {label, domain, typeTag, reason, relevance, on}
   runId: "", run: null,
   filter: "all",            // competitor filter on the wall
@@ -33,7 +34,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 /* esc() makes a string safe as TEXT or as an attribute VALUE. It does not make
    it safe as a URL: it leaves `javascript:` and `data:` untouched, because
    neither contains a character worth escaping.
-   
+
    Every URL rendered into an href here comes from a provider, and two of them
    are chosen by the advertiser rather than observed about them — a Meta card's
    `link_url` is whatever the buyer typed. So the scheme is checked before the
@@ -191,6 +192,7 @@ document.querySelectorAll(".modecard[data-mode]").forEach((card) => {
     });
     $("winMetaWrap").classList.toggle("hidden", isBench || S.sourceChoice === "google_display");
     $("winGoogleWrap").classList.toggle("hidden", !isBench && S.sourceChoice === "meta");
+    syncNationalsRow();
     renderCompetitors();
     show("s-comp");
   };
@@ -269,6 +271,7 @@ async function startCapture({ force = false } = {}) {
     body: JSON.stringify({
       mode: S.mode, clientDomain: S.domain, clientLabel: S.clientLabel,
       product: S.product, competitors, sources, force,
+      includeNationals: S.includeNationals,
       // Per-source windows, because "last 30 days" means a served window on
       // Google and a start-date filter on Meta.
       days: { google_display: S.days, google_search: S.days, meta: S.metaDays },
@@ -600,6 +603,22 @@ function renderDiff(d) {
     <span class="dnote">Each capture is a sample — an ad missing here may simply not have been sampled this time, not stopped.</span>`;
 }
 
+/* What each advertiser actually returned, as list items.
+   Shared by the nothing-captured screen and by the wall's zero-local case,
+   because "here is what each advertiser returned" is the same answer in both
+   and two copies of it would drift. `onlyDomains` narrows the list to one tier. */
+function outcomeRows(r, onlyDomains = null) {
+  return Object.entries(r.progress || {})
+    .filter(([domain]) => !onlyDomains || onlyDomains.includes(domain))
+    .map(([domain, p]) => `
+    <li><b>${esc(p.label || domain)}</b> — ${
+      p.status === "failed" || p.status === "empty"
+        ? esc(reasonText(p.reason))
+        : `${p.read ?? 0} read`
+    }${p.found != null ? ` · ${Number(p.found).toLocaleString()} found` : ""}${
+      p.previewOnly ? ` · ${p.previewOnly} preview-only` : ""}</li>`).join("");
+}
+
 function renderNothingCaptured(r) {
   $("resStats").innerHTML = "";
   $("filters").innerHTML = "";
@@ -608,13 +627,7 @@ function renderNothingCaptured(r) {
   $("funnelBar").classList.add("hidden");
   $("diffBar").classList.add("hidden");
 
-  const rows = Object.entries(r.progress || {}).map(([domain, p]) => `
-    <li><b>${esc(p.label || domain)}</b> — ${
-      p.status === "failed" || p.status === "empty"
-        ? esc(reasonText(p.reason))
-        : `${p.read ?? 0} read`
-    }${p.found != null ? ` · ${Number(p.found).toLocaleString()} found` : ""}${
-      p.previewOnly ? ` · ${p.previewOnly} preview-only` : ""}</li>`).join("");
+  const rows = outcomeRows(r);
 
   $("resultBody").innerHTML = `
     <div class="empty big">
@@ -668,18 +681,70 @@ function renderCreative(r) {
   $("productFilters").querySelectorAll(".fchip").forEach((n) =>
     n.onclick = () => { S.productFilter = n.dataset.f; renderCreative(r); });
 
-  const compChips = [{ code: "all", label: "All advertisers", count: c.summary.total },
-    ...c.byCompetitor.filter((x) => x.count).map((x) => ({ code: x.domain, label: x.label, count: x.count }))];
-  $("filters").innerHTML = compChips.map((x) =>
-    `<button class="fchip ${S.filter === x.code ? "on" : ""}" data-f="${esc(x.code)}">${esc(x.label)}<span class="n">${x.count}</span></button>`).join("");
+  // Advertiser chips are grouped by tier, because the two answer different
+  // questions: locals are "who takes our customers", nationals are "how do we
+  // compare to the ceiling". A flat row hides that Chase is standing furniture
+  // rather than something the strategist chose.
+  const live = c.byCompetitor.filter((x) => x.count);
+  const locals = live.filter((x) => (x.tier || "local") === "local");
+  const nationals = live.filter((x) => x.tier === "national");
+  const chip = (x) => `<button class="fchip ${S.filter === x.code ? "on" : ""}" data-f="${esc(x.code)}">${esc(x.label)}<span class="n">${x.count}</span></button>`;
+
+  $("filters").innerHTML = [
+    chip({ code: "all", label: "All advertisers", count: c.summary.total }),
+    ...locals.map((x) => chip({ code: x.domain, label: x.label, count: x.count })),
+    nationals.length
+      ? `<span class="chipdiv" title="Chase and Capital One are in every analysis as a fixed national ceiling, not because they compete locally">National</span>`
+      : "",
+    ...nationals.map((x) => chip({ code: x.domain, label: x.label, count: x.count })),
+  ].join("");
   $("filters").querySelectorAll(".fchip").forEach((n) =>
     n.onclick = () => { S.filter = n.dataset.f; renderCreative(r); });
 
-  const clusters = shown;
+  // The wall is TIERED, not merged.
+  //
+  // Volume asymmetry is the reason. A community bank might contribute four
+  // cards while Chase contributes forty; interleaved, the screen is a Chase
+  // screen and the local evidence sits below the fold. Solving an empty wall by
+  // burying the local signal would not be solving it.
+  //
+  // Local first, always: it is what the strategist was actually asked about.
+  const localCards = shown.filter((a) => (a.tier || "local") === "local");
+  const natCards = shown.filter((a) => a.tier === "national");
+  const t = c.tiers;
 
-  $("resultBody").innerHTML = clusters.length
-    ? `<div class="wall">${clusters.map(adCard).join("")}</div>`
+  const sectionFor = (cards, meta, cls) => cards.length ? `
+    <div class="tierhead ${cls}">
+      <h3>${esc(meta.label)}<span class="tiern">${cards.length}</span></h3>
+      <p>${esc(meta.note)}</p>
+    </div>
+    <div class="wall">${cards.map(adCard).join("")}</div>` : "";
+
+  $("resultBody").innerHTML = shown.length
+    ? (t
+        ? sectionFor(localCards, t.local, "loc") + sectionFor(natCards, t.national, "nat")
+        : `<div class="wall">${shown.map(adCard).join("")}</div>`)
     : `<div class="empty">Nothing matches both filters. <button class="linkbtn" id="clearFilters">Clear filters</button></div>`;
+
+  // When the locals are thin, say so rather than letting the national section
+  // silently stand in for a market read.
+  //
+  // ZERO local is the case that matters most and the one a truthiness guard
+  // misses: `localCards.length &&` is false at 0, so the thinnest possible
+  // local set was the only one rendering no caveat at all — a wall of Chase and
+  // Capital One with nothing saying the client's actual market returned
+  // nothing. At zero the per-advertiser outcomes are shown too, because
+  // "national benchmarks only" is a statement about the locals that the reader
+  // is entitled to see the reasons behind.
+  if (t && natCards.length && localCards.length < 4) {
+    const caveat = localCards.length
+      ? `Only <b>${localCards.length}</b> local creative${localCards.length === 1 ? "" : "s"} matched — local institutions often run very little display. The national benchmarks below are a reference ceiling, not this client's market.`
+      : `<b>No local creatives were read in this capture.</b> Everything below is a national benchmark — a reference ceiling, not this client's market. Nothing was invented to fill the gap; here is what each advertiser returned:`;
+    const detail = localCards.length ? "" :
+      `<ul class="whylist">${outcomeRows(r, (t.local?.domains) || [])}</ul>`;
+    $("resultBody").insertAdjacentHTML("afterbegin",
+      `<div class="scopebar" style="display:block">${caveat}${detail}</div>`);
+  }
 
   const clear = $("clearFilters");
   if (clear) clear.onclick = () => { S.filter = "all"; S.productFilter = "all"; renderCreative(r); };
@@ -732,6 +797,7 @@ function adCard(a) {
       ${a.subhead ? `<div class="sh">${esc(a.subhead)}</div>` : ""}
       ${a.offer ? `<div class="offer">${esc(a.offer.value)}${a.offer.term ? ` · ${esc(a.offer.term)}` : ""}</div>` : ""}
       <div class="foot">
+        ${a.tier === "national" ? `<span class="tag natbadge">National benchmark</span>` : ""}
         ${a.variations > 1 ? `<span class="tag varbadge">${a.variations} variations</span>` : ""}
         ${a.sizes?.length ? `<span>${esc(a.sizes.slice(0, 2).join(", "))}</span>` : ""}
         ${days ? `<span class="dot">·</span><span>${esc(days)}</span>` : ""}
@@ -1067,6 +1133,7 @@ function openMetaEvidence(messageId) {
 
 $("sourceSel").onchange = () => {
   S.sourceChoice = $("sourceSel").value;
+  syncNationalsRow();
   const showG = S.sourceChoice !== "meta";
   const showM = S.sourceChoice !== "google_display";
   $("winGoogleWrap").classList.toggle("hidden", !showG);
@@ -1075,6 +1142,21 @@ $("sourceSel").onchange = () => {
 };
 $("metaDaysSel").onchange = () => { S.metaDays = Number($("metaDaysSel").value); refreshCost(); };
 $("forceChk").onchange = () => { S.force = $("forceChk").checked; refreshCost(); };
+
+/* The nationals row applies to Google display only, so it hides itself rather
+   than sitting there inert for Meta or Benchmark — a control that cannot affect
+   the run it is next to is worse than no control. Hiding it never changes the
+   stored preference, so switching Meta -> Google display brings back whatever
+   the strategist last chose. */
+$("nationalsChk").onchange = () => { S.includeNationals = $("nationalsChk").checked; refreshCost(); };
+
+function syncNationalsRow() {
+  const applies = S.mode === "creative" && S.sourceChoice !== "meta";
+  $("natRow").classList.toggle("hidden", !applies);
+  $("natWhy").textContent = S.sourceChoice === "both"
+    ? "A fixed national ceiling added to the Google display capture only — Meta is excluded, so the Meta tab stays purely local."
+    : "A fixed national ceiling added to every display capture, shown in their own section below the local results — not as local competitors.";
+}
 $("reanalyzeBtn").onclick = () => startCapture({ force: true });
 
 /* The cost line reads the per-advertiser cache before anything is spent, so
@@ -1095,6 +1177,7 @@ async function refreshCost() {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({
           mode: S.mode, sources, competitors, force: S.force,
+          includeNationals: S.includeNationals,
           clientDomain: S.domain,
           days: { google_display: S.days, google_search: S.days, meta: S.metaDays },
         }),

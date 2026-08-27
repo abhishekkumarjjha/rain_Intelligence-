@@ -98,7 +98,17 @@ try {
       ],
     });
     ok(started.ok, "capture should start");
-    await check("creative mode does NOT capture the client", () => eq(started.targets.length, 2, "target count"));
+    await check("creative mode does NOT capture the client", () => {
+      const domains = started.targets.map((t) => t.domain);
+      ok(!domains.includes("lacapfcu.org"), "the client is not a capture target in creative mode");
+      ok(started.targets.every((t) => !t.isClient), "no target is flagged as the client");
+    });
+    await check("the standing nationals are appended without being selected", () => {
+      const domains = started.targets.map((t) => t.domain);
+      ok(domains.includes("chase.com"), "Chase is always present");
+      ok(domains.includes("capitalone.com"), "Capital One is always present");
+      eq(started.targets.length, 4, "2 chosen + 2 standing nationals");
+    });
 
     creativeRun = await S.awaitRun(started.runId);
     await check("creative run completes", () => eq(creativeRun.status, "done", "status"));
@@ -132,18 +142,19 @@ try {
 
     // ---- the "55 found but only 2 shown" report ----------------------------
     await check("EVERY captured creative is reachable from the wall, not just the scoped ones", () => {
-      // campusfederal ran 3 checking creatives and 1 savings; neighborsfcu ran
-      // 1 checking, 1 mortgage, 1 generic. Scoping to checking must not make
-      // the other three unreachable — the payload carries all 7.
+      // Scoping to checking must not make the off-product creatives
+      // unreachable. Counted against capturedCount rather than a literal,
+      // because the roster now includes the standing nationals and a hardcoded
+      // number would test the fixture instead of the invariant.
       const ids = new Set(creativeRun.creative.clusters.flatMap((c) => c.variationIds || [c.creativeId]));
-      eq(ids.size, 7, "creatives reachable from the wall");
-      eq(creativeRun.creative.capturedCount, 7, "capturedCount");
-      eq(creativeRun.creative.scopedCount, 4, "scopedCount");
+      eq(ids.size, creativeRun.creative.capturedCount, "creatives reachable from the wall");
+      ok(creativeRun.creative.scopedCount < creativeRun.creative.capturedCount, "the scope is narrower than the capture");
+      ok(creativeRun.creative.scopedCount > 0, "and it is not empty");
     });
 
     await check("product chips count everything captured, not just the current slice", () => {
       const total = creativeRun.creative.byProduct.reduce((n, p) => n + p.count, 0);
-      eq(total, 7, "product chip total");
+      eq(total, creativeRun.creative.capturedCount, "product chip total");
       ok(creativeRun.creative.byProduct.length > 1, "expected more than one product chip");
     });
 
@@ -153,8 +164,8 @@ try {
     await check("the capture funnel reconciles listed -> read -> on-product", () => {
       const f = creativeRun.creative.funnel;
       ok(f, "funnel missing");
-      eq(f.read, 7, "read");
-      eq(f.onProduct, 4, "onProduct");
+      eq(f.read, creativeRun.creative.capturedCount, "read matches what the wall holds");
+      eq(f.onProduct, creativeRun.creative.scopedCount, "onProduct matches the scoped slice");
       ok(f.listed >= f.read, `listed ${f.listed} < read ${f.read}`);
       // Every step that lost creatives has to say why, or the strip is noise.
       for (const st of f.steps) {
@@ -168,10 +179,9 @@ try {
     });
 
     await check("off-product creatives are reachable, not silently discarded", () => {
-      // neighborsfcu ran a mortgage banner and a generic one. A capture that
-      // read 7 creatives must be able to account for all 7 somewhere.
+      // Every creative read must be accounted for somewhere in the breakdown.
       const total = creativeRun.breakdown.reduce((s, b) => s + b.count, 0);
-      eq(total, 7, "creatives accounted for across the product breakdown");
+      eq(total, creativeRun.creative.capturedCount, "creatives accounted for across the product breakdown");
     });
 
     await check("every card has the evidence it needs to be clicked", () => {
@@ -404,7 +414,9 @@ try {
     });
     await check("an identical re-capture reports no new creatives", () => {
       eq(run.diff.appeared, 0, "appeared");
-      eq(run.diff.stillRunning, 4, "seen in both");
+      // Every creative in the second capture was in the first. Derived rather
+      // than literal so the standing nationals cannot invalidate the invariant.
+      eq(run.diff.stillRunning, run.ads.length, "seen in both");
       eq(run.diff.noLongerObserved, 0, "no longer observed");
     });
     await check("a run with no comparable predecessor carries no diff", async () => {
@@ -425,11 +437,16 @@ try {
       competitors: [{ label: "Agency Bank", domain: "agencybank.com" }],
     });
     const run = await S.awaitRun(started.runId);
+    // Indexed by institution, not by position: the capture now also contains
+    // the standing nationals, so ads[0] is whichever advertiser happened to
+    // land first.
+    const agencyAd = run.ads.find((a) => a.institution === "agencybank.com");
     await check("the entered domain stays the institution", () => {
-      eq(run.ads[0].institution, "agencybank.com", "institution");
+      ok(agencyAd, "agencybank creative captured");
+      eq(agencyAd.institution, "agencybank.com", "institution");
     });
     await check("the verified advertiser is kept as a separate field", () => {
-      eq(run.ads[0].advertiser, "Fogarty and Klein, Inc.", "advertiser");
+      eq(agencyAd.advertiser, "Fogarty and Klein, Inc.", "advertiser");
     });
   }
 
