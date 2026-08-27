@@ -265,7 +265,7 @@ Then, in order:
 
    The last step is orange. A **"Why the drop?"** link expands the reasons:
    *43 beyond the provider's 100-per-request ceiling · 5 preview-only links,
-   which carry no image to read · 12 over the read cap of 18 per advertiser ·
+   which carry no image to read · 12 over the read cap of 30 per advertiser ·
    3 duplicate artwork collapsed, failed downloads, or unreadable creatives*.
 
    **This strip exists because "55 found" above a wall of 2 is the single most
@@ -439,7 +439,7 @@ last observed YYYY-MM-DD*, and a link to the Transparency Center. Escape closes.
 
 - **1 SerpApi credit per advertiser per capture.** Benchmark adds one for the
   client. Free tier is 250/month.
-- **1 vision call per creative**, capped at 18 per advertiser (`RI_MAX_READ`).
+- **1 vision call per creative**, capped at 30 per advertiser (`RI_MAX_READ`).
 - Extractions **cache forever on creative ID** — a creative's pixels never
   change, so its transcription is bought once for the lifetime of the system.
 - **Byte-identical creatives collapse before extraction.**

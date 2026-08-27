@@ -24,44 +24,56 @@
    ========================================================================= */
 
 :root {
-  /* surfaces */
-  --bg:        #0E2A6B;
-  --bg-2:      #12368A;
+  /* ---------------------------------------------------------------------
+     SURFACES — near-black, and that is a FUNCTIONAL choice, not a taste one.
+     This tool's content is other people's banner creatives, and bank creatives
+     are overwhelmingly blue: Campus Federal navy, Capital One teal-navy, Chase
+     blue. On a blue ground they blend into the chrome and the wall reads as one
+     flat field. A neutral dark ground makes every creative pop whatever its
+     brand colour, which is the whole job of the page.
+     Accent is RAIN's cyan, so the tool looks like the agency that owns it.
+     --------------------------------------------------------------------- */
+  --bg:        #07090D;
+  --bg-2:      #0B0E14;
   color-scheme: dark;   /* native popups, scrollbars and checkboxes follow the app */
-  --panel:     #153A90;
-  --panel-2:   #1B44A2;
-  --panel-3:   #1F4CAE;
-  --line:      #2A57B4;
-  --line-2:    #4076D8;
+  --panel:     #10141C;
+  --panel-2:   #151A24;
+  --panel-3:   #1B212D;
+  --line:      #222A38;
+  --line-2:    #303B4D;
 
   /* text */
   --ink:       #FFFFFF;
-  --ink-2:     #D4E3FF;
-  --ink-3:     #AFC6F5;
+  --ink-2:     #C6D0DE;
+  --ink-3:     #8B97A9;
 
-  /* accents AS TEXT — light enough to read on every surface above */
-  --blue:      #A8CDFF;
-  --amber:     #FFB94D;
-  --green:     #57E3A8;
-  --red:       #FFB3BC;
+  /* accents AS TEXT — light enough to read on every surface above.
+     `--blue` keeps its name and becomes RAIN's cyan: renaming a token used in
+     forty places is churn that hides the one change that matters. */
+  --blue:      #5CD3E8;
+  --amber:     #FFB84D;
+  --green:     #4ADE94;
+  --red:       #FF9AA5;
 
   /* accents AS FILL — dark enough to carry their own label */
-  --blue-fill:   #1746B0;
-  --blue-fill-2: #2559C9;
+  --blue-fill:   #1B9BB8;
+  --blue-fill-2: #2CBFD4;
   --amber-fill:  #FF9F1A;
   --green-fill:  #2FCB8B;
-  --on-blue:     #FFFFFF;
+  /* RAIN's own button is dark text on the cyan gradient, and it has to be:
+     white on #2CBFD4 fails contrast badly. */
+  --on-blue:     #04161B;
   --on-amber:    #2A1500;
   --on-green:    #04231A;
 
-  --blue-glow:  rgba(37,89,201,.45);
-  --amber-glow: rgba(255,159,26,.32);
-  --grad:       linear-gradient(96deg, #1746B0 0%, #2559C9 100%);
+  --blue-glow:  rgba(44,191,212,.30);
+  --amber-glow: rgba(255,159,26,.28);
+  --grad:       linear-gradient(96deg, #2CBFD4 0%, #45D6B4 100%);
   --grad-amber: linear-gradient(96deg, #F58E00 0%, #FFAE33 100%);
 
   --r:         16px;
   --r-sm:      10px;
-  --shadow:    0 20px 56px rgba(4,16,50,.45);
+  --shadow:    0 20px 56px rgba(0,0,0,.55);
   --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -69,10 +81,10 @@
 html, body { margin: 0; padding: 0; }
 body {
   background:
-    radial-gradient(1500px 900px at 78% -12%, rgba(64,140,255,.55), transparent 62%),
-    radial-gradient(1100px 700px at 12% 8%, rgba(23,70,176,.55), transparent 66%),
-    radial-gradient(900px 900px at 96% 92%, rgba(255,159,26,.10), transparent 64%),
-    linear-gradient(158deg, #0C2461 0%, #14409B 52%, #0E2A6B 100%);
+    radial-gradient(1500px 900px at 78% -12%, rgba(44,191,212,.10), transparent 62%),
+    radial-gradient(1100px 700px at 12% 8%, rgba(69,214,180,.06), transparent 66%),
+    radial-gradient(900px 900px at 96% 92%, rgba(255,159,26,.05), transparent 64%),
+    linear-gradient(158deg, #07090D 0%, #0A0E15 52%, #07090D 100%);
   background-attachment: fixed;
   color: var(--ink);
   font-family: var(--font);
@@ -85,7 +97,7 @@ body {
   display: flex; align-items: center; gap: 14px;
   padding: 16px 30px;
   position: sticky; top: 0; z-index: 40;
-  background: rgba(12,36,97,.82);
+  background: rgba(7,9,13,.86);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--line);
 }
@@ -116,8 +128,13 @@ body {
   font-size: 52px; line-height: 1.1; font-weight: 800;
   letter-spacing: -1.6px; margin: 0 0 18px;
 }
+/* RAIN's own site accents one word of the headline in cyan — "grow their
+   conversions". Matching that is what makes this read as their tool rather than
+   a generic dashboard. It also returns amber to being purely semantic: on this
+   wall amber means an OFFER, and a brand flourish in the same colour teaches
+   the eye to stop trusting it. */
 .hero h1 .hl {
-  background: var(--grad-amber);
+  background: var(--grad);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 /* The tagline says what the product IS; the lede says what to do next. Two
@@ -180,14 +197,14 @@ body {
 }
 .modecard:hover:not(.disabled) {
   border-color: var(--blue); transform: translateY(-3px);
-  box-shadow: 0 16px 44px rgba(4,16,50,.36);
+  box-shadow: 0 16px 44px rgba(0,0,0,.45);
   background: var(--panel-2);
 }
 .modecard.disabled { opacity: .42; cursor: default; }
 .mc-icon { width: 38px; height: 38px; border-radius: 11px; margin-bottom: 16px; }
 .mc-icon.creative { background: var(--grad-amber); }
 .mc-icon.bench    { background: linear-gradient(140deg,#2FCB8B,#12A0A0); }
-.mc-icon.proposal { background: linear-gradient(140deg,#41599B,#6B80B5); }
+.mc-icon.proposal { background: linear-gradient(140deg,#2A3340,#3C4757); }
 .mc-title { font-size: 17px; font-weight: 700; margin-bottom: 5px; }
 .mc-q { font-size: 13px; color: var(--blue); font-style: italic; margin-bottom: 11px; }
 .modecard p { color: var(--ink-2); font-size: 13.5px; line-height: 1.6; margin: 0 0 15px; }
@@ -222,12 +239,12 @@ body {
 .scopebox label.lead { color: var(--blue); font-weight: 600; }
 .scopebox select.primary-select {
   color: var(--blue); font-weight: 600; font-size: 13.5px;
-  background: rgba(37,89,201,.16);
+  background: rgba(44,191,212,.14);
   border: 1px solid var(--blue);
-  box-shadow: 0 0 0 3px rgba(37,89,201,.13);
+  box-shadow: 0 0 0 3px rgba(44,191,212,.16);
   padding: 10px 14px;
 }
-.scopebox select.primary-select:hover { background: rgba(37,89,201,.26); }
+.scopebox select.primary-select:hover { background: rgba(44,191,212,.24); }
 .scopebox select.primary-select:focus-visible {
   outline: 2px solid var(--blue); outline-offset: 2px;
 }
@@ -292,8 +309,8 @@ body {
   font-size: 11px; padding: 4px 9px; border-radius: 999px;
   background: var(--bg-2); border: 1px solid var(--line); color: var(--ink-3); white-space: nowrap;
 }
-.tag.match { color: var(--blue); border-color: rgba(168,205,255,.38); }
-.tag.client { color: var(--green); border-color: rgba(87,227,168,.38); }
+.tag.match { color: var(--blue); border-color: rgba(92,211,232,.38); }
+.tag.client { color: var(--green); border-color: rgba(74,222,148,.38); }
 
 .addrow { display: flex; gap: 9px; margin-top: 16px; }
 .addrow input {
@@ -338,7 +355,7 @@ body {
   border-radius: var(--r-sm); padding: 12px 16px; margin-bottom: 22px;
   font-size: 12.5px; color: var(--amber); line-height: 1.6;
 }
-.samplingbar.clean { background: rgba(47,203,139,.12); border-color: rgba(87,227,168,.30); color: var(--green); }
+.samplingbar.clean { background: rgba(47,203,139,.12); border-color: rgba(74,222,148,.30); color: var(--green); }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
 /* Benchmark mode has no filter chips. An empty row still claimed its margin,
@@ -366,7 +383,7 @@ body {
   min-height: 132px; padding: 12px; cursor: zoom-in;
 }
 .adcard .shot img { max-width: 100%; max-height: 210px; display: block; }
-.adcard .shot .broken { color: #8B99B5; font-size: 12px; text-align: center; padding: 26px 10px; }
+.adcard .shot .broken { color: var(--ink-3); font-size: 12px; text-align: center; padding: 26px 10px; }
 .adcard .meta { padding: 14px 16px 16px; flex: 1; display: flex; flex-direction: column; }
 .adcard .who { font-size: 11.5px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; color: var(--blue); }
 .adcard .hl { font-size: 14px; font-weight: 600; margin: 7px 0 5px; line-height: 1.4; }
@@ -381,7 +398,7 @@ body {
   margin-top: auto; padding-top: 13px; font-size: 11px; color: var(--ink-3);
 }
 .adcard .foot .dot { opacity: .4; }
-.varbadge { color: var(--blue); border-color: rgba(168,205,255,.34); }
+.varbadge { color: var(--blue); border-color: rgba(92,211,232,.34); }
 
 /* ---------------- benchmark table ---------------- */
 .bwrap { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
@@ -398,13 +415,13 @@ table.bench tr.offerrow td .val { color: var(--amber); }
 table.bench td .val.absent { color: var(--ink-3); font-weight: 500; }
 table.bench td .det { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; line-height: 1.5; }
 table.bench td .note { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
-table.bench td.clientcol { background: rgba(87,227,168,.07); }
+table.bench td.clientcol { background: rgba(74,222,148,.07); }
 .ev {
   display: inline-block; margin-top: 8px; font-size: 11px; cursor: pointer;
-  color: var(--blue); border: 1px solid rgba(91,140,255,.3);
-  background: rgba(168,205,255,.12); border-radius: 999px; padding: 3px 10px;
+  color: var(--blue); border: 1px solid rgba(92,211,232,.32);
+  background: rgba(92,211,232,.12); border-radius: 999px; padding: 3px 10px;
 }
-.ev:hover { background: rgba(168,205,255,.24); }
+.ev:hover { background: rgba(92,211,232,.24); }
 .comprow-note {
   font-size: 11.5px; color: var(--amber); background: rgba(255,159,26,.09);
   padding: 9px 18px; border-bottom: 1px solid var(--line); line-height: 1.55;
@@ -448,7 +465,7 @@ table.bench td.clientcol { background: rgba(87,227,168,.07); }
 
 /* ---------------- drawer ---------------- */
 .drawer-bg {
-  position: fixed; inset: 0; background: rgba(2,5,14,.72); backdrop-filter: blur(3px);
+  position: fixed; inset: 0; background: rgba(0,0,0,.74); backdrop-filter: blur(3px);
   opacity: 0; pointer-events: none; transition: .22s; z-index: 60;
 }
 .drawer-bg.on { opacity: 1; pointer-events: auto; }
@@ -650,7 +667,7 @@ table.bench td.clientcol { background: rgba(87,227,168,.07); }
   font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
   color: #C9A6E8; background: rgba(170,120,220,.1); border: 1px solid rgba(170,120,220,.28);
 }
-.badge-video { color: var(--blue); border-color: rgba(91,140,255,.3); }
+.badge-video { color: var(--blue); border-color: rgba(92,211,232,.32); }
 .badge-prov {
   font-size: 10px; color: var(--ink-3); border: 1px solid var(--line);
   border-radius: 999px; padding: 2px 8px; background: var(--bg-2);
