@@ -70,6 +70,38 @@ const ago = (d) => now - d * day;
 //   - agencybank       ads verified under an AGENCY name, not the bank's
 // ---------------------------------------------------------------------------
 export const MARKET = {
+  /* The shape that exposed the cap-before-dedupe bug on a live capture: three
+     real campaigns, each rendered at several sizes off the same artwork. A cap
+     applied before the dedupe spends every slot on repeats of campaign A and
+     never reaches B or C — which is exactly how an advertiser's offer ads go
+     missing while the funnel still reconciles. */
+  "dupeheavy.test": [
+    /* Isolates the cap-before-dedupe bug, with the launch-cohort spread
+       deliberately neutralised: every campaign launched in the SAME month, so
+       diversification cannot rescue this and only the dedupe order can.
+
+       Campaign A is 25 renders of ONE artwork and outranks the others on
+       longevity. With the cap applied before the byte-dedupe, all 18 slots go
+       to A and the read comes back with a single creative — the two campaigns
+       carrying offers never reach the model. */
+    ...Array.from({ length: 25 }, (_, i) => ({
+      id: `DUPE_A${i}`, headline: "Become a Member", product: "other",
+      offer: { present: false }, art: 1,
+      daysShown: 400 - i, first: ago(500), last: ago(1), w: 300, h: 250,
+    })),
+    ...Array.from({ length: 6 }, (_, i) => ({
+      id: `DUPE_B${i}`, headline: "Earn $600 With Lagniappe Checking", product: "checking",
+      offer: { present: true, type: "bonus", value: "$600", unit: "USD", term: "", minimum: "", qualifier: "" },
+      art: 2,
+      daysShown: 90 - i, first: ago(500), last: ago(1), w: 728, h: 90,
+    })),
+    ...Array.from({ length: 6 }, (_, i) => ({
+      id: `DUPE_C${i}`, headline: "Unlock Your HELOC", product: "heloc",
+      offer: { present: true, type: "rate", value: "3.99% APR", unit: "APR", term: "", minimum: "", qualifier: "" },
+      art: 3,
+      daysShown: 60 - i, first: ago(500), last: ago(1), w: 970, h: 250,
+    })),
+  ],
   "campusfederal.org": [
     { id: "CAMP1", headline: "Free Checking, Actually Free", product: "checking",
       offer: { present: true, type: "bonus", value: "$300", unit: "USD", term: "", minimum: "", qualifier: "new members only" },
@@ -225,7 +257,11 @@ let seed = 1;
 for (const rows of Object.values(MARKET)) {
   for (const r of rows) {
     if (r.previewOnly) continue;
-    const png = pngFor(seed++);
+    // `art` makes rows share BYTES — one creative rendered at several sizes,
+    // which is what a real display campaign looks like and what the byte-dedupe
+    // is there to collapse. Offset so a shared id can never collide with an
+    // auto-assigned seed.
+    const png = pngFor(r.art != null ? 90000 + r.art : seed++);
     PNG_BY_ID.set(r.id, png);
     ID_BY_B64.set(png.toString("base64"), r.id);
   }

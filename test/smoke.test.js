@@ -95,4 +95,46 @@ t("product from URL path", () => {
   assert.equal(productFromUrl("https://bank.com").from, "none");
 });
 
+// --- selection breadth -----------------------------------------------------
+// The failure this guards, from a live capture: Chase's longest-running display
+// work is evergreen card marketing, so a cap filled straight off the quality
+// ranking returned only card creatives and reported that Chase runs no checking
+// ads. Product is unknowable before the image is read, so launch cohort is the
+// proxy — spread across campaigns, don't go deep into one.
+t("the read cap spreads across campaigns instead of draining the longest-running one", () => {
+  const evergreen = Array.from({ length: 20 }, (_, i) => ({
+    creativeId: `ever_${i}`, firstShown: "2024-01-05", lastShown: "2026-08-26", totalDaysShown: 900 + i,
+  }));
+  const newer = Array.from({ length: 6 }, (_, i) => ({
+    creativeId: `new_${i}`, firstShown: "2026-07-02", lastShown: "2026-08-26", totalDaysShown: 40 + i,
+  }));
+
+  const picked = selectForReading([...evergreen, ...newer], 8);
+  assert.equal(picked.length, 8);
+  const fromNewer = picked.filter((c) => c.creativeId.startsWith("new_")).length;
+  // A straight top-N by longevity would take 8 evergreen and zero newer.
+  assert.ok(fromNewer >= 3, `newer campaign should get slots, got ${fromNewer}`);
+  assert.ok(picked.some((c) => c.creativeId.startsWith("ever_")), "the strongest campaign still gets slots");
+});
+
+t("a single-campaign advertiser is unaffected by the spread", () => {
+  const one = Array.from({ length: 10 }, (_, i) => ({
+    creativeId: `c_${i}`, firstShown: "2026-06-01", lastShown: "2026-08-26", totalDaysShown: 100 - i,
+  }));
+  const picked = selectForReading(one, 4);
+  assert.equal(picked.length, 4);
+  // One cohort means the quality ranking is the whole answer, as before.
+  assert.deepEqual(picked.map((c) => c.creativeId), ["c_0", "c_1", "c_2", "c_3"]);
+});
+
+t("the cap still bites when there is more than it admits", () => {
+  const many = Array.from({ length: 50 }, (_, i) => ({
+    creativeId: `c_${i}`, firstShown: `2026-0${(i % 6) + 1}-01`, lastShown: "2026-08-26", totalDaysShown: 100,
+  }));
+  assert.equal(selectForReading(many, 18).length, 18);
+  // and never returns duplicates of the same creative
+  const ids = selectForReading(many, 18).map((c) => c.creativeId);
+  assert.equal(new Set(ids).size, 18);
+});
+
 console.log(`\n${n} passed`);

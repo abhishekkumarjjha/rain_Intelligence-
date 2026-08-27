@@ -450,7 +450,50 @@ try {
     });
   }
 
-  summary();
+  
+// ---------------------------------------------------------------------------
+section("the read cap buys distinct creatives, not repeats");
+
+{
+  // dupeheavy.test runs 3 campaigns rendered at several sizes each: 20
+  // creatives, 3 distinct artworks. Before the fix the cap was applied BEFORE
+  // the byte-dedupe, so the slots filled with repeats of the longest-running
+  // campaign and the two carrying offers were never read.
+  const { body } = await S.post("/api/capture", {
+    mode: "creative", sources: ["google_display"], includeNationals: false,
+    clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
+    competitors: [{ label: "Dupe Heavy", domain: "dupeheavy.test" }],
+  });
+  const run = await S.awaitRun(body.runs[0].runId);
+  const ads = (run.ads || []).filter((a) => a.institution === "dupeheavy.test");
+
+  await check("every campaign is read, not just the longest-running one", () => {
+    const heads = new Set(ads.map((a) => a.headline));
+    eq(heads.size, 3, `expected all 3 campaigns, got: ${[...heads].join(" | ")}`);
+  });
+
+  await check("no vision slot was spent on artwork already in hand", () => {
+    // 20 creatives, 3 distinct artworks: reading more than 3 means duplicates
+    // reached the model.
+    eq(ads.length, 3, `expected 3 distinct reads, got ${ads.length}`);
+  });
+
+  await check("the offer-bearing campaigns survive to the wall", () => {
+    const offers = ads.filter((a) => a.offer && a.offer.value).map((a) => a.offer.value).sort();
+    eq(offers.length, 2, `expected 2 offers, got ${JSON.stringify(offers)}`);
+    ok(offers.includes("$600"), "the checking bonus was not read");
+    ok(offers.includes("3.99% APR"), "the HELOC rate was not read");
+  });
+
+  await check("the funnel still reconciles and names the duplicates", () => {
+    const f = run.creative.funnel;
+    const sel = f.steps.find((x) => x.key === "selected");
+    ok(/duplicate render/.test(sel.why), `the drop should name duplicates: ${sel.why}`);
+    ok(f.read >= sel.value - 1, "read must not exceed what was selected");
+  });
+}
+
+summary();
 } finally {
   S.stop();
 }
