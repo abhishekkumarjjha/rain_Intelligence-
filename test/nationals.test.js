@@ -196,6 +196,26 @@ try {
       eq(body.targets.length, 1, "only what was chosen");
     });
   }
+
+  /* The cost quote and the capture must agree about the tier. If the quote
+     ignored the opt-out it would price two advertisers the capture is not going
+     to fetch — the mirror of the surprise this endpoint exists to prevent. */
+  {
+    const on = await S.post("/api/cost", {
+      mode: "creative", sources: ["google_display"],
+      clientDomain: "lacapfcu.org",
+      competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
+    });
+    const off = await S.post("/api/cost", {
+      mode: "creative", sources: ["google_display"], includeNationals: false,
+      clientDomain: "lacapfcu.org",
+      competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
+    });
+    await check("the cost quote honours the opt-out", () => {
+      eq(on.body.plans[0].total, 3, "quoted with the tier on");
+      eq(off.body.plans[0].total, 1, "quoted with the tier off");
+    });
+  }
 } finally {
   await S.stop();
 }

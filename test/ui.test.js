@@ -52,6 +52,21 @@ async function newPage() {
   return page;
 }
 
+/** The cost line is debounced and re-fires on every selection change, so read
+    it only once it has stopped moving — otherwise an assertion can catch the
+    value from a selection two clicks ago. */
+async function settledCostLine(page, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  let last = null;
+  for (;;) {
+    const now = await page.locator("#costNote").innerText();
+    if (now === last) return now.trim();
+    last = now;
+    if (Date.now() > deadline) return now.trim();
+    await page.waitForTimeout(200);
+  }
+}
+
 /** Select exactly `want` on the competitor screen, deselecting everything else. */
 async function chooseCompetitors(page, want) {
   const rows = page.locator("#compList .comprow");
@@ -178,8 +193,40 @@ try {
     // the per-advertiser capture cache, so it states the SOURCE, what will
     // actually be spent, and what is being reused — the numbers that change
     // depending on who else on the team ran this competitor that week.
+    await check("the national tier is on by default and says who it adds", async () => {
+      ok(await page.locator("#natRow").isVisible(), "the nationals row is not on the competitor screen");
+      eq(await page.locator("#nationalsChk").isChecked(), true, "the tier should default to ON");
+      const t = await page.locator("#natRow").innerText();
+      ok(/Chase/.test(t) && /Capital One/.test(t), `the row must name both: ${t}`);
+    });
+
+    await check("the tier hides itself where it cannot apply", async () => {
+      // Nationals are Google-display only. A checkbox sitting next to a Meta
+      // capture it cannot affect is worse than no checkbox — and the choice
+      // must survive the round trip rather than being reset by the hiding.
+      await page.selectOption("#sourceSel", "meta");
+      eq(await page.locator("#natRow").isVisible(), false, "still showing for Meta");
+      await page.selectOption("#sourceSel", "both");
+      ok(await page.locator("#natRow").isVisible(), "hidden for Both, where Google display still runs");
+      await page.selectOption("#sourceSel", "google_display");
+      eq(await page.locator("#nationalsChk").isChecked(), true, "the preference was reset by hiding");
+    });
+
+    await check("switching the tier off re-quotes the cost downward", async () => {
+      // The control is only real if the price follows it. Two advertisers
+      // dropped from the capture must be two advertisers dropped from the quote.
+      const before = await settledCostLine(page);
+      const nBefore = Number((before.match(/(\d+) requests?/) || [])[1] || 0);
+      await page.click("#natRow");
+      const after = await settledCostLine(page);
+      const nAfter = Number((after.match(/(\d+) requests?/) || [])[1] || 0);
+      ok(nAfter === nBefore - 2, `expected two fewer requests, got ${nBefore} -> ${nAfter}`);
+      await page.click("#natRow");                       // back on for the capture below
+      eq(await page.locator("#nationalsChk").isChecked(), true, "restored");
+    });
+
     await check("the cost line states what will be spent before anything is spent", async () => {
-      const cost = (await page.locator("#costNote").innerText()).trim();
+      const cost = await settledCostLine(page);
       ok(/Google display/.test(cost), `cost line was: ${cost}`);
       ok(/\d+ requests?|nothing to spend/.test(cost), `cost line was: ${cost}`);
       ok(/reused for \d+ days/.test(cost), `cost line was: ${cost}`);

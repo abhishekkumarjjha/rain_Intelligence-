@@ -9,6 +9,7 @@ const S = {
   mode: "", days: 30, metaDays: 90,
   sourceChoice: "google_display",   // google_display | meta | both
   force: false,
+  includeNationals: true,   // the standing tier; on unless switched off
   competitors: [],          // {label, domain, typeTag, reason, relevance, on}
   runId: "", run: null,
   filter: "all",            // competitor filter on the wall
@@ -191,6 +192,7 @@ document.querySelectorAll(".modecard[data-mode]").forEach((card) => {
     });
     $("winMetaWrap").classList.toggle("hidden", isBench || S.sourceChoice === "google_display");
     $("winGoogleWrap").classList.toggle("hidden", !isBench && S.sourceChoice === "meta");
+    syncNationalsRow();
     renderCompetitors();
     show("s-comp");
   };
@@ -269,6 +271,7 @@ async function startCapture({ force = false } = {}) {
     body: JSON.stringify({
       mode: S.mode, clientDomain: S.domain, clientLabel: S.clientLabel,
       product: S.product, competitors, sources, force,
+      includeNationals: S.includeNationals,
       // Per-source windows, because "last 30 days" means a served window on
       // Google and a start-date filter on Meta.
       days: { google_display: S.days, google_search: S.days, meta: S.metaDays },
@@ -1130,6 +1133,7 @@ function openMetaEvidence(messageId) {
 
 $("sourceSel").onchange = () => {
   S.sourceChoice = $("sourceSel").value;
+  syncNationalsRow();
   const showG = S.sourceChoice !== "meta";
   const showM = S.sourceChoice !== "google_display";
   $("winGoogleWrap").classList.toggle("hidden", !showG);
@@ -1138,6 +1142,21 @@ $("sourceSel").onchange = () => {
 };
 $("metaDaysSel").onchange = () => { S.metaDays = Number($("metaDaysSel").value); refreshCost(); };
 $("forceChk").onchange = () => { S.force = $("forceChk").checked; refreshCost(); };
+
+/* The nationals row applies to Google display only, so it hides itself rather
+   than sitting there inert for Meta or Benchmark — a control that cannot affect
+   the run it is next to is worse than no control. Hiding it never changes the
+   stored preference, so switching Meta -> Google display brings back whatever
+   the strategist last chose. */
+$("nationalsChk").onchange = () => { S.includeNationals = $("nationalsChk").checked; refreshCost(); };
+
+function syncNationalsRow() {
+  const applies = S.mode === "creative" && S.sourceChoice !== "meta";
+  $("natRow").classList.toggle("hidden", !applies);
+  $("natWhy").textContent = S.sourceChoice === "both"
+    ? "A fixed national ceiling added to the Google display capture only — Meta is excluded, so the Meta tab stays purely local."
+    : "A fixed national ceiling added to every display capture, shown in their own section below the local results — not as local competitors.";
+}
 $("reanalyzeBtn").onclick = () => startCapture({ force: true });
 
 /* The cost line reads the per-advertiser cache before anything is spent, so
@@ -1158,6 +1177,7 @@ async function refreshCost() {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({
           mode: S.mode, sources, competitors, force: S.force,
+          includeNationals: S.includeNationals,
           clientDomain: S.domain,
           days: { google_display: S.days, google_search: S.days, meta: S.metaDays },
         }),
