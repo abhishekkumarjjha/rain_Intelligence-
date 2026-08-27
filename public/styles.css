@@ -27,6 +27,7 @@
   /* surfaces */
   --bg:        #0E2A6B;
   --bg-2:      #12368A;
+  color-scheme: dark;   /* native popups, scrollbars and checkboxes follow the app */
   --panel:     #153A90;
   --panel-2:   #1B44A2;
   --panel-3:   #1F4CAE;
@@ -205,6 +206,13 @@ body {
   background: var(--panel); border: 1px solid var(--line-2);
   border-radius: var(--r-sm); padding: 9px 12px; outline: none; cursor: pointer;
 }
+/* The popup is drawn by the browser and does not inherit the app's surface, so
+   every option states its own colours. Without this the list renders on the
+   UA's light background while the text stays light. */
+.scopebox select option {
+  background: var(--panel); color: var(--ink);
+}
+.scopebox select.primary-select option { color: var(--ink); font-weight: 500; }
 
 /* The source control is the most consequential choice on this screen — it
    decides which provider is billed and which wall gets built — so it is styled
