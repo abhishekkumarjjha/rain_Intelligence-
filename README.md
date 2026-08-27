@@ -6,11 +6,17 @@ Competitive advertising evidence for RAIN. Two modes, three sources.
 npm install
 cp .env.example .env      # SERPAPI_API_KEY + ANTHROPIC_API_KEY, and
                           # SEARCHAPI_API_KEY if you want the Meta source
-npm start                 # :3000
+npm run dev               # :3000 — reads .env
 
-npm test                  # 157 tests — logic, pipeline, whole API, failure paths
-npm run test:ui           # 52 more, in a real browser (see Testing below)
+npm test                  # 167 tests — logic, pipeline, whole API, failure paths
+npm run test:ui           # 57 more, in a real browser (see Testing below)
 ```
+
+`npm run dev` loads `.env` through Node's own `--env-file`; `npm start` does
+not, deliberately — in production the platform injects real environment
+variables and a `.env` file should not exist. Nothing here bundles dotenv, so
+running `npm start` locally after filling in `.env` will start a server with no
+keys at all and report every source as unconfigured.
 
 Keys fail independently. Without `SEARCHAPI_API_KEY` the Meta source is refused
 and Google display still works; without `SERPAPI_API_KEY` a Meta-only capture
