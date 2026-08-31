@@ -250,6 +250,62 @@ export function extractionFor(id) {
   return null;
 }
 
+/**
+ * The same market row, answered as a rendered SEARCH ad.
+ *
+ * The banner reader and the search reader take different prompts and return
+ * different shapes, so a mock that only knows the banner shape leaves the whole
+ * benchmark capture path untested — and worse, looks green, because a creative
+ * run run first would leave banner records in the extraction cache for the
+ * benchmark run to pick up. This is the answer to the search prompt.
+ *
+ * The offer is deliberately put in the DESCRIPTION, not the headline. That is
+ * the field the old single-prompt build told the model did not exist, so a
+ * fixture that keeps the figure in the headline would pass either way and prove
+ * nothing.
+ */
+export function searchExtractionFor(id) {
+  for (const rows of Object.values(MARKET)) {
+    const r = rows.find((x) => x.id === id);
+    if (!r) continue;
+
+    const o = r.offer?.present ? r.offer : null;
+    const metric = !o ? null
+      : o.type === "bonus" ? "cash_bonus"
+      : o.unit === "APR" ? "apr"
+      : "apy";
+
+    const facts = metric ? [{
+      metric,
+      raw: o.value,
+      qualifiers: {
+        term_months: /(\d+)[- ]year/.test(o.term) ? Number(RegExp.$1) * 12 : null,
+        minimum_deposit: /\$([\d,]+)/.test(o.minimum) ? Number(RegExp.$1.replace(/,/g, "")) : null,
+      },
+      sourceField: "description",
+    }] : [];
+
+    return {
+      headlines: [r.headline],
+      description: o ? `${o.value} — ${r.headline}.` : `${r.headline}.`,
+      displayUrl: `${(r.advertiser || "").replace(/^www\./, "")}/`,
+      sitelinks: o?.qualifier ? [o.qualifier] : [],
+      callouts: o?.minimum ? [o.minimum] : [],
+      economicFacts: facts,
+      claims: [],
+      unclassified: [],
+      leadEmphasis: o ? (o.type === "bonus" ? "bonus" : "rate") : "brand",
+      urgency: { present: false, phrase: "" },
+      audience: "",
+      product: r.product,
+      productConfidence: 0.9,
+      truncated: false,
+      legible: true,
+    };
+  }
+  return null;
+}
+
 /** creativeId <-> png bytes, so the vision mock can identify what it was shown. */
 export const PNG_BY_ID = new Map();
 export const ID_BY_B64 = new Map();

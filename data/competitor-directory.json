@@ -22,7 +22,7 @@
     "competitors": [
       { "name": "Neighbors Federal Credit Union", "domain": "neighborsfcu.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Baton Rouge CU serving the same nine-parish core with a full lineup." },
       { "name": "EFCU Financial", "domain": "efcufinancial.org", "type_tag": "Local CU", "product_scope": ["all"], "reason": "Baton Rouge CU competing on checking, auto, mortgage, HELOC." },
-      { "name": "Pelican State Credit Union", "domain": "pelicanstatecu.com", "type_tag": "Regional CU", "product_scope": ["auto-loan","personal-loan","checking"], "reason": "Baton Rouge-HQ statewide CU with strong auto and personal lending." },
+      { "name": "Baton Rouge Telco Federal Credit Union", "domain": "brtelco.org", "type_tag": "Local CU", "product_scope": ["checking","savings","auto-loan","mortgage"], "reason": "Baton Rouge-HQ community CU running consistently high search-ad volume across deposit products." },
       { "name": "Campus Federal", "domain": "campusfederal.org", "type_tag": "Local CU", "product_scope": ["checking","auto-loan","heloc"], "reason": "Baton Rouge (LSU-rooted) CU competing on checking, auto, HELOC." }
     ]
   },

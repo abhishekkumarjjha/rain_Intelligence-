@@ -234,8 +234,13 @@ try {
         { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
       ],
     });
-    await check("benchmark captures the client as a column", () => {
-      eq(started.targets.length, 3, "target count");
+    // 5 targets, not 3: the client, two chosen competitors, and the two
+    // standing nationals. Benchmark now carries Chase and Capital One as a
+    // REFERENCE TIER — they get a row in the offer snapshot and are excluded
+    // from every denominator, because we cannot tell from the Transparency
+    // Center whether a national's ads served in this client's market.
+    await check("benchmark captures the client plus the national reference tier", () => {
+      eq(started.targets.length, 5, "target count");
       eq(started.targets.filter((t) => t.isClient).length, 1, "client columns");
     });
 
@@ -246,7 +251,7 @@ try {
     await check("the table has a client column first, marked as the client", () => {
       ok(b, "benchmark payload missing");
       eq(b.columns[0].isClient, true, "first column isClient");
-      eq(b.columns.length, 3, "column count");
+      eq(b.columns.length, 5, "column count — client, 2 local, 2 national reference");
     });
 
     await check("THE CLIENT COLUMN IS POPULATED — its own ads were captured", () => {
@@ -275,8 +280,33 @@ try {
     await check("absence is a counted finding with its denominator", () => {
       const gap = (b.findings || []).find((f) => f.kind === "gap");
       ok(gap, "expected a gap finding");
-      ok(/2 of 2 competitors/.test(gap.text), `denominator missing from: ${gap.text}`);
+      ok(/of \d+ competitors/.test(gap.text), `denominator missing from: ${gap.text}`);
       ok(gap.evidence.length > 0, "a gap finding must carry its evidence");
+    });
+
+    // THE POINT OF THE REFERENCE TIER: nationals are visible and uncounted.
+    await check("nationals never enter a benchmark denominator", () => {
+      const board = benchRun.board;
+      ok(board, "board payload missing");
+      const domains = board.brands.map((x) => x.domain);
+      ok(!domains.includes("chase.com"), "Chase must not be a counted brand");
+      ok(!domains.includes("capitalone.com"), "Capital One must not be a counted brand");
+      ok((board.referenceBrands || []).length >= 1, "nationals should be in referenceBrands");
+      ok(board.snapshot.referenceNote.length > 0, "the reference rows must be labelled");
+      for (const f of board.findings) {
+        ok(!/Chase|Capital One/.test(f.headline), `a national reached a finding: ${f.headline}`);
+      }
+    });
+
+    // Three boards, not one list.
+    await check("findings are split into lead / pressure / context", () => {
+      const board = benchRun.board;
+      ok(board.boards, "boards missing");
+      const total = board.boards.lead.length + board.boards.pressure.length + board.boards.context.length;
+      eq(total, board.findings.length, "every shown finding lands in exactly one board");
+      for (const f of board.findings) {
+        ok(["lead", "pressure", "context"].includes(f.outcome), `${f.rule} has no outcome`);
+      }
     });
 
     await check("comparability travels with the row", () => {
@@ -491,6 +521,69 @@ section("the read cap buys distinct creatives, not repeats");
     ok(/duplicate render/.test(sel.why), `the drop should name duplicates: ${sel.why}`);
     ok(f.read >= sel.value - 1, "read must not exceed what was selected");
   });
+}
+
+// ---------------------------------------------------------------------------
+// REGRESSIONS. Two ways the benchmark silently reverted to reporting nothing.
+// Both passed every other test in this file while broken.
+// ---------------------------------------------------------------------------
+section("regression — the extraction cache is scoped to its reader");
+{
+  // A creative (display, banner reader) run and a benchmark (search reader) run
+  // over the same creativeIds. The cache used to be keyed on creativeId alone,
+  // so the banner records won and the benchmark read ads with no description
+  // and no sitelinks — the exact fields the search reader exists to recover,
+  // and no miss anywhere to show for it.
+  const comps = [{ label: "Campus Federal", domain: "campusfederal.org" }];
+  const base = { clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking", days: 30, competitors: comps };
+
+  const { body: c } = await S.post("/api/capture", { ...base, mode: "creative" });
+  await S.awaitRun(c.runId);
+  const { body: b } = await S.post("/api/capture", { ...base, mode: "benchmark" });
+  const bench = await S.awaitRun(b.runId);
+
+  await check("benchmark ads carry the SEARCH shape, not a replayed banner record", () => {
+    const ad = bench.ads.find((a) => a.creativeId === "CAMP1");
+    ok(ad, "CAMP1 missing from the benchmark run");
+    ok(Array.isArray(ad.sitelinks), "no sitelinks field — this is a banner record");
+    ok(typeof ad.description === "string", "no description field — this is a banner record");
+  });
+
+  await check("the fact in the description survived into the board", () => {
+    const camp = bench.board.brands.find((x) => x.domain === "campusfederal.org");
+    ok(camp?.positions?.cash_bonus?.raw, "the bonus in the description was dropped");
+  });
+}
+
+section("regression — a run is never its own previous snapshot");
+{
+  const base = { clientDomain: "neighborsfcu.org", clientLabel: "Neighbors FCU", product: "checking", days: 30 };
+  const first = [{ label: "Campus Federal", domain: "campusfederal.org" }];
+
+  const { body: r1 } = await S.post("/api/capture", { ...base, mode: "benchmark", competitors: first });
+  await S.awaitRun(r1.runId);
+
+  // A DIFFERENT competitor set. The second run must see the first as previous
+  // and disclose the drift. It used to read back its own just-written snapshot
+  // — identical set, so no drift, and no offer change could ever fire.
+  const { body: r2 } = await S.post("/api/capture", {
+    ...base, mode: "benchmark",
+    competitors: [...first, { label: "EFCU Financial", domain: "efcufinancial.org" }],
+  });
+  const run2 = await S.awaitRun(r2.runId);
+
+  await check("a changed competitor set is disclosed as drift", () => {
+    ok(run2.board.setDrift, "set drift went unreported");
+    ok(run2.board.setDrift.added.includes("efcufinancial.org"), "the added competitor is not named");
+  });
+
+  await check("drift survives re-reading the finished run", async () => {
+    const { body } = await S.get(`/api/run/${r2.runId}`);
+    ok(body.board.setDrift, "drift disappeared when the run was read back");
+  });
+
+  await check("the drift note states how many brands the comparison covers", () =>
+    ok(/present in both/.test(run2.board.setDrift.note), `unhelpful note: ${run2.board.setDrift.note}`));
 }
 
 summary();

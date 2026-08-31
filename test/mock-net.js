@@ -13,7 +13,7 @@
 // =============================================================================
 
 import http from "node:http";
-import { listingFor, extractionFor, PNG_BY_ID, ID_BY_B64, MARKET } from "./fixture-lab.js";
+import { listingFor, extractionFor, searchExtractionFor, PNG_BY_ID, ID_BY_B64, MARKET } from "./fixture-lab.js";
 import { pageSearchResponse, adsResponse, jpegish, PAGE_BY_DOMAIN } from "./meta-fixture.js";
 
 process.env.SERPAPI_API_KEY ||= "test-serpapi-key";
@@ -125,7 +125,12 @@ const anthropic = http.createServer((req, res) => {
         text = "I'm sorry, I cannot read this creative.";
       } else {
         const id = ID_BY_B64.get(img.source.data);
-        const rec = id ? extractionFor(id) : null;
+        // WHICH READER IS ASKING. The search prompt and the banner prompt want
+        // different shapes; answering both with the banner shape would leave
+        // the search reader — and everything the benchmark board counts —
+        // untested while still reporting green.
+        const isSearch = String(body.system || "").includes("THE DESCRIPTION IS NOT DECORATION");
+        const rec = id ? (isSearch ? searchExtractionFor(id) : extractionFor(id)) : null;
         if (rec) {
           text = JSON.stringify(rec);
         } else if (String(body.system || "").includes("Facebook or Instagram")) {

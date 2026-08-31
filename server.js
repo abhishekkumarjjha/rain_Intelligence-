@@ -28,7 +28,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { capture, hasKey, normDomain, buildDomainLink, MAX_READ_PER_ADVERTISER, DEFAULT_LOOKBACK_DAYS } from "./lib/atc-provider.js";
-import { extractCreatives, extractMetaMessages } from "./lib/extract.js";
+import { extractByFormat, readerFor, extractMetaMessages } from "./lib/extract.js";
+import { buildBoard } from "./lib/benchmark.js";
+import { industryContext } from "./lib/industry-context.js";
+import { readRatePages } from "./lib/rate-page.js";
+import {
+  putEvidence, getEvidence, putSnapshot, previousSnapshot,
+  competitorSetVersion, putWatchedSet, getWatchedSet,
+} from "./lib/snapshot.js";
 import { clusterAds, productBreakdown, filterByProduct, buildBenchmark, creativeSummary, samplingNote, captureFunnel } from "./lib/analyze.js";
 import { captureMeta, hasSearchApiKey, MAX_META_PAGES, MAX_META_READ, DEFAULT_META_LOOKBACK_DAYS } from "./lib/meta-provider.js";
 import {
@@ -226,8 +233,16 @@ app.post("/api/capture", (req, res) => {
    * `includeNationals: false` turns it off for a caller that wants only what
    * was selected.
    */
+  // Benchmark now carries the nationals too, but as a REFERENCE TIER: they get
+  // a row in the offer snapshot and are excluded from every denominator (see
+  // benchmark.js). Previously they were blocked here entirely, on the grounds
+  // that a national column reads as a peer — that objection is answered by
+  // tiering and labelling the rows rather than by omitting them.
   const nationalsAllowed = (source) =>
-    mode === "creative" && source === SOURCES.GOOGLE_DISPLAY && body.includeNationals !== false;
+    body.includeNationals !== false && (
+      (mode === "creative" && source === SOURCES.GOOGLE_DISPLAY) ||
+      (mode === "benchmark" && source === SOURCES.GOOGLE_SEARCH)
+    );
 
   const competitorsFor = (source) =>
     withNationals(chosen, { enabled: nationalsAllowed(source) })
@@ -363,6 +378,10 @@ async function executeRun(run) {
 
       run.runs.push(cap.run);
       p.found = cap.run.providerTotal;
+      // coverage.js distinguishes "not advertising" from "nothing on this product"
+      // by comparing what the provider LISTED against what we READ. Same number
+      // as p.found, named for the consumer that has to reason about it.
+      p.listed = cap.run.providerTotal;
       p.renderable = cap.run.renderable;
       p.previewOnly = cap.run.previewOnly;
       p.advertisers = cap.run.advertisers;
@@ -379,10 +398,14 @@ async function executeRun(run) {
       p.downloading = cap.images.length;
 
       // Extraction cache: a creative's transcription never changes, so it is
-      // bought once and reused for every future run and refresh.
+      // bought once and reused for every future run and refresh — but only
+      // within the reader that produced it. A banner record has no description
+      // and no sitelinks, so serving one to a benchmark run would drop the
+      // fields the board counts without any of them registering as a miss.
+      const reader = readerFor({ format: run.format }, cap.images);
       const cachedExtractions = [], fresh = [];
       for (const img of cap.images) {
-        const hit = getCachedExtraction(img.creativeId);
+        const hit = getCachedExtraction(img.creativeId, reader);
         // The cache stores a TRANSCRIPTION, which never changes. Attribution is
         // not part of it: the same creative retrieved under a different entered
         // domain belongs to that domain now, so provider-side fields are always
@@ -403,11 +426,34 @@ async function executeRun(run) {
         } else fresh.push(img);
       }
 
+      // FORMAT-BRANCHED. Benchmark runs are creative_format=text — rendered
+      // SEARCH ads with a description and sitelinks — and were previously read
+      // with the banner prompt, which explicitly told the model those fields do
+      // not exist. Every rate living in a description was discarded before
+      // anything downstream could count it.
       const { ads, extractionFailed } = fresh.length
-        ? await extractCreatives(fresh)
+        ? await extractByFormat(fresh, { format: run.format })
         : { ads: [], extractionFailed: 0 };
 
-      for (const ad of ads) putCachedExtraction(ad.creativeId, ad);
+      // EVIDENCE IS WRITTEN NOW OR NEVER. The base64 is discarded a few lines
+      // below and Transparency Center creatives disappear from Google without
+      // notice. If a figure from this run lands in a client report and is
+      // disputed in three months, this archive is the only way to answer.
+      for (const ad of ads) {
+        const img = fresh.find((f) => f.creativeId === ad.creativeId);
+        putEvidence({
+          creativeId: ad.creativeId,
+          source: run.source,
+          brandDomain: target.domain,
+          capturedAt: new Date().toISOString(),
+          providerRaw: img ? { ...img, data: undefined } : null,
+          mediaType: img?.mediaType,
+          data: img?.data,
+          extraction: ad,
+        });
+      }
+
+      for (const ad of ads) putCachedExtraction(ad.creativeId, ad, reader);
 
       const all = [...cachedExtractions, ...ads].map((a) => ({
         ...a, isClient: !!target.isClient, institutionLabel: target.label, tier: target.tier || "local",
@@ -464,6 +510,50 @@ async function executeRun(run) {
   const prev = findPreviousRun(run);
   if (prev) {
     run.diff = { ...diffRuns(prev, run), previousRunId: prev.id, previousAt: prev.createdAt };
+  }
+
+  // ---- BENCHMARK SNAPSHOT --------------------------------------------------
+  // Written every run from day one, read months later. Month-over-month change
+  // is the most diagnostically valuable thing this tool can produce and it
+  // cannot be reconstructed after the fact — the delta UI can wait, the storage
+  // cannot. This also records the competitor set as part of the measurement:
+  // "4 of 5" in July and "3 of 7" in August are not the same number, and
+  // nothing else on the page would tell the reader that.
+  if (run.mode === "benchmark") {
+    try {
+      const board = boardFor(run);
+
+      // Runs AFTER findings are final and receives them read-only, anonymised.
+      // Never fails a run: a board with no industry block is a complete board.
+      try {
+        run.industry = await industryContext(board.findings, board.productLabel);
+      } catch { run.industry = null; }
+
+      putSnapshot({
+        clientDomain: run.client.domain,
+        product: run.product,
+        source: run.source,
+        runId: run.id,
+        brands: board.brands,
+        // THE BOARD'S OWN SET VERSION — never a second computation of it.
+        // Recomputing from run.competitors silently included the national
+        // reference tier, which buildBoard deliberately excludes. Every
+        // snapshot stored 6 domains, every board compared 4, and every run
+        // reported a phantom "competitor set changed: −2, Chase and Capital
+        // One removed" that no user action could clear. A national cannot move
+        // a finding, so it must not move set identity either.
+        competitorSet: board.competitorSet,
+        windowStart: run.days ? new Date(Date.now() - run.days * 864e5).toISOString().slice(0, 10) : null,
+        windowEnd: new Date().toISOString().slice(0, 10),
+      });
+      // The watched set is the DEFAULT for next month, never a restriction.
+      // Fulfillment may pick anyone; prefilling last month's set just makes
+      // stability the path of least resistance and drift deliberate.
+      putWatchedSet(run.client.domain, run.product, run.competitors);
+    } catch (e) {
+      // A snapshot that failed to write must never take a completed run down.
+      console.error("[snapshot] post-run write failed:", e.message);
+    }
   }
 
   saveRun(run);
@@ -627,6 +717,33 @@ function benchmarkFor(run) {
   });
 }
 
+/**
+ * Assemble the FINDINGS BOARD — the deliverable.
+ *
+ * benchmarkFor() above still runs and its table is still sent, but it renders
+ * BELOW this as the audit trail: the thing you open when someone asks where a
+ * number came from, not the thing you read to answer the question.
+ *
+ * One definition, used by the payload and by the snapshot writer, so the
+ * snapshot a future delta compares against is the same board the user saw.
+ */
+function boardFor(run) {
+  const previous = previousSnapshot({
+    clientDomain: run.client.domain, product: run.product, source: run.source,
+    excludeRunId: run.id,
+  });
+  return buildBoard({
+    client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },
+    competitors: run.competitors.map((c) => ({
+      ...c, ads: run.ads.filter((a) => !a.isClient && a.institution === c.domain),
+    })),
+    product: run.product,
+    progress: run.progress,
+    previous,
+    ratePages: run.ratePages || null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/run/:id — poll a run, or read a finished one.
 // ---------------------------------------------------------------------------
@@ -743,10 +860,19 @@ app.get("/api/run/:id", (req, res) => {
       funnel: captureFunnel(run.runs, competitorAds, scoped.length),
     };
   } else {
+    // THE BOARD IS THE ANSWER. The table is the audit trail.
+    payload.board = boardFor(run);
+    // Generated once per run and cached on it: the observations are about the
+    // shape of the findings, and the findings do not change between polls.
+    payload.industry = run.industry || null;
     payload.benchmark = benchmarkFor(run);
     payload.funnel = captureFunnel(run.runs, run.ads,
       payload.benchmark.columns.reduce((n, c) => n + c.adCount, 0));
-    payload.strategies = run.strategies || null;
+    // Recommended strategies are a Creative/Sales deliverable. Han asked
+    // Fulfillment for quasi-analysis — counted facts the client draws their own
+    // conclusion from — so the benchmark no longer offers a strategy pass.
+    payload.strategies = null;
+    payload.ratePages = run.ratePages || null;
   }
 
   // The evidence itself, keyed for the drawer. Base64 was discarded after
@@ -768,6 +894,62 @@ app.get("/api/run/:id", (req, res) => {
 });
 
 app.get("/api/runs", (_req, res) => res.json({ runs: listRuns({ limit: 25 }) }));
+
+// ---------------------------------------------------------------------------
+// GET /api/watched — last month's competitor set for this client and product.
+//
+// The stability problem is solved by the DEFAULT, not by permission. Fulfillment
+// can pick literally anyone; this just means they do not have to re-pick the
+// same five every month, which is what keeps month-over-month deltas meaningful.
+// ---------------------------------------------------------------------------
+app.get("/api/watched", (req, res) => {
+  const domain = normDomain(req.query.clientDomain);
+  const product = normalizeProduct(req.query.product || "");
+  if (!domain) return res.status(400).json({ ok: false, reason: "bad_client_domain" });
+  const watched = getWatchedSet(domain, product);
+  res.json({ ok: true, watched: watched?.competitors || [], updatedAt: watched?.updatedAt || null });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/evidence/:creativeId — reproduce one creative exactly as RAIN saw it.
+//
+// This is what answers "that competitor never advertised 4.50%, show me". The
+// creative may be gone from Google by then; this bundle is dated, carries the
+// raw provider record and the verbatim transcription, and is never rewritten.
+// ---------------------------------------------------------------------------
+app.get("/api/evidence/:creativeId", (req, res) => {
+  const bundle = getEvidence(req.params.creativeId);
+  if (!bundle) return res.status(404).json({ ok: false, reason: "not_found" });
+  res.json({ ok: true, evidence: bundle });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/rate-pages — read current product pages for a finished run.
+//
+// Ads are historical; the page is current. Deliberately a SEPARATE, opt-in call
+// rather than part of capture: rate-page coverage is inconsistent, so these
+// figures are display-only and never enter a denominator. See rate-page.js.
+// ---------------------------------------------------------------------------
+app.post("/api/rate-pages", async (req, res) => {
+  const run = ACTIVE.get(req.body?.runId) || loadRun(req.body?.runId);
+  if (!run) return res.status(404).json({ ok: false, reason: "not_found" });
+  if (run.mode !== "benchmark") return res.status(400).json({ ok: false, reason: "wrong_mode" });
+
+  const targets = (Array.isArray(req.body?.pages) ? req.body.pages : [])
+    .map((t) => ({ domain: normDomain(t.domain), url: String(t.url || "").trim() }))
+    .filter((t) => t.domain && t.url)
+    .slice(0, 8);
+  if (!targets.length) return res.status(400).json({ ok: false, reason: "no_pages" });
+
+  try {
+    run.ratePages = { ...(run.ratePages || {}),
+      ...(await readRatePages(targets, { product: run.product, productLabel: run.productLabel })) };
+    saveRun(run);
+    res.json({ ok: true, ratePages: run.ratePages, board: boardFor(run) });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e?.code === "NO_API_KEY" ? "anthropic_not_configured" : "read_failed" });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // GET /api/img?u= — creative image proxy.

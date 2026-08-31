@@ -153,12 +153,34 @@ try {
       clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
       competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
     });
-    await check("Benchmark never gets a national column", () => {
+    // CHANGED DELIBERATELY. Benchmark used to exclude the nationals entirely,
+    // on the grounds that a national column reads as a peer. That objection is
+    // now answered by TIERING rather than by omission: they are captured, shown
+    // under their own heading in the offer snapshot, and excluded from every
+    // denominator and every finding (asserted in flow.test.js). A strategist
+    // sitting with a client can see the national ceiling without it ever
+    // becoming part of a "4 of 5 competitors" sentence.
+    await check("Benchmark captures nationals as a reference tier", () => {
       const domains = body.targets.map((t) => t.domain);
-      ok(!domains.includes("chase.com"), "no Chase");
-      ok(!domains.includes("capitalone.com"), "no Capital One");
-      eq(body.targets.length, 2, "client + the one chosen peer");
+      ok(domains.includes("chase.com"), "Chase should be captured for reference");
+      ok(domains.includes("capitalone.com"), "Capital One should be captured for reference");
+      eq(body.targets.length, 4, "client + one chosen peer + two nationals");
+      const nationals = body.targets.filter((t) => t.domain === "chase.com" || t.domain === "capitalone.com");
+      for (const n of nationals) ok(!n.isClient, "a national is never the client");
     });
+
+    // The opt-out still holds, and it still means "no national rows at all".
+    {
+      const { body: optedOut } = await S.post("/api/capture", {
+        mode: "benchmark",
+        clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
+        competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
+        includeNationals: false,
+      });
+      await check("Benchmark honours the nationals opt-out", () => {
+        eq(optedOut.targets.length, 2, "client + the one chosen peer");
+      });
+    }
   }
 
   {
