@@ -178,25 +178,58 @@ async function refreshCompetitors() {
   renderCompetitors();
 }
 
+/* The two halves of the tool, named the way the team names them. One capture
+   set, two readings of it: the Wall is what competitors MADE, Competitive
+   Intelligence is how the client COMPARES. */
+const MODE_LABEL = { creative: "The Wall of Creatives", benchmark: "Competitive Intelligence" };
+const OTHER_MODE = { creative: "benchmark", benchmark: "creative" };
+const CROSS_LABEL = { creative: "Competitive Intelligence →", benchmark: "← The Wall" };
+
+/* One picker value -> the sources actually captured. The Wall is DISPLAY only:
+   search ads reach it as a free view over the Competitive Intelligence run that
+   already paid to capture and read them. See SOURCES_FOR_MODE in lib/sources.js. */
+function sourcesForChoice(choice) {
+  if (choice === "both") return ["google_display", "meta"];
+  return [choice];
+}
+
+/**
+ * Enter a mode and land on the confirm screen.
+ *
+ * Extracted from the mode-card handler so the cross-navigation buttons on the
+ * results screen go through EXACTLY the same path. The alternative — starting
+ * the other mode's capture directly from a button — would spend SerpApi credits
+ * on a click, and the display side of that switch is never cached.
+ */
+function enterMode(mode) {
+  S.mode = mode;
+  // Benchmark has exactly one legal source, so offering a chooser would imply
+  // a decision that does not exist.
+  const isBench = mode === "benchmark";
+  $("sourceSel").parentElement && ($("sourceSel").style.display = isBench ? "none" : "");
+  document.querySelectorAll(".scopebox label").forEach((l) => {
+    if (l.textContent.trim() === "Sources") l.style.display = isBench ? "none" : "";
+  });
+  $("winMetaWrap").classList.toggle("hidden", isBench || !sourcesForChoice(S.sourceChoice).includes("meta"));
+  $("winGoogleWrap").classList.toggle("hidden", !isBench && S.sourceChoice === "meta");
+  syncNationalsRow();
+  renderCompetitors();
+  show("s-comp");
+}
+
 /* ---------------- mode ---------------- */
 document.querySelectorAll(".modecard[data-mode]").forEach((card) => {
   card.onclick = () => {
-    S.mode = card.dataset.mode;
-    // Benchmark has exactly one legal source, so offering a chooser would imply
-    // a decision that does not exist.
-    const isBench = S.mode === "benchmark";
-    $("sourceSel").closest(".scopebox").querySelectorAll("#sourceSel, #sourceSel + label").forEach(() => {});
-    $("sourceSel").parentElement && ($("sourceSel").style.display = isBench ? "none" : "");
-    document.querySelectorAll('.scopebox label').forEach((l) => {
-      if (l.textContent.trim() === "Sources") l.style.display = isBench ? "none" : "";
-    });
-    $("winMetaWrap").classList.toggle("hidden", isBench || S.sourceChoice === "google_display");
-    $("winGoogleWrap").classList.toggle("hidden", !isBench && S.sourceChoice === "meta");
-    syncNationalsRow();
-    renderCompetitors();
-    show("s-comp");
+    enterMode(card.dataset.mode);
   };
 });
+
+/* The cross-link. Client, competitors and window are already in S, so switching
+   halves keeps the whole selection — the user re-confirms rather than re-enters,
+   and the cost line on that screen tells them what the switch costs. Going Wall
+   -> Competitive Intelligence is usually free, because the Wall already bought
+   the google_search capture the board needs. */
+$("crossBtn").onclick = () => enterMode(OTHER_MODE[S.run?.mode] || "benchmark");
 
 /* ---------------- competitors ---------------- */
 function renderCompetitors() {
@@ -263,7 +296,7 @@ async function startCapture({ force = false } = {}) {
   const competitors = S.competitors.filter((c) => c.on).map((c) => ({ label: c.label || c.name, domain: c.domain }));
   const sources = S.mode === "benchmark"
     ? ["google_search"]
-    : (S.sourceChoice === "both" ? ["google_display", "meta"] : [S.sourceChoice]);
+    : sourcesForChoice(S.sourceChoice);
 
   $("captureBtn").disabled = true;
   const r = await (await fetch("/api/capture", {
@@ -512,9 +545,16 @@ const reasonText = (r) => ({
 /* ---------------- results ---------------- */
 function renderResults() {
   const r = S.run;
-  $("resEyebrow").textContent = (r.mode === "creative" ? "Creative Inspiration" : "Campaign Benchmark")
+  $("resEyebrow").textContent = (MODE_LABEL[r.mode] || r.mode)
     + (r.sourceLabel ? ` · ${r.sourceLabel}` : "");
   $("resTitle").textContent = `${r.client.label} · ${r.productLabel}`;
+
+  const cross = $("crossBtn");
+  cross.textContent = CROSS_LABEL[r.mode] || "";
+  cross.title = r.mode === "creative"
+    ? "Compare these competitors' ads against the client's — the search capture is already paid for"
+    : "See what these competitors are making, display and search";
+  cross.classList.toggle("hidden", !CROSS_LABEL[r.mode]);
 
   const s = r.sampling || {};
   $("samplingBar").className = "samplingbar" + (s.complete ? " clean" : "");
@@ -1371,7 +1411,7 @@ $("sourceSel").onchange = () => {
   S.sourceChoice = $("sourceSel").value;
   syncNationalsRow();
   const showG = S.sourceChoice !== "meta";
-  const showM = S.sourceChoice !== "google_display";
+  const showM = sourcesForChoice(S.sourceChoice).includes("meta");
   $("winGoogleWrap").classList.toggle("hidden", !showG);
   $("winMetaWrap").classList.toggle("hidden", !showM);
   refreshCost();
@@ -1389,7 +1429,7 @@ $("nationalsChk").onchange = () => { S.includeNationals = $("nationalsChk").chec
 function syncNationalsRow() {
   const applies = S.mode === "creative" && S.sourceChoice !== "meta";
   $("natRow").classList.toggle("hidden", !applies);
-  $("natWhy").textContent = S.sourceChoice === "both"
+  $("natWhy").textContent = sourcesForChoice(S.sourceChoice).includes("meta")
     ? "A fixed national ceiling added to the Google display capture only — Meta is excluded, so the Meta tab stays purely local."
     : "A fixed national ceiling added to every display capture, shown in their own section below the local results — not as local competitors.";
 }
@@ -1407,7 +1447,7 @@ async function refreshCost() {
 
     const sources = S.mode === "benchmark"
       ? ["google_search"]
-      : (S.sourceChoice === "both" ? ["google_display", "meta"] : [S.sourceChoice]);
+      : sourcesForChoice(S.sourceChoice);
     try {
       const r = await (await fetch("/api/cost", {
         method: "POST", headers: { "content-type": "application/json" },

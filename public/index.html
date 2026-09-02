@@ -58,27 +58,19 @@
     <div class="modegrid">
       <button class="modecard" data-mode="creative">
         <div class="mc-icon creative"></div>
-        <div class="mc-title">Creative Inspiration</div>
+        <div class="mc-title">The Wall of Creatives</div>
         <div class="mc-q">"What are competitors making?"</div>
-        <p>Real display creatives from competitors, grouped by idea and filtered to your product. Sorted by what is running now, with longevity shown.</p>
+        <p>Real display creatives from competitors, grouped by idea and filtered to your product. Sorted by what is running now, with longevity shown. Search ads appear on their own wall inside Competitive Intelligence, at no extra cost.</p>
         <div class="mc-tags"><span>Google display</span><span>Image creatives</span></div>
       </button>
 
       <button class="modecard" data-mode="benchmark">
         <div class="mc-icon bench"></div>
-        <div class="mc-title">Campaign Benchmark</div>
+        <div class="mc-title">Competitive Intelligence</div>
         <div class="mc-q">"How did our ads compare to theirs?"</div>
-        <p>Your ads against their ads over the same window — offers, longevity and volume side by side. Facts first; strategies only when you ask.</p>
+        <p>Your ads against their ads over the same window — offers, longevity and volume side by side, with every figure traceable to the ad that carried it.</p>
         <div class="mc-tags"><span>Google search</span><span>Ads vs ads</span></div>
       </button>
-
-      <div class="modecard disabled">
-        <div class="mc-icon proposal"></div>
-        <div class="mc-title">Proposal Evidence</div>
-        <div class="mc-q">"Which ads go in the pitch?"</div>
-        <p>Select competitor ads for a prospect and export them into the proposal deck.</p>
-        <div class="mc-tags"><span class="soon">Next build</span></div>
-      </div>
     </div>
   </section>
 
@@ -171,6 +163,12 @@
       </div>
       <div class="resright">
         <div class="resstats" id="resStats"></div>
+        <!-- The other half of the tool. One capture set, two ways of reading
+             it: the Wall is what competitors MADE, Competitive Intelligence is
+             how the client COMPARES. This lands on the confirm screen with the
+             same client and competitors already selected, so the cost line can
+             say what the switch costs before anything is spent. -->
+        <button class="btn ghost sm hidden" id="crossBtn"></button>
         <button class="btn ghost sm" id="reanalyzeBtn" title="Ignore the cache and capture again">↻ Re-analyze</button>
       </div>
     </div>

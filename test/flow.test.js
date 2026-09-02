@@ -586,6 +586,44 @@ section("regression — a run is never its own previous snapshot");
     ok(/present in both/.test(run2.board.setDrift.note), `unhelpful note: ${run2.board.setDrift.note}`));
 }
 
+// ---------------------------------------------------------------------------
+// ONE TOOL, TWO HALVES. The Wall shows what competitors MADE; Competitive
+// Intelligence shows how the client COMPARES.
+//
+// The Wall is DISPLAY ONLY, and that is a cost decision. Capturing search there
+// too would double its bill — not in listing requests (~$0.01) but in the one
+// vision call per creative that follows each one. Competitive Intelligence
+// already reads every search ad, so the search wall is a free view over that
+// run rather than a second purchase of the same data.
+// ---------------------------------------------------------------------------
+section("the Wall is display only — search is never bought twice");
+{
+  const comps = [{ label: "Campus Federal", domain: "campusfederal.org" }];
+  const { body } = await S.post("/api/capture", {
+    mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+    product: "checking", days: 30,
+    // Asking for search on the Wall must be refused, not honoured: this is the
+    // request shape a UI regression would send.
+    sources: ["google_display", "google_search"], competitors: comps,
+  });
+
+  await check("a Wall run never captures Google search", () => {
+    const sources = body.runs.map((r) => r.source);
+    ok(!sources.includes("google_search"),
+      `the Wall bought a search capture it does not need: ${sources.join(",")}`);
+  });
+
+  await check("the Wall still captures display", () => {
+    eq(body.runs.map((r) => r.source).join(","), "google_display", "sources");
+  });
+
+  const wall = await S.awaitRun(body.runs[0].runId);
+  await check("the display wall still fills", () => {
+    eq(wall.status, "done", "status");
+    ok(wall.creative?.clusters?.length > 0, "wall is empty");
+  });
+}
+
 summary();
 } finally {
   S.stop();
