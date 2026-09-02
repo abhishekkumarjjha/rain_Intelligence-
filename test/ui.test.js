@@ -81,11 +81,36 @@ async function chooseCompetitors(page, want) {
   }
 }
 
-async function toResults(page, mode, want) {
+/* The landing page has two ways in and they must both keep working. The
+   directory path is what a strategist actually uses, so it is the one the
+   walkthroughs take; the URL path gets its own checks below. */
+async function openLanding(page) {
   await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-  await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-  await page.click("#analyzeBtn");
+  // The product list arrives from /api/clients and /api/health. Selecting an
+  // option before either lands is a race, not a bug in the page.
+  await page.waitForFunction(
+    () => document.querySelectorAll("#landProductSel option").length > 1,
+    null, { timeout: 10000 });
+}
+
+async function pickClient(page, typed, product) {
+  await openLanding(page);
+  await page.fill("#clientInput", typed);
+  await page.click("#clientMenu .acitem");
+  await page.selectOption("#landProductSel", product);
+  await page.click("#goBtn");
   await page.waitForSelector("#s-mode.active", { timeout: 10000 });
+}
+
+async function pickUrl(page, url) {
+  await openLanding(page);
+  await page.click("#urlToggle");
+  await page.fill("#urlInput", url);
+  await page.click("#analyzeBtn");
+}
+
+async function toResults(page, mode, want) {
+  await pickClient(page, "capitol", "checking");
   await page.click(`.modecard[data-mode="${mode}"]`);
   await page.waitForSelector("#s-comp.active", { timeout: 10000 });
   await chooseCompetitors(page, want);
@@ -115,8 +140,36 @@ try {
       ok(/see what your competitors are doing/i.test(t), `tagline was: ${t}`);
     });
 
-    await check("the landing-page URL field is the primary action", async () => {
-      ok(await page.locator("#urlInput").isVisible(), "url input not visible");
+    await check("the client picker is the primary action, the URL is not", async () => {
+      ok(await page.locator("#clientInput").isVisible(), "client input not visible");
+      ok(await page.locator("#landProductSel").isVisible(), "product select not visible");
+      // Two fields, both required. The board is product-scoped, so Analyze must
+      // not be reachable until the product is stated.
+      eq(await page.locator("#goBtn").isDisabled(), true, "Analyze was live before either field was set");
+      eq(await page.locator("#urlInput").isVisible(), false, "the URL bar should start collapsed");
+    });
+
+    await check("typing a partial name finds the client by substring", async () => {
+      await page.fill("#clientInput", "capitol");
+      await page.waitForSelector("#clientMenu .acitem", { timeout: 4000 });
+      const first = (await page.locator("#clientMenu .acitem .acname").first().innerText()).trim();
+      eq(first, "La Capitol Federal Credit Union", `first suggestion was: ${first}`);
+      // The market is the disambiguator when two clients share a word.
+      ok((await page.locator("#clientMenu .acitem .acmeta").first().innerText()).includes("lacapfcu.org"),
+        "suggestion should show the domain");
+    });
+
+    await check("a name that matches nothing points at the URL path", async () => {
+      await page.fill("#clientInput", "zzzznotaclient");
+      await page.waitForSelector("#clientMenu .acnone", { timeout: 4000 });
+      ok(/landing page URL/i.test(await page.locator("#clientMenu .acnone").innerText()),
+        "no-match state should name the other way in");
+      await page.fill("#clientInput", "");
+    });
+
+    await check("the URL path is one click away for anyone not in the directory", async () => {
+      await page.click("#urlToggle");
+      ok(await page.locator("#urlInput").isVisible(), "url input did not open");
       const ph = await page.locator("#urlInput").getAttribute("placeholder");
       ok(ph.includes("/"), `placeholder should show a product path, got ${ph}`);
       ok(/landing page|product page/i.test(await page.locator("#urlHint").innerText()), "no landing-page guidance");
@@ -166,10 +219,7 @@ try {
   let wallCount = 0;
   {
     const page = await newPage();
-    await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-    await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-    await page.click("#analyzeBtn");
-    await page.waitForSelector("#s-mode.active", { timeout: 10000 });
+    await pickClient(page, "capitol", "checking");
 
     await check("the mode screen names the resolved client", async () =>
       // .eyebrow is uppercased in CSS, so compare the text not its casing.
@@ -387,10 +437,7 @@ try {
   section("benchmark flow — table, gate, strategies");
   {
     const page = await newPage();
-    await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-    await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-    await page.click("#analyzeBtn");
-    await page.waitForSelector("#s-mode.active", { timeout: 10000 });
+    await pickClient(page, "capitol", "checking");
     await page.click('.modecard[data-mode="benchmark"]');
     await page.waitForSelector("#s-comp.active", { timeout: 10000 });
 
@@ -461,10 +508,7 @@ try {
   section("a capture that finds nothing still renders a result");
   {
     const page = await newPage();
-    await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-    await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-    await page.click("#analyzeBtn");
-    await page.waitForSelector("#s-mode.active", { timeout: 10000 });
+    await pickClient(page, "capitol", "checking");
     await page.click('.modecard[data-mode="creative"]');
     await page.waitForSelector("#s-comp.active", { timeout: 10000 });
 
@@ -505,9 +549,7 @@ try {
     let alerted = false;
     page.on("dialog", async (d) => { alerted = true; await d.dismiss(); });
 
-    await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-    await page.fill("#urlInput", "definitely not a url");
-    await page.click("#analyzeBtn");
+    await pickUrl(page, "definitely not a url");
     await page.waitForTimeout(600);
 
     await check("a bad URL is explained inline, not in a blocking dialog", async () => {

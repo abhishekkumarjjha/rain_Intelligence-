@@ -35,8 +35,11 @@ async function pick(want) {
 await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
 await shot("1-landing");
 
-await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-await page.click("#analyzeBtn");
+await page.waitForFunction(() => document.querySelectorAll("#landProductSel option").length > 1);
+await page.fill("#clientInput", "capitol");
+await page.click("#clientMenu .acitem");
+await page.selectOption("#landProductSel", "checking");
+await page.click("#goBtn");
 await page.waitForSelector("#s-mode.active");
 await shot("2-mode");
 
@@ -57,8 +60,11 @@ await shot("5-evidence-drawer");
 await page.keyboard.press("Escape");
 
 await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-await page.click("#analyzeBtn");
+await page.waitForFunction(() => document.querySelectorAll("#landProductSel option").length > 1);
+await page.fill("#clientInput", "capitol");
+await page.click("#clientMenu .acitem");
+await page.selectOption("#landProductSel", "checking");
+await page.click("#goBtn");
 await page.waitForSelector("#s-mode.active");
 await page.click('.modecard[data-mode="benchmark"]');
 await page.waitForSelector("#s-comp.active");

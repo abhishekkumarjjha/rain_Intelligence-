@@ -89,13 +89,169 @@ function crumbs(id) {
       ? `<span class="bad">Not configured: ${missing.join(", ")}</span> · ${h.directorySize} clients in directory`
       : `${h.directorySize} clients in directory · reads up to ${h.maxReadPerAdvertiser} creatives per advertiser`;
 
+    fillLandingProducts();
   } catch { /* health is informational only */ }
 })();
+
+/* ---------------- landing: who and what ----------------
+   Two ways in, converging on one payload. The directory path is the common
+   one: 40 known clients, and the product stated rather than inferred from a
+   path. The URL path stays for anyone not in the directory, which is the only
+   case it was ever really needed for. */
+let CLIENTS = [];
+let picked = null;      // the directory row the user chose, or null
+let acIdx = -1;         // highlighted suggestion, -1 = none
+
+(async () => {
+  try {
+    const r = await (await fetch("/api/clients")).json();
+    CLIENTS = (r.clients || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  } catch { /* the URL path still works without the directory */ }
+  fillLandingProducts();
+  if (!CLIENTS.length) {
+    $("pickHint").innerHTML = `<span class="warn">Could not load the client directory.</span> Use a landing page URL below.`;
+    openUrlPath();
+  }
+})();
+
+/* Called from both async loaders, whichever wins. The taxonomy comes from
+   /api/health but the fallback list is complete, so a slow health request
+   costs nothing here — the second call just rebuilds with the real labels and
+   keeps whatever the user had already chosen. */
+function fillLandingProducts() {
+  const sel = $("landProductSel");
+  const keep = sel.value;
+  sel.innerHTML = `<option value="">Product</option>` +
+    productList().filter((p) => p.code !== "other")
+      .map((p) => `<option value="${p.code}">${esc(p.label)}</option>`).join("");
+  if (keep) sel.value = keep;
+  sel.required = true;                        // drives :invalid, which greys the placeholder
+}
+
+/* Substring, not prefix. "capitol" has to find La Capitol Federal Credit Union,
+   because nobody types the article. Domains match too — several of these are
+   known internally by their URL. */
+function matchClients(q) {
+  const t = q.trim().toLowerCase();
+  if (!t) return CLIENTS.slice(0, 8);
+  const hit = CLIENTS.filter((c) =>
+    c.name.toLowerCase().includes(t) || (c.domain || "").toLowerCase().includes(t));
+  // Name-start matches first: typing "hor" should put Horicon on top even
+  // though other rows contain those letters further in.
+  hit.sort((a, b) => {
+    const s = (c) => (c.name.toLowerCase().startsWith(t) ? 0 : 1);
+    return s(a) - s(b) || a.name.localeCompare(b.name);
+  });
+  return hit.slice(0, 8);
+}
+
+function renderMenu(list) {
+  const m = $("clientMenu");
+  m.innerHTML = list.length
+    ? list.map((c, i) => `<div class="acitem${i === acIdx ? " on" : ""}" role="option" data-i="${i}">
+         <div class="acname">${esc(c.name)}</div>
+         <div class="acmeta">${esc(c.domain || "")}${c.market ? " · " + esc(c.market) : ""}</div>
+       </div>`).join("")
+    : `<div class="acnone">No client by that name. Use a landing page URL below.</div>`;
+  m.hidden = false;
+  $("clientInput").setAttribute("aria-expanded", "true");
+  m.querySelectorAll(".acitem").forEach((el) => {
+    // mousedown, not click: blur fires first and would close the menu out from
+    // under the pointer.
+    el.onmousedown = (e) => { e.preventDefault(); choose(list[Number(el.dataset.i)]); };
+  });
+}
+
+function closeMenu() {
+  $("clientMenu").hidden = true; acIdx = -1;
+  $("clientInput").setAttribute("aria-expanded", "false");
+}
+
+function choose(c) {
+  if (!c) return;
+  picked = c;
+  $("clientInput").value = c.name;
+  closeMenu();
+  $("pickHint").innerHTML = c.market
+    ? `${esc(c.name)} — ${esc(c.market)}`
+    : `${esc(c.name)} — ${esc(c.domain || "")}`;
+  const sel = $("landProductSel");
+  if (!sel.value) sel.focus(); else $("goBtn").focus();
+  updateGo();
+}
+
+function updateGo() {
+  $("goBtn").disabled = !(picked && $("landProductSel").value);
+}
+
+$("clientInput").oninput = () => {
+  // Editing the text abandons the pick, otherwise a stale selection could be
+  // analysed under a name no longer on screen.
+  picked = null; updateGo();
+  acIdx = -1;
+  renderMenu(matchClients($("clientInput").value));
+};
+$("clientInput").onfocus = () => { if (!picked) renderMenu(matchClients($("clientInput").value)); };
+$("clientInput").onblur = () => setTimeout(closeMenu, 120);
+$("clientInput").onkeydown = (e) => {
+  const list = matchClients($("clientInput").value);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if ($("clientMenu").hidden) { renderMenu(list); return; }
+    if (!list.length) return;
+    acIdx = (acIdx + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length;
+    renderMenu(list);
+    $("clientMenu").querySelector(".acitem.on")?.scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (picked) {
+      if ($("landProductSel").value) goClient(); else $("landProductSel").focus();
+      return;
+    }
+    // One unambiguous match means Enter should take it. The strategist typed
+    // enough to name a client; making them arrow down to confirm what they
+    // already said is friction with no information in it.
+    choose(list[acIdx >= 0 ? acIdx : 0]);
+  } else if (e.key === "Escape") closeMenu();
+};
+$("landProductSel").onchange = updateGo;
+// Choosing the client moves focus here, so Enter has to finish the job or the
+// keyboard path dead-ends one tab short of Analyze.
+$("landProductSel").onkeydown = (e) => {
+  if (e.key === "Enter" && !$("goBtn").disabled) { e.preventDefault(); goClient(); }
+};
+$("goBtn").onclick = goClient;
+
+function openUrlPath() {
+  $("urlBlock").hidden = false; $("urlHint").hidden = false;
+  $("urlToggle").hidden = true;
+  $("urlInput").focus();
+}
+$("urlToggle").onclick = openUrlPath;
 
 /* ---------------- resolve ---------------- */
 $("analyzeBtn").onclick = resolve;
 $("urlInput").onkeydown = (e) => { if (e.key === "Enter") resolve(); };
 $("restartBtn").onclick = () => location.reload();
+
+/* The directory path already knows both answers, so it sends the product as an
+   explicit override — the same field the product selector uses later. That
+   skips the URL guess and the model read entirely, which is why this returns
+   instantly and can never land on the "no product detected" warning. */
+async function goClient() {
+  if (!picked || !$("landProductSel").value) return;
+  $("goBtn").disabled = true;
+  try {
+    const r = await (await fetch("/api/resolve", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: picked.domain, product: $("landProductSel").value }),
+    })).json();
+    if (!r.ok) { $("pickHint").innerHTML = `<span class="warn">Could not resolve ${esc(picked.name)}.</span>`; return; }
+    applyResolve(r, picked.domain);
+  } catch {
+    showError("Could not reach the server. Is it still running on this port?");
+  } finally { updateGo(); }
+}
 
 async function resolve() {
   const url = $("urlInput").value.trim();
@@ -108,32 +264,38 @@ async function resolve() {
     })).json();
 
     if (!r.ok) { $("urlHint").innerHTML = `<span class="warn">That does not look like a URL. Try <b>yourbank.com/checking</b>.</span>`; return; }
-    clearError();
-
-    S.url = url; S.domain = r.domain; S.product = r.product;
-    S.productLabel = r.productLabel;
-    S.clientLabel = r.client?.name || r.domain;
-    S.competitors = (r.competitors || []).map((c, i) => ({ ...c, on: i < 3 }));
-
-    $("modeInst").textContent = S.clientLabel;
-    $("compInst").textContent = S.clientLabel;
-    $("compSub").innerHTML = r.directoryMiss
-      ? `Not in the curated directory — add competitors manually below.`
-      : `${esc(r.client.market || "")}${r.client.market ? " · " : ""}${esc(r.client.institutionType || "")}`;
-
-    // A homepage names the institution but not the product, and every count in
-    // this tool is product-scoped. Say so instead of quietly analysing "other".
-    // Detected or not. Until the user settles it, the capture stays blocked.
-    S.productConfirmed = !r.looksLikeHomepage;
-    if (r.looksLikeHomepage) {
-      $("compSub").innerHTML += `<br><span style="color:var(--amber)">No product detected in that URL — choose a product scope on the right, or re-enter using the product page.</span>`;
-    }
-
-    buildProductSelect();
-    show("s-mode");
+    applyResolve(r, url);
   } catch {
     showError("Could not reach the server. Is it still running on this port?");
   } finally { $("analyzeBtn").disabled = false; }
+}
+
+/* Both entry paths land here, so the screen after the landing page cannot
+   diverge depending on how the user got to it. */
+function applyResolve(r, url) {
+  clearError();
+
+  S.url = url; S.domain = r.domain; S.product = r.product;
+  S.productLabel = r.productLabel;
+  S.clientLabel = r.client?.name || r.domain;
+  S.competitors = (r.competitors || []).map((c, i) => ({ ...c, on: i < 3 }));
+
+  $("modeInst").textContent = S.clientLabel;
+  $("compInst").textContent = S.clientLabel;
+  $("compSub").innerHTML = r.directoryMiss
+    ? `Not in the curated directory — add competitors manually below.`
+    : `${esc(r.client.market || "")}${r.client.market ? " · " : ""}${esc(r.client.institutionType || "")}`;
+
+  // A homepage names the institution but not the product, and every count in
+  // this tool is product-scoped. Say so instead of quietly analysing "other".
+  // Detected or not. Until the user settles it, the capture stays blocked.
+  S.productConfirmed = !r.looksLikeHomepage;
+  if (r.looksLikeHomepage) {
+    $("compSub").innerHTML += `<br><span style="color:var(--amber)">No product detected in that URL — choose a product scope on the right, or re-enter using the product page.</span>`;
+  }
+
+  buildProductSelect();
+  show("s-mode");
 }
 
 /* The taxonomy comes from /api/health. If that request failed the selector must
