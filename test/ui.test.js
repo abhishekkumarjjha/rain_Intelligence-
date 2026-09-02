@@ -175,10 +175,23 @@ try {
       ok(/landing page|product page/i.test(await page.locator("#urlHint").innerText()), "no landing-page guidance");
     });
 
-    await check("the landing screen is the field and nothing else", async () => {
+    await check("the landing screen carries nothing it was not asked", async () => {
       eq(await page.locator("#quickClients").count(), 0, "client shortcut chips still present");
-      ok(/\d+ clients in directory/.test(await page.locator("#healthLine").innerText()),
-        "directory size should still be stated");
+      // The directory size and the read cap were facts about the tool, not
+      // answers to anything asked on this screen. Silence is correct here;
+      // this line speaks only when a key is missing.
+      eq((await page.locator("#healthLine").innerText()).trim(), "",
+        "the status line should be silent when everything is configured");
+    });
+
+    await check("a missing key is stated on the landing page, not after Analyze", async () => {
+      const shown = await page.evaluate(() => {
+        const el = document.getElementById("healthLine");
+        el.innerHTML = `<span class="bad">Not configured: SERPAPI_KEY</span> — captures will fail until this is set.`;
+        return { text: el.innerText, visible: el.offsetParent !== null };
+      });
+      ok(shown.visible, "the status line must be able to appear");
+      ok(/Not configured/.test(shown.text), "the warning has to survive the quiet default");
     });
 
     await check("the palette uses blue, orange and green — not blue alone", async () => {

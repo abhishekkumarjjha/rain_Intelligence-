@@ -85,9 +85,15 @@ function crumbs(id) {
     const missing = [];
     if (!h.serpapi) missing.push("SERPAPI_API_KEY");
     if (!h.anthropic) missing.push("ANTHROPIC_API_KEY");
+    // Silent when everything is configured. The directory size and the read
+    // cap were facts about the tool, not answers to anything the user was
+    // asking on this screen, and a landing page that states its own internals
+    // reads as unfinished. A MISSING key is different: it is the difference
+    // between this working and not, and finding that out after clicking
+    // Analyze is finding out too late.
     $("healthLine").innerHTML = missing.length
-      ? `<span class="bad">Not configured: ${missing.join(", ")}</span> · ${h.directorySize} clients in directory`
-      : `${h.directorySize} clients in directory · reads up to ${h.maxReadPerAdvertiser} creatives per advertiser`;
+      ? `<span class="bad">Not configured: ${missing.join(", ")}</span> — captures will fail until this is set.`
+      : "";
 
     fillLandingProducts();
   } catch { /* health is informational only */ }
