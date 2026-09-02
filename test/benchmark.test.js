@@ -927,8 +927,11 @@ test("a discount off a rate is never read as the rate", () => {
   const c = board.brands.find((b) => b.isClient);
   assert.equal(c.positions.apr.raw, "4.59% APR*",
     `a discount became the advertised rate: ${c.positions.apr.raw}`);
-  assert.doesNotMatch(JSON.stringify(board.findings), /0\.65% off/,
-    "a discount reached a finding as if it were a rate");
+  // RETYPED, not dropped. The ad really does offer 0.65% off — it is simply a
+  // different mechanic, and a separate metric id makes ranking it against a
+  // rate impossible by construction rather than by a filter someone can remove.
+  assert.equal(c.positions.rate_discount?.raw, "0.65% off", "the discount was lost entirely");
+  assert.equal(c.positions.rate_discount.retypedFrom, "apr", "the reclassification is not recorded");
 });
 
 test("a product page URL is detected, plural or singular", () => {
@@ -979,12 +982,31 @@ test("an amount you can borrow is never a cash bonus", () => {
   const ad = normalizeObservation({ product: "personal-loan", rawClaims: [],
     allText: "Apply For A Personal Loan - Borrow Funds Up To $30,000*",
     rawEconomicFacts: [{ metric: "cash_bonus", raw: "$30,000*", qualifiers: {} }] });
-  assert.ok(ad.facts.every((f) => f.isLoanAmount), "a loan size was left countable as a bonus");
+  assert.deepEqual(ad.facts.map((f) => f.metric), ["loan_amount"],
+    "a loan size was left countable as a bonus");
+  assert.equal(ad.facts[0].retypedFrom, "cash_bonus", "the reclassification is not recorded");
   // A genuine bonus on the same product is untouched.
   const bonus = normalizeObservation({ product: "personal-loan", rawClaims: [],
     allText: "Earn a $300 bonus when you open a personal loan",
     rawEconomicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {} }] });
-  assert.ok(bonus.facts.every((f) => !f.isLoanAmount), "a real bonus was refused");
+  assert.deepEqual(bonus.facts.map((f) => f.metric), ["cash_bonus"], "a real bonus was refused");
+});
+
+test("financing availability is its own mechanic, not a down payment", () => {
+  // "Up to 100% Financing" is how a lender competes when it is not competing on
+  // rate. Read as a down payment it says the opposite of what the ad says.
+  const ad = normalizeObservation({ product: "auto-loan", rawClaims: [],
+    allText: "Great Rates with Extended Loan Terms and Up to 100% Financing",
+    rawEconomicFacts: [{ metric: "down_payment", raw: "Up to 100% Financing", qualifiers: {} }] });
+  assert.deepEqual(ad.facts.map((f) => f.metric), ["financing_percent"]);
+});
+
+test("no two offer mechanics are ever ranked against each other", () => {
+  // The structural guarantee: different metric ids cannot meet in a comparison,
+  // whatever a later stage decides to do. A rate, a discount off that rate and
+  // a financing percentage are three promises, not three values of one.
+  const ids = ["apr", "rate_discount", "financing_percent", "loan_amount", "cash_bonus"];
+  assert.equal(new Set(ids).size, ids.length, "mechanics must not share an id");
 });
 
 test("participation is stated before any ratio is read", () => {

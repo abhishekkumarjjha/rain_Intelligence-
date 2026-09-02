@@ -39,6 +39,7 @@ import { SOURCES, SOURCE_LABELS, resolveSources, googleFormatFor, WINDOW_OPTIONS
 import { withNationals, isNational, captureOptionsFor, NATIONAL_BENCHMARKS, NATIONAL_TTL_DAYS, NATIONAL_READ_CAP } from "./lib/national-tier.js";
 import { suggestCompetitors, findClient, listClients, DIRECTORY_SIZE } from "./lib/directory.js";
 import { productFromUrl, normalizeProduct, PRODUCT_LABELS, PRODUCT_CODES } from "./lib/products.js";
+import { readProductFromUrl, CONFIDENT } from "./lib/product-reader.js";
 import { generateStrategies } from "./lib/strategies.js";
 import { hasAnthropicKey } from "./lib/claude.js";
 import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, findPreviousRun, diffRuns } from "./lib/store.js";
@@ -129,7 +130,7 @@ app.get("/api/clients", (_req, res) => res.json({ clients: listClients() }));
 // user's finger is still on the mouse. Everything expensive waits for an
 // explicit Analyze.
 // ---------------------------------------------------------------------------
-app.post("/api/resolve", (req, res) => {
+app.post("/api/resolve", async (req, res) => {
   const url = String(req.body?.url || "").trim();
   const domain = normDomain(url);
   if (!domain) return res.status(400).json({ ok: false, reason: "bad_url" });
@@ -140,8 +141,21 @@ app.post("/api/resolve", (req, res) => {
   // market-wide one the moment checking is what we are looking at.
   const guessed = productFromUrl(url);
   const override = String(req.body?.product || "").trim();
-  const product = override ? normalizeProduct(override) : guessed.product;
-  const from = override ? "explicit" : guessed.from;
+
+  // THE MODEL ONLY RUNS WHEN THE PATTERN FOUND NOTHING.
+  //
+  // The regex handles /checking-accounts and /credit-cards for free. It cannot
+  // handle /choice-checking or /platinum-card, because banks brand everything
+  // and there is no finite list of the names they invent. One cheap call reads
+  // the words; anything short of confident still goes to the user, because a
+  // product this tool cannot infer is one the strategist has to supply.
+  let read = null;
+  if (!override && guessed.from === "none") {
+    try { read = await readProductFromUrl(url); } catch { read = null; }
+  }
+  const inferred = CONFIDENT(read) ? read.product : guessed.product;
+  const product = override ? normalizeProduct(override) : inferred;
+  const from = override ? "explicit" : (CONFIDENT(read) ? "model" : guessed.from);
 
   const dir = suggestCompetitors({ domain, product, limit: 8 });
   const row = findClient(domain);
@@ -149,7 +163,9 @@ app.post("/api/resolve", (req, res) => {
   // A homepage tells us the institution but not the product. Say so rather than
   // silently analysing "other" — the whole benchmark is scoped by product, so a
   // wrong guess here quietly wrecks every count downstream.
-  const looksLikeHomepage = guessed.from === "none" && !override;
+  // Blocks the capture until the user settles it. True whenever neither the
+  // path nor the model produced a product we are willing to act on.
+  const looksLikeHomepage = !override && guessed.from === "none" && !CONFIDENT(read);
 
   res.json({
     ok: true,

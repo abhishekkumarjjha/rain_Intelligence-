@@ -56,6 +56,23 @@ try {
     });
   }
   {
+    // Banks brand every product, and there is no finite list of the names they
+    // invent. The regex cannot read "platinum-card"; a model can.
+    const { body } = await S.post("/api/resolve", { url: "https://lacapfcu.org/platinum-card" });
+    await check("a branded product name is read when the pattern cannot", () => {
+      eq(body.product, "credit-card", "product");
+      eq(body.productFrom, "model", "productFrom");
+      eq(body.looksLikeHomepage, false, "a confident read must not block the capture");
+    });
+  }
+  {
+    const { body } = await S.post("/api/resolve", { url: "https://lacapfcu.org/about-us" });
+    await check("a page that names no product still goes to the user", () => {
+      eq(body.product, "other", "product");
+      eq(body.looksLikeHomepage, true, "the user must be asked rather than guessed at");
+    });
+  }
+  {
     const { status, body } = await S.post("/api/resolve", { url: "not a url at all" });
     await check("garbage input is rejected with a reason", () => {
       eq(status, 400, "status");

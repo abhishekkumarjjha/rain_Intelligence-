@@ -99,6 +99,18 @@ const anthropic = http.createServer((req, res) => {
           text = "{}";
         }
       }
+    } else if (String(body.system || "").includes("You identify which retail banking product")) {
+      // THE PRODUCT READER. Answers from the path it was handed, so the test
+      // exercises the accept/ask threshold rather than a canned reply: a
+      // branded product name comes back confident, a non-product page comes
+      // back "other" and must send the user to the dropdown.
+      const path = String(body.messages?.[0]?.content || "").toLowerCase();
+      const pick =
+        /card|visa|mastercard/.test(path) ? ["credit-card", 0.95]
+        : /powersports|motorcycle|vehicle|auto/.test(path) ? ["auto-loan", 0.88]
+        : /checking/.test(path) ? ["checking", 0.9]
+        : ["other", 0.96];
+      text = JSON.stringify({ product: pick[0], confidence: pick[1], why: "test fixture" });
     } else if (String(body.system || "").includes("You are a DESCRIBER")) {
       // THE THEMES PASS, answered like a real model that does not fully obey.
       //
