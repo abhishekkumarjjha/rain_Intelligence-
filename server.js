@@ -240,7 +240,17 @@ app.post("/api/capture", (req, res) => {
   // capture with nothing selected proceed on Chase and Capital One alone — a
   // wall of two national brands and no local evidence, which answers a question
   // nobody asked.
-  if (!chosen.length) return res.status(400).json({ ok: false, reason: "no_competitors" });
+  //
+  // A SEED is the one legitimate exception, and it is a different intent
+  // rather than a loophole. Nationals are captured once per quarter and shared
+  // by every client, so somebody has to fill that cache before any wall can
+  // read from it — and doing it by attaching a local competitor nobody asked
+  // about would distort a real analysis to get a side effect. `seed: true`
+  // says plainly what it is: warm the shared national cache, produce no
+  // client-facing wall. The guard still stands for every ordinary capture.
+  const seed = body.seed === true;
+  if (!chosen.length && !seed) return res.status(400).json({ ok: false, reason: "no_competitors" });
+  if (seed && chosen.length) return res.status(400).json({ ok: false, reason: "seed_takes_no_competitors" });
   if (!hasAnthropicKey()) return res.status(400).json({ ok: false, reason: "anthropic_not_configured" });
 
   // ---- FAIL CLOSED ON AN UNKNOWN PRODUCT ----------------------------------
