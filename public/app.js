@@ -456,7 +456,27 @@ function maybeShowResults() {
   }
   renderSourceTabs();
   const active = S.bySource[S.activeSource];
-  if (active?.run) { S.run = active.run; renderResults(); }
+  if (!active?.run) return;
+  S.run = active.run;
+
+  // A RENDER THAT THROWS MUST NOT LOOK LIKE A CAPTURE THAT HUNG.
+  //
+  // renderResults() ends by switching to the results screen. When it threw
+  // partway — a stale variable left behind by an edit, in the case that
+  // prompted this — the switch never happened, and the user sat watching a
+  // finished capture with every advertiser marked done and no way to know the
+  // run had actually completed twenty seconds earlier.
+  //
+  // The failure is now visible and the run is still reachable: it is on disk,
+  // it is in the run list, and reloading opens it.
+  try {
+    renderResults();
+  } catch (e) {
+    console.error("renderResults failed:", e);
+    showError(`The capture finished, but this page could not draw the results (${e.message}). `
+      + `The run is saved — reload and open it from the run list.`);
+    $("runNote").innerHTML = `<span class="bad">Capture complete. Rendering failed — see the message above.</span>`;
+  }
 }
 
 /* The tabs. Switching one swaps the ENTIRE rendered dataset — a different run,
@@ -900,7 +920,6 @@ function renderBenchmark(r) {
     ${boardHtml(r.board)}
     <details class="auditwrap">
       <summary>Full benchmark table and capture detail</summary>
-      ${findings ? `<div class="findings">${findings}</div>` : ""}
       <div class="bwrap"><table class="bench"><thead>${head}</thead><tbody>${body}</tbody></table></div>
     </details>`;
 
