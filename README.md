@@ -310,3 +310,34 @@ npm i -D playwright && npx playwright install chromium
 npm run test:ui
 npm run shots ./shots     # screenshots of every screen
 ```
+
+## Moving the cache between environments
+
+`RI_DATA_DIR` is portable by construction. Nothing under it stores an absolute
+path, a hostname or a port, and no key encodes the machine that wrote it — so
+the directory can be copied from a laptop to a Render disk to an S3-backed
+volume and every entry is a hit. **No SerpApi request and no vision call is
+repeated at any hop.** Roughly 18 MB after a few runs, most of it the evidence
+archive.
+
+```bash
+# localhost -> a Render disk
+scp -r runs/* srv-xxxx@ssh.oregon.render.com:/var/data/
+
+# a Render disk -> S3
+aws s3 sync /var/data s3://rain-intelligence-cache/
+```
+
+What each layer costs to lose:
+
+| | rebuildable? |
+|---|---|
+| `_captures` | yes, at SerpApi's price |
+| `_extractions` | yes, at Anthropic's price |
+| `_snapshots`, `_evidence`, `run_*.json` | **no** — a new capture returns today's ads |
+
+`manifest.json` records the schema the directory was written under. A cache from
+an older build is not dangerous: extractions carry their reader VERSION in the
+filename (`CR123.search-v2.json`), so entries written by a different prompt miss
+rather than mislead, and the first run re-reads them. The startup line says which
+schema it found.

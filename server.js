@@ -25,7 +25,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { capture, hasKey, normDomain, buildDomainLink, MAX_READ_PER_ADVERTISER, DEFAULT_LOOKBACK_DAYS } from "./lib/atc-provider.js";
-import { extractByFormat, readerFor } from "./lib/extract.js";
+import { extractByFormat, readerFor, readerKey } from "./lib/extract.js";
 import { buildBoard } from "./lib/benchmark.js";
 import { readThemes } from "./lib/themes.js";
 import { readRatePages } from "./lib/rate-page.js";
@@ -42,7 +42,7 @@ import { productFromUrl, normalizeProduct, PRODUCT_LABELS, PRODUCT_CODES } from 
 import { readProductFromUrl, CONFIDENT } from "./lib/product-reader.js";
 import { generateStrategies } from "./lib/strategies.js";
 import { hasAnthropicKey } from "./lib/claude.js";
-import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, findPreviousRun, diffRuns } from "./lib/store.js";
+import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, findPreviousRun, diffRuns, writeManifest, readManifest, CACHE_SCHEMA } from "./lib/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -406,7 +406,8 @@ async function executeRun(run) {
       // within the reader that produced it. A banner record has no description
       // and no sitelinks, so serving one to a benchmark run would drop the
       // fields the board counts without any of them registering as a miss.
-      const reader = readerFor({ format: run.format }, cap.images);
+      // Versioned, so a prompt change retires old readings on its own.
+      const reader = readerKey(readerFor({ format: run.format }, cap.images));
       const cachedExtractions = [], fresh = [];
       for (const img of cap.images) {
         const hit = getCachedExtraction(img.creativeId, reader);
@@ -898,6 +899,19 @@ app.post("/api/run/:id/strategies", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`RAIN Intelligence on :${PORT}`);
+
+  // Say what cache this process is sitting on. When a directory has been copied
+  // between environments — which is the supported way to move it — this is the
+  // line that tells you whether it came from this build or an older one.
+  const man = readManifest();
+  if (man && man.schema !== CACHE_SCHEMA) {
+    console.log(`  Cache: schema ${man.schema}, this build expects ${CACHE_SCHEMA}`);
+    console.log("         Entries written by the older build are keyed differently and will");
+    console.log("         simply miss. Nothing is served stale; the first run re-reads them.");
+  } else if (man) {
+    console.log(`  Cache: schema ${man.schema}, first written ${String(man.createdAt).slice(0, 10)}`);
+  }
+  writeManifest({ lastBuild: CACHE_SCHEMA });
   console.log(`  SerpApi: ${hasKey() ? "configured" : "NOT CONFIGURED"}`);
   console.log(`  Anthropic: ${hasAnthropicKey() ? "configured" : "NOT CONFIGURED"}`);
   console.log(`  Directory: ${DIRECTORY_SIZE} clients`);
