@@ -352,7 +352,24 @@ async function executeRun(run) {
       const opts = captureOptionsFor(target.domain, {});
       const ck = { source: run.source, domain: target.domain, days: run.days };
       const cached = captureCache.get({ ...ck, force: run.force, ttlDays: opts.ttlDays });
-      if (cached) {
+
+      // A CACHE ENTRY STORES THE ADS IT READ, NOT THE LISTING IT READ THEM FROM.
+      //
+      // So a raised read cap is invisible to it. Chase's entry held the 30 its
+      // capture was capped at, and every later run replayed those 30 out of 92
+      // renderable — the new ceiling silently did nothing, and the board went
+      // on saying "30 of about 4,000 listed ads were sampled" as though that
+      // were a fact about Chase rather than about our own cap.
+      //
+      // An entry is short when the provider had more renderable creatives than
+      // the entry actually read AND the current cap has room for them. Only
+      // then is it worth paying for the listing again; an entry that already
+      // read everything available stays a hit however high the cap goes.
+      const capNow = opts.max || MAX_READ_PER_ADVERTISER;
+      const held = (cached?.ads || []).length;
+      const shortRead = !!cached && held < Math.min(capNow, cached.run?.renderable ?? 0);
+
+      if (cached && !shortRead) {
         p.status = "done";
         p.fromCaptureCache = true;
         p.captureAgeDays = cached._cache.ageDays;
@@ -371,6 +388,7 @@ async function executeRun(run) {
       }
 
       p.status = "fetching";
+      if (shortRead) p.reReadReason = `cap raised to ${capNow}; cached entry held ${held} of ${cached.run?.renderable} renderable`;
       const cap = await capture(target.domain, { format: run.format, days: run.days, max: opts.max });
       run.requests += 1;
 
