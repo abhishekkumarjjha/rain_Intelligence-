@@ -549,8 +549,9 @@ async function executeRun(run) {
  * strategy generated from a differently-assembled benchmark is a strategy about
  * numbers the client never saw.
  */
-function benchmarkFor(run) {
+function benchmarkFor(run, brands = null) {
   return buildBenchmark({
+    brands,
     client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },
     competitors: run.competitors.map((c) => ({
       ...c, ads: run.ads.filter((a) => !a.isClient && a.institution === c.domain),
@@ -672,9 +673,10 @@ app.get("/api/run/:id", (req, res) => {
   } else {
     // THE BOARD IS THE ANSWER. The table is the audit trail.
     payload.board = boardFor(run);
-    // Generated once per run and cached on it: the observations are about the
-    // shape of the findings, and the findings do not change between polls.
-    payload.benchmark = benchmarkFor(run);
+    // The table AUDITS the board, so it is handed the board's own rollup. Two
+    // aggregations over the same ads is how one screen showed 4.84% APR in a
+    // finding and 6.74% in the table below it.
+    payload.benchmark = benchmarkFor(run, payload.board.brands);
     payload.funnel = captureFunnel(run.runs, run.ads,
       payload.benchmark.columns.reduce((n, c) => n + c.adCount, 0));
     // Recommended strategies are a Creative/Sales deliverable. Han asked
@@ -859,7 +861,7 @@ app.post("/api/run/:id/strategies", async (req, res) => {
     // Built from the same function that produced the table the user is looking
     // at. Two call sites that assemble the benchmark separately is how the
     // strategy pass ends up reasoning over numbers nobody was shown.
-    const benchmark = benchmarkFor(run);
+    const benchmark = benchmarkFor(run, boardFor(run).brands);
 
     const strategies = await generateStrategies({
       benchmark,

@@ -867,12 +867,6 @@ function renderBenchmark(r) {
     scope.classList.add("hidden");
   }
 
-  const findings = (b.findings || []).map((f) => `
-    <div class="finding ${esc(f.kind)}">
-      <div>${esc(f.text)}</div>
-      ${f.evidence?.length ? `<span class="ev" data-ev="${esc(f.evidence.join(","))}">${f.evidence.length} ads</span>` : ""}
-    </div>`).join("");
-
   const head = `<tr><th></th>${b.columns.map((c) =>
     `<th class="${c.isClient ? "cl" : ""}">${esc(c.label)}<span class="sm">${esc(c.domain)}</span></th>`).join("")}</tr>`;
 

@@ -1,8 +1,9 @@
 // Pure-logic smoke test. No key, no network.
 import assert from "node:assert";
 import { buildListingParams, selectForReading, epochToDate } from "../lib/atc-provider.js";
-import { clusterAds, buildBenchmark, samplingNote, countedFindings } from "../lib/analyze.js";
+import { clusterAds, buildBenchmark, samplingNote } from "../lib/analyze.js";
 import { productFromUrl, normalizeProduct } from "../lib/products.js";
+import { buildBoard } from "../lib/benchmark.js";
 
 let n = 0; const t = (name, fn) => { fn(); n++; console.log("  ok  " + name); };
 
@@ -42,21 +43,32 @@ t("same headline+offer collapses into one idea", () => {
 });
 
 // --- benchmark -------------------------------------------------------------
+//
+// The table is now a VIEW over the board's rollup rather than a second
+// aggregation of its own, so these fixtures carry rawEconomicFacts and the
+// board is built first. That is the point of the change: one canonical number,
+// and no way to construct a table that disagrees with the findings above it.
 const ad = (inst, over, days=100) => ({
   creativeId: inst + (over?.value || "n") + days, institution: inst, product: "checking",
-  headline: "h", offer: over ? { type: over.type, value: over.value, term: over.term || "",
-    minimum: over.minimum || "", qualifier: "", numeric: { n: parseFloat(over.value.replace(/[^0-9.]/g,"")), kind: "usd" } } : null,
+  headline: "h",
+  rawEconomicFacts: over ? [{ metric: "cash_bonus", raw: over.value, qualifiers: {}, sourceField: "headline" }] : [],
+  rawClaims: [], allText: over ? `Earn a ${over.value} bonus` : "h",
   totalDaysShown: days, firstShown: "2025-01-01", lastShown: "2026-08-10",
 });
 
-const bench = buildBenchmark({
+const benchArgs = {
   client: { label: "Lookout", domain: "lookout.com", ads: [ad("lookout.com", null)] },
   competitors: [
     { label: "Comp A", domain: "a.com", ads: [ad("a.com", { type: "bonus", value: "$400" })] },
     { label: "Comp B", domain: "b.com", ads: [ad("b.com", { type: "bonus", value: "$300" }, 900)] },
   ],
   product: "checking",
+};
+const smokeBoard = buildBoard({ ...benchArgs, progress: {} });
+const bench = buildBenchmark({
+  ...benchArgs,
   runs: [{ complete: false, providerTotal: 2000, selectedForReading: 18 }],
+  brands: smokeBoard.brands,
 });
 
 t("benchmark shows the client column first and marks it", () => {
@@ -64,20 +76,21 @@ t("benchmark shows the client column first and marks it", () => {
   assert.equal(bench.columns.length, 3);
 });
 t("bonus row exists with an absent client cell", () => {
-  const row = bench.rows.find(r => r.id === "offer_bonus");
+  const row = bench.rows.find(r => r.id === "offer_cash_bonus");
   assert.ok(row);
   assert.equal(row.cells[0].absent, true, "client did not advertise a bonus");
   assert.equal(row.cells[1].value, "$400");
 });
 t("missing terms downgrade comparability, and say so", () => {
-  const row = bench.rows.find(r => r.id === "offer_bonus");
+  const row = bench.rows.find(r => r.id === "offer_cash_bonus");
   assert.equal(row.comparability.level, "advertised-only");
   assert.match(row.comparability.note, /not full product terms/);
 });
-t("gap finding counts competitors, not ads", () => {
-  const f = bench.findings.find(x => x.kind === "gap");
-  assert.match(f.text, /2 of 2 competitors advertised a cash bonus/);
-  assert.match(f.text, /Lookout did not/);
+t("the table carries no findings of its own", () => {
+  // It used to compute a third set, over a DIFFERENT denominator: "1 of 6
+  // competitors" counting nationals, beside a board saying "1 of 3" excluding
+  // them. The board owns findings; this is the metric-by-metric audit trail.
+  assert.equal(bench.findings, undefined);
 });
 t("longevity phrasing is days-shown, never 'continuously'", () => {
   const row = bench.rows.find(r => r.id === "longevity");

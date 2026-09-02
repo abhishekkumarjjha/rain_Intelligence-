@@ -264,24 +264,41 @@ try {
     });
 
     await check("the bonus row exists and the client cell is absent", () => {
-      const row = b.rows.find((r) => r.id === "offer_bonus");
+      // Rows are keyed on the METRIC now, not a legacy offer type — the table
+      // reads the board's rollup rather than computing a second one.
+      const row = b.rows.find((r) => r.id === "offer_cash_bonus");
       ok(row, "bonus row missing");
       const clientCell = row.cells.find((c) => c.column === "client");
       eq(clientCell.absent, true, "client bonus cell should be absent");
     });
 
+    await check("the table agrees with the board, cell for cell", () => {
+      // The defect this replaces: the table sorted on the LARGEST printed
+      // figure while the board ranked by the metric's direction, so one
+      // auto-loan screen showed 4.84% APR in a finding and 6.74% below it.
+      for (const row of b.rows.filter((r) => r.kind === "offer")) {
+        for (const cell of row.cells) {
+          const brand = benchRun.board.brands.find((x) =>
+            (cell.column === "client" ? x.isClient : x.domain === cell.column));
+          const pos = brand?.positions?.[row.metric];
+          if (cell.absent) { ok(!pos, `${row.metric}/${cell.column}: table blank, board has ${pos?.raw}`); continue; }
+          eq(cell.value, pos?.raw, `${row.metric}/${cell.column} disagrees with the board`);
+        }
+      }
+    });
+
     await check("the strongest advertised bonus is shown, with its evidence", () => {
-      const row = b.rows.find((r) => r.id === "offer_bonus");
+      const row = b.rows.find((r) => r.id === "offer_cash_bonus");
       const camp = row.cells.find((c) => c.column === "campusfederal.org");
       eq(camp.value, "$400", "campusfederal headline bonus");
       ok(camp.evidence.length >= 2, "expected multiple bonus ads as evidence");
     });
 
-    await check("absence is a counted finding with its denominator", () => {
-      const gap = (b.findings || []).find((f) => f.kind === "gap");
-      ok(gap, "expected a gap finding");
-      ok(/of \d+ competitors/.test(gap.text), `denominator missing from: ${gap.text}`);
-      ok(gap.evidence.length > 0, "a gap finding must carry its evidence");
+    await check("the table carries no findings of its own", () => {
+      // It used to compute a third set over a DIFFERENT denominator — "1 of 6
+      // competitors" counting nationals, rendered directly above a board saying
+      // "1 of 3" excluding them. The board owns findings.
+      eq(b.findings, undefined, "the table is the audit trail, not a second opinion");
     });
 
     // THE POINT OF THE REFERENCE TIER: nationals are visible and uncounted.
@@ -310,7 +327,7 @@ try {
     });
 
     await check("comparability travels with the row", () => {
-      const row = b.rows.find((r) => r.id === "offer_bonus");
+      const row = b.rows.find((r) => r.id === "offer_cash_bonus");
       ok(row.comparability, "comparability missing");
       ok(typeof row.comparability.level === "string", "comparability level missing");
     });
