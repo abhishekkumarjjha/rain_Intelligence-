@@ -33,7 +33,7 @@ import {
   putEvidence, getEvidence, putSnapshot, previousSnapshot,
   competitorSetVersion, putWatchedSet, getWatchedSet,
 } from "./lib/snapshot.js";
-import { clusterAds, productBreakdown, filterByProduct, buildBenchmark, creativeSummary, samplingNote, captureFunnel } from "./lib/analyze.js";
+import { clusterAds, productBreakdown, filterByProduct, buildBenchmark, creativeSummary, samplingNote, captureFunnel, isShowable } from "./lib/analyze.js";
 import * as captureCache from "./lib/capture-cache.js";
 import { SOURCES, SOURCE_LABELS, resolveSources, googleFormatFor, WINDOW_OPTIONS, defaultWindowFor } from "./lib/sources.js";
 import { withNationals, isNational, captureOptionsFor, NATIONAL_BENCHMARKS, NATIONAL_TTL_DAYS, NATIONAL_READ_CAP } from "./lib/national-tier.js";
@@ -699,24 +699,33 @@ app.get("/api/run/:id", (req, res) => {
     // to 2 rendered a chip saying "All products 2" and the other 10 were
     // unreachable from the UI. The counts a filter offers have to describe what
     // is actually in hand.
+    // A creative the reader could find no copy in — or found only the
+    // Transparency Center's own buttons in — is not competitor creative. It is
+    // dropped from the wall and COUNTED, so the funnel still reconciles and
+    // nobody has to wonder where a card went.
+    const showable = competitorAds.filter(isShowable);
+    const unreadable = competitorAds.length - showable.length;
+    const scopedShowable = scoped.filter(isShowable);
+
     payload.creative = {
       productScope: run.product,
+      unreadable,
       // Pre-select the scope only when it has something in it. Landing on an
       // empty wall is the failure this whole path exists to avoid.
-      defaultProductFilter: scoped.length ? run.product : "all",
-      scopedCount: scoped.length,
-      capturedCount: competitorAds.length,
-      summary: creativeSummary(competitorAds),
-      scopedSummary: creativeSummary(scoped),
+      defaultProductFilter: scopedShowable.length ? run.product : "all",
+      scopedCount: scopedShowable.length,
+      capturedCount: showable.length,
+      summary: creativeSummary(showable),
+      scopedSummary: creativeSummary(scopedShowable),
       // The wall shows IDEAS, not every execution. Three near-identical rate
       // banners are one idea with three pieces of evidence, and presenting them
       // as three findings produces a wall nobody reads.
-      clusters: clusterAds(competitorAds),
-      byProduct: productBreakdown(competitorAds),
+      clusters: clusterAds(showable),
+      byProduct: productBreakdown(showable),
       byCompetitor: run.competitors.map((c) => ({
         ...c,
         tier: c.tier || "local",
-        count: competitorAds.filter((a) => a.institution === c.domain).length,
+        count: showable.filter((a) => a.institution === c.domain).length,
       })),
       // The wall renders these as two groups. Volume asymmetry is the reason:
       // a community bank might contribute four cards while Chase contributes

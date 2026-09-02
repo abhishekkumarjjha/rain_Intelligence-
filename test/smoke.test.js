@@ -1,7 +1,7 @@
 // Pure-logic smoke test. No key, no network.
 import assert from "node:assert";
 import { buildListingParams, selectForReading, epochToDate } from "../lib/atc-provider.js";
-import { clusterAds, buildBenchmark, samplingNote } from "../lib/analyze.js";
+import { clusterAds, buildBenchmark, samplingNote, isShowable } from "../lib/analyze.js";
 import { productFromUrl, normalizeProduct } from "../lib/products.js";
 import { buildBoard } from "../lib/benchmark.js";
 
@@ -149,5 +149,40 @@ t("the cap still bites when there is more than it admits", () => {
   const ids = selectForReading(many, 18).map((c) => c.creativeId);
   assert.equal(new Set(ids).size, 18);
 });
+
+
+
+// ===========================================================================
+// A picture of Google's own UI is not competitor creative
+// ===========================================================================
+t("the Transparency Center's own chrome never reaches the wall", () => {
+  // When a creative fails to paint, the screenshot contains the viewer's
+  // collapse/expand controls and overflow menu. The reader transcribes them
+  // faithfully, and because these entries are old and long-running they sort
+  // to the TOP — so the first thing on a wall of competitor creative was a
+  // white card reading "Collapsed ad on mobile ... more_vert".
+  assert.equal(isShowable({ headline: "Collapsed ad on mobile" }), false);
+  assert.equal(isShowable({ headline: "Expanded ad" }), false);
+  assert.equal(isShowable({ headline: "more_vert" }), false);
+  assert.equal(isShowable({ headline: "MORE_VERT" }), false, "case must not matter");
+});
+
+t("a creative with nothing readable in it is not shown", () => {
+  assert.equal(isShowable({ headline: "", subhead: "" }), false);
+  assert.equal(isShowable({}), false);
+  assert.equal(isShowable(null), false);
+});
+
+t("real copy is never dropped, and an offer alone is enough", () => {
+  // The filter must not become a second, quieter way to lose evidence.
+  assert.equal(isShowable({ headline: "360 Performance Savings" }), true);
+  assert.equal(isShowable({ subhead: "Save big with one of the nation's top rates" }), true);
+  // A banner that prints only a figure is still the advertiser saying something.
+  assert.equal(isShowable({ offer: { value: "$300 bonus" } }), true);
+  // "Ad" appearing inside real copy must not trip the chrome test.
+  assert.equal(isShowable({ headline: "Ready to add a car to the family?" }), true);
+  assert.equal(isShowable({ headline: "Adventure starts here" }), true);
+});
+
 
 console.log(`\n${n} passed`);

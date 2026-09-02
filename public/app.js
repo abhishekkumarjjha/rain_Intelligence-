@@ -750,8 +750,12 @@ function renderResults() {
   // free because Competitive Intelligence already captured and read those ads;
   // Key insights is a model call, so it lives behind a click on the Wall.
   $("searchWallBtn").classList.toggle("hidden", !(r.mode === "benchmark" && r.ads?.length));
+  // The one thing on this screen worth clicking, and it was styled like the
+  // three navigation buttons beside it. It is the wall's only reading of
+  // itself; it should not have to be hunted for.
   $("insightsBtn").classList.toggle("hidden", !(r.mode === "creative" && (r.ads?.length || 0) >= 4));
-  $("insightsBtn").textContent = "Key insights";
+  $("insightsBtn").classList.add("accent", "lg");
+  $("insightsBtn").textContent = "✨ Key insights";
   $("insightsBtn").disabled = false;
 
   $("crossBtn").classList.add("hidden");
@@ -1453,9 +1457,16 @@ function strategyHtml(s) {
 }
 
 /* ---------------- evidence drawer ---------------- */
-function wireEvidence() {
-  document.querySelectorAll(".ev").forEach((n) =>
-    n.onclick = () => openEvidence(n.dataset.ev.split(",").filter(Boolean), "Evidence"));
+/* Scoped, because the sheet renders AFTER this has already run over the page.
+   Key insights opened with "View 4 ads" chips that did nothing at all: the
+   themes markup uses the same .ev class as the board, but openSheet only wired
+   images, so nothing ever bound a click to them. */
+function wireEvidence(root = document) {
+  root.querySelectorAll(".ev").forEach((n) =>
+    n.onclick = (e) => {
+      e.stopPropagation();
+      openEvidence(n.dataset.ev.split(",").filter(Boolean), "Evidence");
+    });
 }
 
 function openEvidence(ids, title) {
@@ -1491,6 +1502,7 @@ function openSheet(title, sub, html) {
   $("sheetSub").textContent = sub || "";
   $("sheetBody").innerHTML = html;
   wireImages($("sheetBody"));
+  wireEvidence($("sheetBody"));
   $("sheet").classList.add("on"); $("sheetBg").classList.add("on");
 }
 const closeSheet = () => { $("sheet").classList.remove("on"); $("sheetBg").classList.remove("on"); };
@@ -1632,10 +1644,10 @@ $("insightsBtn").onclick = async () => {
   try {
     r = await (await fetch(`/api/run/${S.run.id}/themes`, { method: "POST" })).json();
   } catch {
-    btn.disabled = false; btn.textContent = "Key insights";
+    btn.disabled = false; btn.textContent = "✨ Key insights";
     return showError("Could not reach the server to read the creatives.");
   }
-  btn.disabled = false; btn.textContent = "Key insights";
+  btn.disabled = false; btn.textContent = "✨ Key insights";
 
   if (!r.ok) {
     return showError(r.reason === "anthropic_not_configured"
