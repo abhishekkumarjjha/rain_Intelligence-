@@ -174,6 +174,15 @@ body {
 /* The gated strategy pass is the one deliberate, optional action on the page.
    Orange marks it as a step the strategist chooses, not the default path. */
 .btn.primary.secondary { background: var(--grad-amber); color: var(--on-amber); box-shadow: 0 8px 24px var(--amber-glow); }
+/* The wall of search ads. Orange because it is the one thing on the results
+   screen that goes SOMEWHERE rather than changing what is on this page — and
+   because unlike everything else offered here, it costs nothing to open. */
+.btn.amber {
+  background: var(--grad-amber); color: var(--on-amber);
+  box-shadow: 0 8px 24px var(--amber-glow);
+  font-size: 14px; padding: 11px 20px; font-weight: 700;
+}
+.btn.amber:hover { filter: brightness(1.08); }
 .btn.primary:hover { filter: brightness(1.1); }
 .btn.primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 .btn.lg { padding: 15px 34px; font-size: 15px; }
@@ -188,7 +197,14 @@ body {
 .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .9px; text-transform: uppercase; color: var(--blue); }
 
 /* ---------------- mode cards ---------------- */
-.modegrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+/* TWO cards, not three. A 3-column grid left one third of the screen empty and
+   pushed the whole choice into the left margin; with two modes the grid centres
+   itself and the cards get room to be read. */
+.modegrid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px; max-width: 880px; margin: 0 auto;
+}
+@media (max-width: 720px) { .modegrid { grid-template-columns: 1fr; } }
 .modecard {
   text-align: left; font-family: var(--font);
   background: var(--panel); border: 1px solid var(--line);
@@ -208,12 +224,25 @@ body {
 .mc-title { font-size: 17px; font-weight: 700; margin-bottom: 5px; }
 .mc-q { font-size: 13px; color: var(--blue); font-style: italic; margin-bottom: 11px; }
 .modecard p { color: var(--ink-2); font-size: 13.5px; line-height: 1.6; margin: 0 0 15px; }
+/* WHICH SURFACE THIS READS is the first thing a user needs from these cards,
+   and it was the smallest text on them. Promoted to a headline above the title:
+   the choice between the two halves of the tool is really a choice between
+   display creative and search advertising. */
+.mc-source {
+  font-size: 15px; font-weight: 800; letter-spacing: -.2px;
+  margin-bottom: 10px; color: var(--amber);
+}
+.modecard.bench .mc-source { color: var(--green); }
+
 .mc-tags { display: flex; gap: 7px; flex-wrap: wrap; }
 .mc-tags span {
   font-size: 11px; color: var(--ink-3); padding: 4px 10px;
   border-radius: 999px; background: var(--bg-2); border: 1px solid var(--line);
 }
-.mc-tags .soon { color: var(--amber); border-color: rgba(255,159,26,.36); }
+
+/* The mode screen is a choice between two things and nothing else, so it reads
+   centred rather than left-aligned against an empty right half. */
+#s-mode .panel-head { justify-content: center; text-align: center; margin-bottom: 34px; }
 
 /* ---------------- scope box ---------------- */
 .scopebox { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
@@ -948,10 +977,25 @@ table.snap .rl .sm { display: block; font-size: 11px; opacity: .45; font-weight:
 .shapeframe {
   font-size: 12px; opacity: .58; line-height: 1.55; margin-bottom: 13px;
 }
-.shapelist { display: grid; gap: 1px; background: var(--line, #26313c); border-radius: 12px; overflow: hidden; }
-.shapeitem {
-  display: flex; gap: 12px; align-items: flex-start;
-  padding: 14px 16px; background: var(--panel, #121a21);
+/* A TABLE WITHOUT RULES. As a flex row each chip was as wide as its own text,
+   so every sentence started at a different x and the column of labels read as
+   ragged noise. A two-column grid gives the chips one shared column and the
+   prose one shared left edge — the alignment of a table, without drawing one. */
+.shapelist {
+  display: grid; grid-template-columns: max-content 1fr; gap: 1px 0;
+  background: var(--line, #26313c); border-radius: 12px; overflow: hidden;
+}
+/* Each item contributes two real grid cells, so the row background and the
+   1px separator come from the grid rather than from the item. */
+.shapeitem { display: contents; }
+.shapechip, .shapeitem > .shapebody { background: var(--panel, #121a21); padding: 15px 16px; }
+.shapechip { padding-right: 4px; }
+.shapeitem.ref > .shapechip, .shapeitem.ref > .shapebody { background: #141d28; }
+.shapechip .fchip { white-space: nowrap; }
+@media (max-width: 700px) {
+  .shapelist { grid-template-columns: 1fr; }
+  .shapechip { padding-bottom: 0; }
+  .shapeitem > .shapebody { padding-top: 8px; }
 }
 .shapeitem.ref { background: rgba(90, 130, 180, .05); }
 .shapeitem .fchip {

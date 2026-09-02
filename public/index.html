@@ -56,20 +56,22 @@
     </div>
 
     <div class="modegrid">
-      <button class="modecard" data-mode="creative">
+      <button class="modecard wall" data-mode="creative">
         <div class="mc-icon creative"></div>
+        <div class="mc-source">Google Display</div>
         <div class="mc-title">The Wall of Creatives</div>
         <div class="mc-q">"What are competitors making?"</div>
         <p>Real display creatives from competitors, grouped by idea and filtered to your product. Sorted by what is running now, with longevity shown. Search ads appear on their own wall inside Competitive Intelligence, at no extra cost.</p>
-        <div class="mc-tags"><span>Google display</span><span>Image creatives</span></div>
+        <div class="mc-tags"><span>Image creatives</span><span>Longevity</span></div>
       </button>
 
-      <button class="modecard" data-mode="benchmark">
+      <button class="modecard bench" data-mode="benchmark">
         <div class="mc-icon bench"></div>
+        <div class="mc-source">Google Search</div>
         <div class="mc-title">Competitive Intelligence</div>
         <div class="mc-q">"How did our ads compare to theirs?"</div>
         <p>Your ads against their ads over the same window — offers, longevity and volume side by side, with every figure traceable to the ad that carried it.</p>
-        <div class="mc-tags"><span>Google search</span><span>Ads vs ads</span></div>
+        <div class="mc-tags"><span>Ads vs ads</span><span>Counted findings</span></div>
       </button>
     </div>
   </section>
@@ -87,11 +89,14 @@
         <select id="productSel"></select>
         <!-- Chosen BEFORE anything is spent, so the cost line below can be
              accurate. Creative work on display does not need Meta requests. -->
-        <label class="lead">Sources</label>
-        <select id="sourceSel" class="primary-select">
+        <!-- No source chooser. Each half of the tool captures exactly one
+             surface — the Wall is Google display, Competitive Intelligence is
+             Google search — so there is no choice to offer. Kept as a hidden
+             control because the capture request still carries a source and the
+             Meta provider is still wired underneath, unreachable from here. -->
+        <label class="lead" style="display:none">Sources</label>
+        <select id="sourceSel" class="primary-select" style="display:none">
           <option value="google_display">Google display</option>
-          <option value="meta">Meta</option>
-          <option value="both">Both</option>
         </select>
         <!-- Two windows, because the two filters ask different questions.
              Google: served during the window. Meta: started within it. -->
@@ -172,7 +177,7 @@
              and already on the client — until now it was only reachable one
              evidence chip at a time. This is the same creatives laid out as a
              wall. It costs nothing: no capture, no vision call, no request. -->
-        <button class="btn ghost sm hidden" id="searchWallBtn">See all search ads</button>
+        <button class="btn amber hidden" id="searchWallBtn">See all search ads →</button>
         <!-- Descriptive themes across the captured display creatives. Gated
              behind a click because it is the one model call on this screen. -->
         <button class="btn ghost sm hidden" id="insightsBtn">Key insights</button>
@@ -195,6 +200,30 @@
     <div class="filters" id="filters"></div>
 
     <div id="resultBody"></div>
+  </section>
+
+  <!-- ══════════════ SCREEN 6 — the wall of search ads ══════════════
+       Its own screen rather than an overlay: at 131 creatives this is a place
+       you browse, not a thing you peek at. Nothing here costs anything — every
+       ad was captured and read by the Competitive Intelligence run behind it. -->
+  <section class="screen" id="s-searchwall">
+    <div class="resulthead">
+      <div>
+        <div class="eyebrow">All search ads</div>
+        <h2 id="swTitle">—</h2>
+        <p class="sub" id="swSub"></p>
+      </div>
+      <div class="resright">
+        <button class="btn primary" id="swBack">← Back to Competitive Intelligence</button>
+      </div>
+    </div>
+
+    <!-- Same two independent filters as the display wall: product narrows what
+         the ads are about, advertiser narrows whose work it is. -->
+    <div class="filters" id="swProductFilters"></div>
+    <div class="filters" id="swFilters"></div>
+
+    <div id="swBody"></div>
   </section>
 
 </main>

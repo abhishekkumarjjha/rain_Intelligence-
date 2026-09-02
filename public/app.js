@@ -189,8 +189,7 @@ const CROSS_LABEL = { creative: "Competitive Intelligence →", benchmark: "← 
    search ads reach it as a free view over the Competitive Intelligence run that
    already paid to capture and read them. See SOURCES_FOR_MODE in lib/sources.js. */
 function sourcesForChoice(choice) {
-  if (choice === "both") return ["google_display", "meta"];
-  return [choice];
+  return [choice === "both" ? "google_display" : choice];
 }
 
 /**
@@ -203,12 +202,19 @@ function sourcesForChoice(choice) {
  */
 function enterMode(mode) {
   S.mode = mode;
-  // Benchmark has exactly one legal source, so offering a chooser would imply
-  // a decision that does not exist.
+  // NEITHER half offers a source chooser any more.
+  //
+  // Competitive Intelligence has exactly one legal source and always did. The
+  // Wall now has exactly one too: it is display, by the cost decision in
+  // lib/sources.js. Leaving a picker that reads "Google display / Meta / Both"
+  // on a screen where only the first is real offers a choice that does not
+  // exist and names a surface this build does not capture.
   const isBench = mode === "benchmark";
-  $("sourceSel").parentElement && ($("sourceSel").style.display = isBench ? "none" : "");
+  S.sourceChoice = isBench ? "google_search" : "google_display";
+  $("sourceSel").value = "google_display";
+  $("sourceSel").style.display = "none";
   document.querySelectorAll(".scopebox label").forEach((l) => {
-    if (l.textContent.trim() === "Sources") l.style.display = isBench ? "none" : "";
+    if (l.textContent.trim() === "Sources") l.style.display = "none";
   });
   $("winMetaWrap").classList.toggle("hidden", isBench || !sourcesForChoice(S.sourceChoice).includes("meta"));
   $("winGoogleWrap").classList.toggle("hidden", !isBench && S.sourceChoice === "meta");
@@ -558,12 +564,7 @@ function renderResults() {
   $("insightsBtn").textContent = "Key insights";
   $("insightsBtn").disabled = false;
 
-  const cross = $("crossBtn");
-  cross.textContent = CROSS_LABEL[r.mode] || "";
-  cross.title = r.mode === "creative"
-    ? "Compare these competitors' ads against the client's — the search capture is already paid for"
-    : "See what these competitors are making, display and search";
-  cross.classList.toggle("hidden", !CROSS_LABEL[r.mode]);
+  $("crossBtn").classList.add("hidden");
 
   const s = r.sampling || {};
   $("samplingBar").className = "samplingbar" + (s.complete ? " clean" : "");
@@ -970,8 +971,13 @@ function boardHtml(board, industry) {
             "No competitor was ahead in the captured ads.")}
         </div>
         ${b.context.length ? `
-          <details class="ctxwrap">
-            <summary>Context — ${b.context.length} more observation${b.context.length === 1 ? "" : "s"}</summary>
+          <!-- OPEN by default, and named neutrally. These are the findings that
+               are neither a win nor a loss — the mixed-message question, the age
+               of a creative. Collapsed behind the word "Context" they read as
+               small print, and the card most likely to start a real conversation
+               with the client was the one nobody opened. -->
+          <details class="ctxwrap" open>
+            <summary>Some observations — ${b.context.length}</summary>
             <div class="fgrid ctx">${b.context.map(cardHtml).join("")}</div>
           </details>` : ""}
       `}
@@ -1055,7 +1061,7 @@ function setShapeHtml(shape) {
       <div class="shapelist">
         ${shape.observations.map((o) => `
           <div class="shapeitem${o.reference ? " ref" : ""}">
-            <span class="fchip ${esc(CHIP_TONE[o.metric] || "t-slate")}">${esc(o.chip)}</span>
+            <div class="shapechip"><span class="fchip ${esc(CHIP_TONE[o.metric] || "t-slate")}">${esc(o.chip)}</span></div>
             <div class="shapebody">
               <div class="shapetext">${esc(o.text)}</div>
               ${o.detail ? `<div class="shapedetail">${esc(o.detail)}</div>` : ""}
@@ -1253,48 +1259,86 @@ $("sheetClose").onclick = closeSheet;
 $("sheetBg").onclick = closeSheet;
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeSheet(); closeDrawer(); } });
 
-/**
- * Every search ad this run captured, laid out as a wall.
- *
- * Competitive Intelligence already captured these and already spent a vision
- * call reading each one — they were simply only reachable one evidence chip at
- * a time. That is right for "show me the ad behind this number" and useless for
- * "show me what everyone is running". Same creatives, same card as the display
- * wall, grouped by advertiser so whose ad is whose survives the layout.
- */
+/* ---------------------------------------------------------------------------
+   THE WALL OF SEARCH ADS — its own screen.
+   Every creative here was captured and read by the Competitive Intelligence run
+   behind it, so browsing costs nothing: no request, no vision call, no model.
+   --------------------------------------------------------------------------- */
+const SW = { product: "all", brand: "all" };
+
 function openSearchWall() {
-  const ads = S.run?.ads || [];
-  if (!ads.length) {
-    return openSheet("All search ads", "", `<div class="empty">No search ads were captured in this run.</div>`);
-  }
-
-  // Client first, then locals by volume, then the national reference tier — the
-  // same ordering the board uses, so the two screens agree on who matters.
-  const rank = (a) => (a.isClient ? 0 : a.tier === "national" ? 2 : 1);
-  const groups = new Map();
-  for (const a of ads) {
-    if (!groups.has(a.institution)) groups.set(a.institution, []);
-    groups.get(a.institution).push(a);
-  }
-  const rows = [...groups.entries()]
-    .map(([domain, list]) => ({ domain, list, head: list[0] }))
-    .sort((x, y) => rank(x.head) - rank(y.head) || y.list.length - x.list.length);
-
-  openSheet(
-    "All search ads",
-    `${ads.length} creatives across ${rows.length} advertisers — every one already captured and read for this run. This is what was captured, not the whole market.`,
-    rows.map((g) => `
-      <div class="sheetgroup">
-        <h4>
-          ${esc(g.head.institutionLabel || g.domain)}
-          ${g.head.isClient ? `<span class="clienttag">Your client</span>` : ""}
-          ${g.head.tier === "national" ? `<span class="clienttag" style="color:var(--ink-3)">National reference</span>` : ""}
-          <span class="n">${g.list.length} ad${g.list.length === 1 ? "" : "s"}</span>
-        </h4>
-        <div class="wall">${g.list.map(adCard).join("")}</div>
-      </div>`).join(""));
+  SW.product = "all"; SW.brand = "all";
+  renderSearchWall();
+  show("s-searchwall");
+  window.scrollTo(0, 0);
 }
+
+function renderSearchWall() {
+  const r = S.run;
+  const ads = r?.ads || [];
+  $("swTitle").textContent = `${r.client.label} · ${r.productLabel}`;
+  $("swSub").textContent =
+    `${ads.length} creatives already captured and read for this run. This is what was captured, not the whole market.`;
+
+  // Counts are over EVERYTHING captured, never over the current slice — a chip
+  // whose number only describes the filtered view cannot be used to escape it.
+  const label = (a) => a.institutionLabel || a.institution;
+  const byProduct = new Map();
+  const byBrand = new Map();
+  for (const a of ads) {
+    const p = a.product || "other";
+    byProduct.set(p, (byProduct.get(p) || 0) + 1);
+    if (!byBrand.has(a.institution)) byBrand.set(a.institution, { label: label(a), tier: a.tier, isClient: a.isClient, n: 0 });
+    byBrand.get(a.institution).n++;
+  }
+
+  const chip = (on, key, text, n) =>
+    `<button class="fchip ${on ? "on" : ""}" data-f="${esc(key)}">${esc(text)}<span class="n">${n}</span></button>`;
+
+  $("swProductFilters").innerHTML = [
+    chip(SW.product === "all", "all", "All products", ads.length),
+    ...[...byProduct.entries()].sort((a, b) => b[1] - a[1])
+      .map(([code, n]) => chip(SW.product === code, code, productLabel(code), n)),
+  ].join("");
+  $("swProductFilters").querySelectorAll(".fchip").forEach((n) =>
+    n.onclick = () => { SW.product = n.dataset.f; renderSearchWall(); });
+
+  // Client first, then locals by volume, then the national reference tier —
+  // the same ordering the board uses, so the two screens agree on who matters.
+  const brands = [...byBrand.entries()].map(([domain, v]) => ({ domain, ...v }));
+  const rank = (b) => (b.isClient ? 0 : b.tier === "national" ? 2 : 1);
+  brands.sort((a, b) => rank(a) - rank(b) || b.n - a.n);
+  const locals = brands.filter((b) => b.tier !== "national");
+  const nationals = brands.filter((b) => b.tier === "national");
+
+  $("swFilters").innerHTML = [
+    chip(SW.brand === "all", "all", "All advertisers", ads.length),
+    ...locals.map((b) => chip(SW.brand === b.domain, b.domain, b.label + (b.isClient ? " (you)" : ""), b.n)),
+    nationals.length
+      ? `<span class="chipdiv" title="Chase and Capital One are in every analysis as a fixed national ceiling, not because they compete locally">National</span>`
+      : "",
+    ...nationals.map((b) => chip(SW.brand === b.domain, b.domain, b.label, b.n)),
+  ].join("");
+  $("swFilters").querySelectorAll(".fchip").forEach((n) =>
+    n.onclick = () => { SW.brand = n.dataset.f; renderSearchWall(); });
+
+  // ONE wall, exactly like the display wall — not a list per advertiser. The
+  // advertiser is already on every card, and grouping by brand turns browsing
+  // into scrolling past four banks to reach the fifth.
+  const shown = ads
+    .filter((a) => SW.product === "all" || (a.product || "other") === SW.product)
+    .filter((a) => SW.brand === "all" || a.institution === SW.brand);
+
+  $("swBody").innerHTML = shown.length
+    ? `<div class="wall">${shown.map(adCard).join("")}</div>`
+    : `<div class="empty">No captured search ad matches this filter.</div>`;
+  wireImages($("swBody"));
+  $("swBody").querySelectorAll(".shot").forEach((n) =>
+    n.onclick = () => openEvidence((n.dataset.ids || "").split(",").filter(Boolean), "Creative"));
+}
+
 $("searchWallBtn").onclick = openSearchWall;
+$("swBack").onclick = () => { show("s-results"); window.scrollTo(0, 0); };
 
 /**
  * Key insights — the recurring ideas across the captured display creatives.
@@ -1310,7 +1354,7 @@ function themesHtml(t) {
     <div class="shapelist">
       ${t.themes.map((x) => `
         <div class="shapeitem">
-          <span class="fchip t-violet">Theme</span>
+          <div class="shapechip"><span class="fchip t-violet">Theme</span></div>
           <div class="shapebody">
             <div class="shapetext"><b>${esc(x.name)}</b></div>
             <div class="shapedetail">${esc(x.description)}</div>
@@ -1545,10 +1589,15 @@ $("forceChk").onchange = () => { S.force = $("forceChk").checked; refreshCost();
 $("nationalsChk").onchange = () => { S.includeNationals = $("nationalsChk").checked; refreshCost(); };
 
 function syncNationalsRow() {
-  const applies = S.mode === "creative" && S.sourceChoice !== "meta";
+  // Shown for BOTH halves. v4 gave Competitive Intelligence a national
+  // reference tier, but this row stayed creative-only — so Chase and Capital
+  // One appeared in the results of a benchmark the user was never offered the
+  // chance to opt out of. A capture the user did not agree to is the one thing
+  // the cost line exists to prevent.
+  const applies = S.sourceChoice !== "meta";
   $("natRow").classList.toggle("hidden", !applies);
-  $("natWhy").textContent = sourcesForChoice(S.sourceChoice).includes("meta")
-    ? "A fixed national ceiling added to the Google display capture only — Meta is excluded, so the Meta tab stays purely local."
+  $("natWhy").textContent = S.mode === "benchmark"
+    ? "Chase and Capital One as a reference ceiling. They are shown in their own block and are excluded from every finding and every denominator — we cannot tell whether their ads served in this market."
     : "A fixed national ceiling added to every display capture, shown in their own section below the local results — not as local competitors.";
 }
 $("reanalyzeBtn").onclick = () => startCapture({ force: true });
