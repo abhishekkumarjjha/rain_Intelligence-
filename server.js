@@ -592,7 +592,7 @@ async function executeRun(run) {
  * numbers the client never saw.
  */
 function benchmarkFor(run, brands = null) {
-  return buildBenchmark({
+  const bm = buildBenchmark({
     brands,
     client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },
     competitors: run.competitors.map((c) => ({
@@ -601,6 +601,24 @@ function benchmarkFor(run, brands = null) {
     product: run.product,
     runs: run.runs,
   });
+
+  // A NATIONAL CAPTURE CAN BE OLDER THAN THE WINDOW IT SITS BESIDE.
+  //
+  // Nationals are cached for a quarter because that is how often their creative
+  // turns over, and that is the right trade — but it means the ads in the
+  // reference rows may have been captured over a window months away from the
+  // one the client is being read over. The note already explains why nationals
+  // are in no local count; it has to say this too, or the reader reasonably
+  // assumes every row on the page describes the same stretch of time.
+  const ages = (run.competitors || [])
+    .filter((c) => c.tier === "national")
+    .map((c) => run.progress?.[c.domain]?.captureAgeDays)
+    .filter((n) => Number.isFinite(n));
+  const oldest = ages.length ? Math.max(...ages) : 0;
+  if (bm.referenceNote && oldest > run.days) {
+    bm.referenceNote += ` Their creative was captured ${Math.round(oldest)} days ago and is refreshed quarterly, so it may fall outside the ${run.days}-day window the local rows describe.`;
+  }
+  return bm;
 }
 
 /**
