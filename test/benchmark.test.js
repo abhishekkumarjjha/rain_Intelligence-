@@ -899,6 +899,60 @@ test("the framing says this is read after delivery, not instead of it", () => {
   assert.match(BOARD.primaryRead.framing, /delivery|execution/i);
 });
 
+test("a discount off a rate is never read as the rate", () => {
+  // Verbatim from La Capitol's auto-loan ad: "Rates as low as 4.59% APR* ...
+  // get 0.65% off your rate". Both were filed as apr, and because a LOWER apr
+  // wins, 0.65 became the advertised position — so the board told the client
+  // they advertised a 0.65% auto loan.
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["4.59% APR* For 67 - 75 Months"],
+      description: "Refinance your auto loan. Rates as low as 4.59% APR* and get 0.65% off your rate.",
+      product: "auto-loan",
+      economicFacts: [
+        { metric: "apr", raw: "4.59% APR*", qualifiers: {}, sourceField: "headline" },
+        { metric: "apr", raw: "0.65% off", qualifiers: {}, sourceField: "description" },
+      ],
+    })] },
+    competitors: ["a", "b", "c"].map((k) => ({
+      label: `Comp ${k.toUpperCase()}`, domain: `${k}.org`, ads: [chk(`${k}.org`, `Comp ${k.toUpperCase()}`, {
+        headlines: ["Auto Loans"], description: "Rates from 4.84% APR*.", product: "auto-loan",
+        economicFacts: [{ metric: "apr", raw: "4.84% APR*", qualifiers: {}, sourceField: "description" }],
+      })],
+    })),
+    product: "auto-loan",
+    progress: Object.fromEntries(["lacapfcu.org", "a.org", "b.org", "c.org"].map((d) => [d, { listed: 1, read: 1 }])),
+  });
+  const c = board.brands.find((b) => b.isClient);
+  assert.equal(c.positions.apr.raw, "4.59% APR*",
+    `a discount became the advertised rate: ${c.positions.apr.raw}`);
+  assert.doesNotMatch(JSON.stringify(board.findings), /0\.65% off/,
+    "a discount reached a finding as if it were a rate");
+});
+
+test("participation is stated before any ratio is read", () => {
+  // A competitor absent from the product and one present but silent on price
+  // are different facts, and a ratio alone cannot tell them apart.
+  const pr = BOARD.primaryRead;
+  assert.ok(pr.participation, "no participation line");
+  assert.match(pr.participation, /of \d+ selected competitors? advertised/,
+    `participation must name the selected set: ${pr.participation}`);
+});
+
+test("an advertiser with nothing on this product is named once, not tabled", () => {
+  const snap = BOARD.snapshot;
+  assert.ok(Array.isArray(snap.summaries), "expected per-advertiser summaries");
+  for (const x of snap.summaries) {
+    assert.ok(x.adCount > 0, `${x.label} has no ads and should not be summarised`);
+    assert.ok(x.text, `${x.label} has no summary sentence`);
+  }
+  for (const a of snap.absent || []) {
+    // Never "they don't advertise this" — always what OUR capture saw.
+    assert.doesNotMatch(a.text, /does not advertise|no longer/i,
+      `absence stated as a product fact: ${a.text}`);
+  }
+});
+
 test("local and national conclusions never merge into one claim", () => {
   const t = BOARD.primaryRead.localVsNational;
   if (!t) return;

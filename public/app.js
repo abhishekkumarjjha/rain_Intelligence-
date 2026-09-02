@@ -983,6 +983,7 @@ function primaryReadHtml(pr) {
     <div class="pread">
       <div class="preadframe">${esc(pr.framing)}</div>
       <h4 class="preadhead">${esc(pr.headline)}</h4>
+      ${pr.participation ? `<div class="preadpart">${esc(pr.participation)}</div>` : ""}
       <div class="preaddiff">${esc(pr.differences)}</div>
       ${pr.localVsNational ? `<div class="preadlocal">${esc(pr.localVsNational)}</div>` : ""}
       ${pr.changes?.length ? `
@@ -1094,51 +1095,44 @@ function setShapeHtml(shape) {
 }
 
 /**
- * The compact offer matrix — brands down, this product's metrics across.
+ * WHAT EACH ADVERTISER IS COMPETING ON.
  *
- * National advertisers render below a rule under their own heading, because
- * they are a reference ceiling and are excluded from every finding. A Chase row
- * sitting inline reads as a peer, which is a different and wrong claim.
+ * This was a metric matrix, and a matrix is right for a rich product and wrong
+ * for a thin one. The checking board filled four columns; the auto-loan board
+ * filled two, showed a grid of "none captured", and carried three rows that
+ * said nothing at all. Worse, columns fixed to the profile had nowhere to put
+ * Neighbors' "Up to 100% Financing" — so the one thing that advertiser was
+ * competing on was dropped, and they read as having printed nothing.
+ *
+ * A line per advertiser instead, carrying every figure they printed and what
+ * they message on. The metric-by-metric grid still exists in the full table
+ * below; this answers the different question a salesperson is actually asked.
  */
 function snapshotHtml(snap) {
-  if (!snap?.columns?.length) return "";
-  const head = `<tr><th>Advertiser</th>${
-    snap.columns.map((c) => `<th>${esc(c.label)}</th>`).join("")}</tr>`;
-
-  const rowHtml = (r) => `
-    <tr class="${r.isClient ? "clientrow" : ""}${r.reference ? " refrow" : ""}">
-      <td class="rl">${esc(r.label)}${
-        r.absentReason ? `<span class="sm">${esc(r.absentReason)}</span>` : ""}</td>
-      ${r.summary
-        // A row that is one figure and a run of blanks reads as a broken row.
-        // Said as a sentence, the same data reads as what it is: this advertiser
-        // is buying the category on one lever and printing nothing else.
-        ? `<td class="rsum" colspan="${snap.columns.length}">
-             <span class="rsumtext">${esc(r.summary.text)}</span>
-             ${r.summary.evidence?.length
-               ? `<span class="ev sm" data-ev="${esc(r.summary.evidence.join(","))}">See ${r.summary.evidence.length} ad${r.summary.evidence.length > 1 ? "s" : ""}</span>`
-               : ""}
-           </td>`
-        : r.cells.map((c) => `
-        <td class="${c.absent ? "absent" : ""}${c.clipped ? " clipped" : ""}" title="${esc(c.note || "")}">
-          <div class="val">${esc(c.value)}</div>
-          ${c.note && !c.absent ? `<div class="note">${esc(c.note)}</div>` : ""}
-          ${c.evidence?.length ? `<span class="ev sm" data-ev="${esc(c.evidence.join(","))}">${c.evidence.length}</span>` : ""}
-        </td>`).join("")}
-    </tr>`;
-
-  const refBlock = (snap.reference || []).length ? `
-    <tr class="refhead"><td colspan="${snap.columns.length + 1}">
-      National reference — not counted in any finding
-    </td></tr>
-    ${snap.reference.map(rowHtml).join("")}` : "";
+  if (!snap?.summaries?.length) return "";
+  const row = (x) => `
+    <div class="osrow${x.isClient ? " client" : ""}${x.tier === "national" ? " ref" : ""}">
+      <div class="osname">${esc(x.label)}${x.isClient ? `<span class="ostag">Your client</span>` : ""}</div>
+      <div class="ostext">${esc(x.text)}</div>
+      ${x.figures?.length
+        ? `<div class="osfigs">${x.figures.map((f) => `
+            <span class="osfig">${esc(f.label)} <b>${esc(f.raw)}</b>${f.note ? ` <i>${esc(f.note)}</i>` : ""}${
+              f.evidence?.length ? `<span class="ev sm" data-ev="${esc(f.evidence.join(","))}">${f.evidence.length}</span>` : ""}</span>`).join("")}</div>`
+        : ""}
+    </div>`;
 
   return `
-    <h3 class="bh">Offer snapshot</h3>
-    <div class="bwrap"><table class="snap"><thead>${head}</thead><tbody>
-      ${snap.rows.map(rowHtml).join("")}${refBlock}
-    </tbody></table></div>
-    <div class="snapnote">&ldquo;None captured&rdquo; means the figure was not observed in the captured ads. It does not mean the institution has no such offer. &ldquo;Cut off&rdquo; means a figure was advertised but the ad text was clipped before it could be read.${
+    <h3 class="bh">What each advertiser is competing on</h3>
+    <div class="oslist">${snap.summaries.map(row).join("")}</div>
+    ${snap.referenceSummaries?.length ? `
+      <div class="osrefhead">National reference — not counted in any finding</div>
+      <div class="oslist">${snap.referenceSummaries.map(row).join("")}</div>` : ""}
+    ${snap.absent?.length ? `
+      <div class="osabsent">
+        <b>Not advertising this product in what we captured:</b>
+        ${snap.absent.map((a) => `<div>${esc(a.text)}</div>`).join("")}
+      </div>` : ""}
+    <div class="snapnote">Every figure is the strongest the advertiser printed in the captured ads, with the qualifiers it carried. The metric-by-metric comparison is in the full table below.${
       snap.referenceNote ? ` ${esc(snap.referenceNote)}` : ""}</div>`;
 }
 

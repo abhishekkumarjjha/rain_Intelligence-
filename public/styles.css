@@ -798,6 +798,14 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
   letter-spacing: -.3px;
 }
 .preaddiff { font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
+/* WHO IS EVEN IN THE RACE. A competitor absent from the product and one present
+   but silent on price are different facts, and a ratio alone cannot tell them
+   apart — so participation is stated before any ratio is read. */
+.preadpart {
+  font-size: 13.5px; line-height: 1.6; color: var(--ink);
+  margin-bottom: 10px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
 /* Local and national never share a sentence, so they never share a line. */
 .preadlocal {
   font-size: 13.5px; line-height: 1.6; color: var(--ink-2);
@@ -900,7 +908,47 @@ table.snap td.rsum .ev { margin-left: 10px; }
 table.snap .val { font-weight: 600; }
 table.snap .note { font-size: 11.5px; opacity: .55; margin-top: 3px; }
 table.snap .rl .sm { display: block; font-size: 11px; opacity: .45; font-weight: 400; }
-.snapnote { font-size: 12px; opacity: .5; margin-top: 8px; line-height: 1.5; }
+.snapnote { font-size: 12px; opacity: .5; margin-top: 12px; line-height: 1.5; }
+
+/* WHAT EACH ADVERTISER IS COMPETING ON — a line each, not a matrix. */
+.oslist { display: grid; gap: 1px; background: var(--line); border-radius: 12px; overflow: hidden; }
+.osrow { background: var(--panel); padding: 14px 16px; }
+.osrow.client { background: rgba(90, 200, 170, .06); }
+.osrow.ref { background: rgba(124,92,224,.05); }
+.osname {
+  font-size: 14px; font-weight: 700; margin-bottom: 5px;
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.osrow.client .osname { color: #5fc9a7; }
+.osrow.ref .osname { font-style: italic; opacity: .85; }
+.ostag {
+  font-size: 10px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase;
+  color: var(--green); border: 1px solid rgba(74,222,148,.34);
+  border-radius: 999px; padding: 2px 8px;
+}
+.ostext { font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.osfigs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 9px; }
+.osfig {
+  font-size: 12.5px; color: var(--ink-2);
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  border-radius: 8px; padding: 4px 10px;
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.osfig b { color: var(--accent); font-weight: 700; }
+.osfig i { font-style: normal; color: var(--ink-3); font-size: 11.5px; }
+.osrefhead {
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3); margin: 18px 0 8px;
+}
+/* Said ONCE, not as a run of empty rows. For a national the sample size is the
+   point: "no auto loan ads" reads as a fact about Chase when it is a fact about
+   our thirty-ad sample of their four thousand. */
+.osabsent {
+  margin-top: 14px; padding: 12px 14px;
+  border: 1px dashed var(--line-2); border-radius: 10px;
+  font-size: 12.5px; color: var(--ink-3); line-height: 1.7;
+}
+.osabsent b { color: var(--ink-2); display: block; margin-bottom: 4px; font-weight: 600; }
 
 /* Report lines — bullets a strategist ticks, not a paragraph to rewrite. */
 .replines { display: grid; gap: 2px; }
