@@ -1158,21 +1158,17 @@ function boardHtml(board) {
           ${columnHtml("pressure", "Competitive pressure", b.pressure.filter(notIsolated),
             "No local competitor was ahead in the captured ads.")}
         </div>
-        ${isolatedOf(b).length ? `
-          <details class="ctxwrap" open>
-            <summary>Other differences observed — ${isolatedOf(b).length}</summary>
-            <div class="fgrid ctx">${isolatedOf(b).map(cardHtml).join("")}</div>
-          </details>` : ""}
-        ${b.context.length ? `
-          <!-- OPEN by default, and named neutrally. These are the findings that
-               are neither a win nor a loss — the mixed-message question, the age
-               of a creative. Collapsed behind the word "Context" they read as
-               small print, and the card most likely to start a real conversation
-               with the client was the one nobody opened. -->
-          <details class="ctxwrap" open>
-            <summary>Some observations — ${b.context.length}</summary>
-            <div class="fgrid ctx">${b.context.map(cardHtml).join("")}</div>
-          </details>` : ""}
+        ${sectionHtml("single", "Observed in one advertiser",
+          "Each of these appeared in a single competitor's captured ads. A tactic that advertiser is using, not a standard across the local set — which is why it sits outside the two columns above.",
+          isolatedOf(b))}
+        <!-- OPEN by default, and named neutrally. These are the findings that
+             are neither a win nor a loss — the mixed-message question, the age
+             of a creative. Collapsed behind the word "Context" they read as
+             small print, and the card most likely to start a real conversation
+             with the client was the one nobody opened. -->
+        ${sectionHtml("neutral", "About this client's own advertising",
+          "Neither an advantage nor a pressure — these describe the client's captured ads rather than comparing them to anyone.",
+          b.context)}
       `}
 
       ${setShapeHtml(board.setShape)}
@@ -1233,6 +1229,32 @@ function columnHtml(kind, title, findings, emptyText) {
         ? [...findings].sort((a, b) => SIG_ORDER.indexOf(a.significance) - SIG_ORDER.indexOf(b.significance)).map(cardHtml).join("")
         : `<div class="scolempty">${esc(emptyText)}</div>`}
     </div>`;
+}
+
+/**
+ * A named section below the two columns.
+ *
+ * These were bare `<summary>` lines — grey, small, and unlabelled — sitting
+ * directly under two properly headed columns. With no heading of their own the
+ * eye carried the nearest one down: a client advantage in the right-hand half
+ * of the grid read as competitive pressure, because pressure was the last
+ * heading above it.
+ *
+ * So each section states its own name AND its own rule. A heading that says
+ * "Other differences observed" without saying what makes a difference "other"
+ * invites exactly the reading it is trying to prevent.
+ */
+function sectionHtml(kind, title, rule, findings) {
+  if (!findings.length) return "";
+  return `
+    <details class="ctxwrap sect ${esc(kind)}" open>
+      <summary class="secthead">
+        <span class="sdot"></span>${esc(title)}
+        <span class="scount">${findings.length}</span>
+      </summary>
+      <div class="sectrule">${esc(rule)}</div>
+      <div class="fgrid ctx">${findings.map(cardHtml).join("")}</div>
+    </details>`;
 }
 
 /* Each metric keeps ONE colour everywhere it appears, so "the pink one" is

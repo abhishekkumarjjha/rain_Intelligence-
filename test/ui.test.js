@@ -194,6 +194,23 @@ try {
       ok(/Not configured/.test(shown.text), "the warning has to survive the quiet default");
     });
 
+    await check("every block of findings carries its own heading", async () => {
+      // Without one the eye carries the nearest heading down: a client
+      // advantage sitting in the right half of the grid below "Competitive
+      // pressure" reads as pressure, because pressure was the last thing named.
+      for (const sel of [".scol.lead .scolhead", ".scol.pressure .scolhead"]) {
+        ok(await page.locator(sel).count() > 0, `${sel} missing`);
+      }
+      for (const el of await page.locator(".sect > summary.secthead").all()) {
+        const t = (await el.innerText()).trim();
+        ok(t.length > 3, `a section rendered without a heading: "${t}"`);
+      }
+      // A heading that names a section without defining it invites the same
+      // misreading, so each one states its rule underneath.
+      const sects = await page.locator(".sect").count();
+      eq(await page.locator(".sect .sectrule").count(), sects, "a section is missing its rule line");
+    });
+
     await check("the palette uses blue, orange and green — not blue alone", async () => {
       const t = await page.evaluate(() => {
         const cs = getComputedStyle(document.documentElement);

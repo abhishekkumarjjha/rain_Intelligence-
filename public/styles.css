@@ -1162,6 +1162,29 @@ table.snap .rl .sm { display: block; font-size: 11px; opacity: .45; font-weight:
 }
 .ctxwrap > summary:hover { opacity: .9; }
 .ctxwrap[open] > summary { margin-bottom: 12px; }
+
+/* The sections below the columns get the SAME heading as the columns, because
+   they hold the same kind of thing. Without one the eye carried the nearest
+   heading down and read a client advantage as competitive pressure. */
+.sect { margin-top: 26px; }
+.sect > summary.secthead {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 12px; letter-spacing: .07em; text-transform: uppercase;
+  font-weight: 700; padding: 0 2px 10px; opacity: 1;
+  color: var(--ink-3); list-style: none;
+}
+.sect > summary.secthead::-webkit-details-marker { display: none; }
+.sect > summary.secthead:hover { color: var(--ink-2); }
+.sect.single  .sdot { background: #6E7C93; }
+.sect.neutral .sdot { background: #4A5468; }
+.sect[open] > summary.secthead { margin-bottom: 0; }
+/* The rule that defines the section, stated where it is needed. A heading
+   saying "observed in one advertiser" without saying why that is filed
+   separately invites the reading it exists to prevent. */
+.sectrule {
+  font-size: 12px; color: var(--ink-3); opacity: .8; line-height: 1.55;
+  max-width: 760px; margin: 0 2px 13px;
+}
 .fgrid.ctx { display: grid; gap: 10px; }
 @media (min-width: 940px) { .fgrid.ctx { grid-template-columns: 1fr 1fr; } }
 

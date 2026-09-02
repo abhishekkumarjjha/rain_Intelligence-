@@ -815,7 +815,7 @@ test("below three readable brands the set has no shape", () => {
 console.log("\nSTAGE 9 — weight, and the one sentence at the top");
 // ===========================================================================
 
-test("a lone advertiser's tactic is not weighted like a shared pattern", () => {
+test("a lone COMPETITOR's tactic is not weighted like a shared pattern", () => {
   // The complaint this fixes: "1 of 3 competitors advertise a $5 minimum" was
   // rendering identically to "2 of 3 mention member-owned", telling the reader
   // they carried the same diagnostic weight.
@@ -823,7 +823,7 @@ test("a lone advertiser's tactic is not weighted like a shared pattern", () => {
   for (const f of BOARD.findings) {
     assert.ok(f.significance, `${f.rule} has no significance`);
     const n = Number(f.count), d = Number(f.denominator);
-    if (Number.isFinite(n) && Number.isFinite(d) && d >= 3 && n === 1 && f.outcome !== "context") {
+    if (Number.isFinite(n) && Number.isFinite(d) && d >= 3 && n === 1 && f.outcome === "pressure") {
       assert.equal(f.significance, "isolated", `${f.rule} at ${n}/${d} should be isolated`);
     }
     if (Number.isFinite(n) && Number.isFinite(d) && d > 0 && n / d >= 0.5 && f.outcome !== "context") {
@@ -831,6 +831,57 @@ test("a lone advertiser's tactic is not weighted like a shared pattern", () => {
     }
   }
   assert.ok(Object.values(byRule).some((f) => f.significance === "primary"), "expected a primary finding");
+});
+
+test("the client being the only one doing something is never demoted", () => {
+  // The same 1-of-4 arithmetic means opposite things depending on WHO the one
+  // is. Read as an outlier it hid every sole advantage behind a fold, and the
+  // La Capitol auto-loan board printed "Where you lead: 0" directly above two
+  // cards naming exactly where they led.
+  const quiet = (domain, label) => chk(domain, label, {
+    headlines: ["Checking"], description: "Open an account online today.",
+    economicFacts: [], claims: [],
+  });
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Choice Checking", "6.50% APY"],
+      description: "Earn 6.50% APY. Get paid up to 2 days early.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+      claims: [{ claim: "early_direct_deposit", verbatim: "Get paid up to 2 days early", sourceField: "description" }],
+    })] },
+    competitors: [
+      { label: "Campus Federal", domain: "campusfederal.org", ads: [quiet("campusfederal.org", "Campus Federal")] },
+      { label: "Neighbors FCU", domain: "neighborsfcu.org", ads: [quiet("neighborsfcu.org", "Neighbors FCU")] },
+      { label: "BR Telco", domain: "brtelco.org", ads: [quiet("brtelco.org", "BR Telco")] },
+    ],
+    product: "checking",
+    progress: {
+      "lacapfcu.org": { listed: 1, read: 1 }, "campusfederal.org": { listed: 1, read: 1 },
+      "neighborsfcu.org": { listed: 1, read: 1 }, "brtelco.org": { listed: 1, read: 1 },
+    },
+  });
+
+  const leads = board.findings.filter((f) => f.outcome === "lead");
+  assert.ok(leads.length >= 1, "expected the client's sole APY to be a lead finding");
+  for (const f of leads) {
+    assert.notEqual(f.significance, "isolated",
+      `${f.rule} is about the client, so being alone in it is the finding, not a reason to hide it`);
+  }
+  // A single advertiser out of four — the arithmetic that used to demote it.
+  assert.ok(leads.some((f) => Number(f.count) === 1 && Number(f.denominator) >= 3),
+    "the fixture no longer exercises the 1-of-many case");
+  // And it has to reach the column, not just carry the right label.
+  assert.ok(board.boards.lead.some((f) => f.significance !== "isolated"),
+    "the lead column would still render 0");
+});
+
+test("no finding in the lead column is ever filed as a single advertiser's tactic", () => {
+  // The section below the columns pulls isolated findings from BOTH boards. If
+  // a lead one can land there it appears under a heading about competitors,
+  // which is how a client advantage came to read as competitive pressure.
+  for (const f of BOARD.boards.lead) {
+    assert.notEqual(f.significance, "isolated", `${f.rule} would fall out of the lead column`);
+  }
 });
 
 test("the client's stance on the headline rate is always primary", () => {
