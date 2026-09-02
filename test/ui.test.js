@@ -193,48 +193,11 @@ try {
     // the per-advertiser capture cache, so it states the SOURCE, what will
     // actually be spent, and what is being reused — the numbers that change
     // depending on who else on the team ran this competitor that week.
-    await check("every source option is selectable and legible", async () => {
-      // The popup is painted by the browser, not by the page, and defaults to a
-      // LIGHT surface while the options inherit the select's light text. That
-      // rendered Meta and Both as washed-out grey — indistinguishable from
-      // disabled, on a control where "we can't do that" is a real state the app
-      // reports elsewhere. Guarded here because it is invisible to any
-      // assertion that only reads text.
-      const r = await page.evaluate(() => {
-        const scheme = getComputedStyle(document.documentElement).colorScheme;
-        return {
-          scheme,
-          opts: [...document.getElementById("sourceSel").options].map((o) => {
-            const cs = getComputedStyle(o);
-            return { v: o.value, disabled: o.disabled, color: cs.color, bg: cs.backgroundColor };
-          }),
-        };
-      });
-      ok(/dark/.test(r.scheme), `native widgets must follow the dark app, got: ${r.scheme}`);
-      eq(r.opts.length, 3, "google_display, meta, both");
-      for (const o of r.opts) {
-        eq(o.disabled, false, `${o.v} must be selectable`);
-        ok(o.color !== o.bg, `${o.v} renders its text in its own background colour`);
-      }
-    });
-
     await check("the national tier is on by default and says who it adds", async () => {
       ok(await page.locator("#natRow").isVisible(), "the nationals row is not on the competitor screen");
       eq(await page.locator("#nationalsChk").isChecked(), true, "the tier should default to ON");
       const t = await page.locator("#natRow").innerText();
       ok(/Chase/.test(t) && /Capital One/.test(t), `the row must name both: ${t}`);
-    });
-
-    await check("the tier hides itself where it cannot apply", async () => {
-      // Nationals are Google-display only. A checkbox sitting next to a Meta
-      // capture it cannot affect is worse than no checkbox — and the choice
-      // must survive the round trip rather than being reset by the hiding.
-      await page.selectOption("#sourceSel", "meta");
-      eq(await page.locator("#natRow").isVisible(), false, "still showing for Meta");
-      await page.selectOption("#sourceSel", "both");
-      ok(await page.locator("#natRow").isVisible(), "hidden for Both, where Google display still runs");
-      await page.selectOption("#sourceSel", "google_display");
-      eq(await page.locator("#nationalsChk").isChecked(), true, "the preference was reset by hiding");
     });
 
     await check("switching the tier off re-quotes the cost downward", async () => {

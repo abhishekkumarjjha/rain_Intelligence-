@@ -184,19 +184,6 @@ try {
   }
 
   {
-    const { body } = await S.post("/api/capture", {
-      mode: "creative", sources: ["meta"],
-      clientDomain: "lacaptest.org", clientLabel: "La Cap Test", product: "checking",
-      competitors: [{ label: "Summit Credit Union", domain: "summitcu.test" }],
-    });
-    await check("Meta does not get nationals — their coverage is unproven there", () => {
-      const domains = body.runs[0].targets.map((t) => t.domain);
-      ok(!domains.includes("chase.com"), "no Chase on Meta");
-      eq(body.runs[0].targets.length, 1, "only the chosen competitor");
-    });
-  }
-
-  {
     const { status, body } = await S.post("/api/capture", {
       mode: "creative", sources: ["google_display"],
       clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",

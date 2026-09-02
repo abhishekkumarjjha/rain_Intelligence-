@@ -6,8 +6,8 @@
 
 const S = {
   url: "", domain: "", clientLabel: "", product: "other", productLabel: "",
-  mode: "", days: 30, metaDays: 90,
-  sourceChoice: "google_display",   // google_display | meta | both
+  mode: "", days: 30,
+  sourceChoice: "google_display",   // google_display | google_search
   force: false,
   includeNationals: true,   // the standing tier; on unless switched off
   competitors: [],          // {label, domain, typeTag, reason, relevance, on}
@@ -20,7 +20,7 @@ const S = {
   //
   // Not one array with a `source` field and a filter over it. The tab switches
   // which tree is rendered; it does not filter a combined collection. That is
-  // what makes it structurally impossible for a Google count and a Meta count
+  // what makes it structurally impossible for two surfaces' counts
   // to end up in the same denominator, or for one source's filter selection to
   // silently apply to the other's data.
   bySource: {},             // { [source]: { runId, status, run, filter, productFilter } }
@@ -36,7 +36,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
    neither contains a character worth escaping.
 
    Every URL rendered into an href here comes from a provider, and two of them
-   are chosen by the advertiser rather than observed about them — a Meta card's
+   are chosen by the advertiser rather than observed about them — a card's
    `link_url` is whatever the buyer typed. So the scheme is checked before the
    link is built, not escaped afterwards, and anything that is not plain http(s)
    renders as no link at all rather than as a link that runs. */
@@ -206,9 +206,7 @@ function enterMode(mode) {
   //
   // Competitive Intelligence has exactly one legal source and always did. The
   // Wall now has exactly one too: it is display, by the cost decision in
-  // lib/sources.js. Leaving a picker that reads "Google display / Meta / Both"
-  // on a screen where only the first is real offers a choice that does not
-  // exist and names a surface this build does not capture.
+  // lib/sources.js, so a picker would offer a choice that does not exist.
   const isBench = mode === "benchmark";
   S.sourceChoice = isBench ? "google_search" : "google_display";
   $("sourceSel").value = "google_display";
@@ -216,8 +214,7 @@ function enterMode(mode) {
   document.querySelectorAll(".scopebox label").forEach((l) => {
     if (l.textContent.trim() === "Sources") l.style.display = "none";
   });
-  $("winMetaWrap").classList.toggle("hidden", isBench || !sourcesForChoice(S.sourceChoice).includes("meta"));
-  $("winGoogleWrap").classList.toggle("hidden", !isBench && S.sourceChoice === "meta");
+  $("winGoogleWrap").classList.remove("hidden");
   syncNationalsRow();
   renderCompetitors();
   show("s-comp");
@@ -312,8 +309,7 @@ async function startCapture({ force = false } = {}) {
       product: S.product, competitors, sources, force,
       includeNationals: S.includeNationals,
       // Per-source windows, because "last 30 days" means a served window on
-      // Google and a start-date filter on Meta.
-      days: { google_display: S.days, google_search: S.days, meta: S.metaDays },
+      days: { google_display: S.days, google_search: S.days },
     }),
   })).json();
   $("captureBtn").disabled = false;
@@ -321,7 +317,6 @@ async function startCapture({ force = false } = {}) {
   if (!r.ok) {
     showError({
       serpapi_not_configured: "SERPAPI_API_KEY is not set on the server, so Google ads cannot be fetched.",
-      searchapi_not_configured: "SEARCHAPI_API_KEY is not set on the server, so Meta ads cannot be fetched.",
       anthropic_not_configured: "ANTHROPIC_API_KEY is not set on the server, so creatives cannot be read.",
       no_competitors: "Select at least one competitor before capturing.",
       bad_client_domain: "That client domain could not be read. Re-enter the landing page URL.",
@@ -369,7 +364,7 @@ async function startCapture({ force = false } = {}) {
   for (const run of r.runs) poll(run.source);
 }
 
-const SRC_LABEL = { google_display: "Google display", google_search: "Google search", meta: "Meta" };
+const SRC_LABEL = { google_display: "Google display", google_search: "Google search" };
 
 /* A capture takes tens of seconds and the poll is the only thing driving the UI
    forward. A single failed request used to end the loop silently, leaving the
@@ -426,7 +421,7 @@ async function poll(source) {
 }
 
 /* Show results as soon as the FIRST source finishes rather than waiting for
-   both. With "Both" selected, Google typically lands well before Meta — making
+   both. Two sources land at different times — making
    someone stare at a finished Google wall they cannot see, because a second
    provider is still paginating, is a worse experience than a tab that fills in.
    The still-running tab shows a pulse. */
@@ -470,7 +465,7 @@ function renderSourceTabs() {
       S.activeSource = n.dataset.s;
       S.run = st.run;
       // Filters live PER SOURCE, so switching tabs restores that source's own
-      // selection instead of carrying a Google product chip onto a Meta wall
+      // selection instead of carrying one source's product chip onto another
       // where the counts behind it are different.
       S.filter = st.filter; S.productFilter = st.productFilter;
       renderSourceTabs();
@@ -481,7 +476,6 @@ function renderSourceTabs() {
 
 function countFor(run) {
   if (!run) return null;
-  if (run.source === "meta") return run.meta?.capturedCount ?? 0;
   if (run.mode === "creative") return run.creative?.capturedCount ?? (run.ads?.length || 0);
   return run.ads?.length || 0;
 }
@@ -498,31 +492,9 @@ function progressLine(p, source) {
       : age < 1 ? "captured today"
       : age < 2 ? "captured yesterday"
       : `captured ${Math.round(age)} days ago`;
-    return `<b>${p.read}</b> ${source === "meta" ? "messages" : "read"} · <span style="color:var(--green)">${when}, no request spent</span>`;
+    return `<b>${p.read}</b> read · <span style="color:var(--green)">${when}, no request spent</span>`;
   }
 
-  if (source === "meta") {
-    if (p.status === "resolving") return "resolving the Meta Page…";
-    if (p.status === "reading") return `reading <b>${p.messages ?? "…"}</b> messages…`;
-    if (p.status === "needs_confirmation") {
-      return `<span style="color:var(--amber)">several Pages share this name — needs confirmation</span>`;
-    }
-    if (p.status === "failed") return `<span style="color:var(--amber)">${esc(reasonText(p.reason))}</span>`;
-    if (p.status === "empty") {
-      // A resolved Page with no ads is a REAL ANSWER about the competitor.
-      // A Page we could not resolve is a failure of ours. Never the same line.
-      return p.pageResolved
-        ? `<span style="color:var(--amber)">Page resolved · no Meta ads in this window</span>`
-        : `<span style="color:var(--amber)">${esc(reasonText(p.reason))}</span>`;
-    }
-    const bits = [`<b>${p.messages}</b> messages`];
-    if (p.rawUnits) bits.push(`from ${p.rawUnits} cards`);
-    if (p.found != null) bits.push(`of ${Number(p.found).toLocaleString()} ads`);
-    if (p.visionRead) bits.push(`${p.visionRead} read by vision`);
-    if (p.rainManaged) bits.push(`<span style="color:#C9A6E8">${p.rainManaged} RAIN-managed</span>`);
-    if (p.moreAvailable) bits.push(`<span style="color:var(--amber)">more pages available</span>`);
-    return bits.join(" · ");
-  }
 
   if (p.status === "fetching") return "fetching creatives…";
   if (p.status === "reading") return `reading <b>${p.downloading}</b> creatives…`;
@@ -558,9 +530,8 @@ function renderResults() {
   // Each half gets the one extra view that belongs to it. The search wall is
   // free because Competitive Intelligence already captured and read those ads;
   // Key insights is a model call, so it lives behind a click on the Wall.
-  const isGoogleRun = r.source !== "meta";
   $("searchWallBtn").classList.toggle("hidden", !(r.mode === "benchmark" && r.ads?.length));
-  $("insightsBtn").classList.toggle("hidden", !(r.mode === "creative" && isGoogleRun && (r.ads?.length || 0) >= 4));
+  $("insightsBtn").classList.toggle("hidden", !(r.mode === "creative" && (r.ads?.length || 0) >= 4));
   $("insightsBtn").textContent = "Key insights";
   $("insightsBtn").disabled = false;
 
@@ -574,15 +545,10 @@ function renderResults() {
   // preview-only creatives, a provider outage. That is a RESULT and it has to be
   // rendered as one, with the per-target reasons still visible, rather than
   // dropping the user onto an empty results screen.
-  renderFunnel(r.source === "meta" ? r.meta?.funnel : (r.mode === "creative" ? r.creative?.funnel : r.funnel));
+  renderFunnel(r.mode === "creative" ? r.creative?.funnel : r.funnel);
   renderDiff(r.diff);
 
-  if (r.source === "meta") {
-    // Meta has its own renderer end to end. It shares the card styling and
-    // nothing else: different grain (messages, not creatives), different counts
-    // and different date vocabulary.
-    renderMeta(r);
-  } else if (!r.ads?.length) {
+  if (!r.ads?.length) {
     renderNothingCaptured(r);
   } else if (r.mode === "creative") {
     renderCreative(r);
@@ -1396,196 +1362,8 @@ function monthYear(iso) {
   return isNaN(d) ? iso : d.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   META RENDERING
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-function renderMeta(r) {
-  const m = r.meta;
-  const st = S.bySource[r.source];
-
-  if (S.productFilter === null) S.productFilter = m.defaultProductFilter || "all";
-
-  $("resStats").innerHTML = `
-    <div class="st"><div class="v">${m.summary.messages}</div><div class="k">Messages</div></div>
-    <div class="st"><div class="v">${m.summary.adRecords}</div><div class="k">Ad records</div></div>
-    <div class="st"><div class="v">${m.summary.withOffer}</div><div class="k">With an offer</div></div>`;
-
-  renderPageStates(r);
-
-  // ---- product chips, over the FULL captured set ---------------------------
-  const chips = [{ code: "all", label: "All products", count: m.capturedCount }, ...m.byProduct];
-  $("productFilters").innerHTML = chips.map((x) =>
-    `<button class="fchip ${S.productFilter === x.code ? "on" : ""}" data-p="${esc(x.code)}">${esc(x.label)}<span class="n">${x.count}</span></button>`
-  ).join("");
-  $("productFilters").querySelectorAll(".fchip").forEach((n) =>
-    n.onclick = () => { S.productFilter = n.dataset.p; if (st) st.productFilter = S.productFilter; renderMeta(r); });
-
-  // ---- competitor chips ----------------------------------------------------
-  const comps = [{ code: "all", label: "All", count: m.capturedCount },
-    ...m.byCompetitor.filter((c) => c.count).map((c) => ({ code: c.domain, label: c.label, count: c.count }))];
-  $("filters").innerHTML = comps.map((x) =>
-    `<button class="fchip ${S.filter === x.code ? "on" : ""}" data-f="${esc(x.code)}">${esc(x.label)}<span class="n">${x.count}</span></button>`
-  ).join("");
-  $("filters").querySelectorAll(".fchip").forEach((n) =>
-    n.onclick = () => { S.filter = n.dataset.f; if (st) st.filter = S.filter; renderMeta(r); });
-
-  // ---- the wall ------------------------------------------------------------
-  let msgs = m.messages;
-  if (S.productFilter && S.productFilter !== "all") msgs = msgs.filter((x) => (x.product || "other") === S.productFilter);
-  if (S.filter !== "all") msgs = msgs.filter((x) => x.institution === S.filter);
-
-  const rainCount = msgs.filter((x) => x.rainManaged).length;
-
-  $("resultBody").innerHTML = msgs.length
-    ? `${rainCount ? `<div class="scopebar" style="display:block">
-         <b>${rainCount}</b> of these ${rainCount === 1 ? "is" : "are"} RAIN-managed — the destination carries RAIN campaign tracking,
-         so ${rainCount === 1 ? "it is" : "they are"} work RAIN runs rather than independent competitor activity. Badged below, and never counted as a competitor's own strategy.
-       </div>` : ""}
-       <div class="wall">${msgs.map(metaCard).join("")}</div>`
-    : `<div class="empty">No Meta messages match this filter.<br />
-       ${m.capturedCount} were captured in total — try All products, or widen the window and re-run.</div>`;
-
-  $("resultBody").querySelectorAll(".shot").forEach((n) =>
-    n.onclick = () => openMetaEvidence(n.dataset.mid));
-}
-
-/* Page resolution is a SEPARATE reported step, so "we could not find them" and
-   "they are not advertising" never collapse into one sentence. */
-function renderPageStates(r) {
-  const rows = Object.entries(r.progress || {})
-    .filter(([, p]) => p.status === "needs_confirmation" || (p.status === "empty" && p.pageResolved));
-  const host = $("scopeBar");
-  if (!rows.length) { host.classList.add("hidden"); return; }
-  host.classList.remove("hidden");
-  host.innerHTML = rows.map(([domain, p]) => {
-    if (p.status === "needs_confirmation") {
-      return `<div class="pagestate">
-        <h4>${esc(p.label || domain)} — several Facebook Pages share this name</h4>
-        <p>Picking one automatically would risk showing another company's ads under this competitor's name, so nothing was fetched. Confirm which Page is theirs and it will be remembered.</p>
-        <div class="candlist">${(p.candidates || []).map((c) => `
-          <div class="cand" data-domain="${esc(domain)}" data-pid="${esc(c.pageId)}" data-pname="${esc(c.pageName)}">
-            <div class="cn">${esc(c.pageName)}</div>
-            <div class="cm">${esc(c.category || "")}${c.likes ? ` · ${Number(c.likes).toLocaleString()} likes` : ""}</div>
-          </div>`).join("")}</div>
-      </div>`;
-    }
-    return `<div class="pagestate">
-      <h4>${esc(p.label || domain)} — Page found, no Meta ads in this window</h4>
-      <p>Their Facebook Page resolved cleanly${p.pageName ? ` (${esc(p.pageName)})` : ""} and returned nothing for this window. That is a result about their advertising, not a lookup failure.</p>
-    </div>`;
-  }).join("");
-
-  host.querySelectorAll(".cand").forEach((n) => {
-    n.onclick = async () => {
-      n.style.opacity = ".5";
-      await fetch("/api/meta/confirm-page", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ domain: n.dataset.domain, pageId: n.dataset.pid, pageName: n.dataset.pname }),
-      });
-      n.outerHTML = `<div class="cand" style="border-color:var(--green)"><div class="cn">Saved — re-run to capture ${esc(n.dataset.pname)}</div></div>`;
-    };
-  });
-}
-
-function metaCard(m) {
-  const src = m.mediaHash ? `/api/media/${encodeURIComponent(m.mediaHash)}` : safeUrl(m.imageUrl);
-  const prov = { url: "from link", provider_text: "from copy", vision: "read from artwork", unresolved: "unclassified" }[m.productFrom] || "";
-  return `
-  <div class="adcard">
-    <div class="shot ${m.isVideo ? "vid" : ""}" data-mid="${esc(m.messageId)}">
-      ${src
-        ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=broken>Creative could not be loaded</div>'" />`
-        : `<div class="broken">No creative stored for this message</div>`}
-    </div>
-    <div class="meta">
-      <div class="who">${esc(m.institutionLabel || m.institution)}</div>
-      <div class="hl">${esc(m.title || m.headlineInArt || "(no headline)")}</div>
-      ${m.body ? `<div class="sh">${esc(m.body.slice(0, 150))}${m.body.length > 150 ? "…" : ""}</div>` : ""}
-      ${m.offer ? `<div class="offer">${esc(m.offer.value)}${m.offer.term ? ` · ${esc(m.offer.term)}` : ""}</div>` : ""}
-      <div class="foot">
-        ${m.platforms?.length ? `<span class="plat">${esc(m.platforms.join(" · "))}</span>` : ""}
-        ${m.isActive ? `<span class="live">${esc(metaTiming(m))}</span>` : `<span>${esc(metaTiming(m))}</span>`}
-        ${m.adRecordCount > 1 ? `<span class="tag varbadge">${m.adRecordCount} ad records</span>` : ""}
-        ${m.assetCount > 1 ? `<span class="tag varbadge">${m.assetCount} assets</span>` : ""}
-        ${m.isVideo ? `<span class="tag badge-video">video</span>` : ""}
-        ${m.rainManaged ? `<span class="badge-rain">RAIN-managed</span>` : ""}
-        ${prov ? `<span class="badge-prov">${esc(prov)}</span>` : ""}
-      </div>
-    </div>
-  </div>`;
-}
-
-/* Meta timing copy, mirroring lib/meta-analyze.js metaTimingLabel().
-   NEVER a closed range for a live ad, and NEVER a day count: every probed ad was
-   is_active=true while carrying an end_date already in the past, so end_date is
-   a rolling last-observed stamp rather than a stop date, and end-minus-start is
-   not the days-served measurement Google's column means. */
-function metaTiming(m) {
-  const d = m.startDate ? new Date(String(m.startDate).slice(0, 10) + "T00:00:00Z") : null;
-  const started = d && !isNaN(d) ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "";
-  if (m.isActive) return started ? `Active · started ${started}` : "Active";
-  return started ? `Started ${started}` : "";
-}
-
-function openMetaEvidence(messageId) {
-  const m = (S.run?.meta?.messages || []).find((x) => x.messageId === messageId);
-  if (!m) return;
-  const src = m.mediaHash ? `/api/media/${encodeURIComponent(m.mediaHash)}` : safeUrl(m.imageUrl);
-  const provLabel = { url: "the destination link", provider_text: "the ad copy", vision: "the artwork", unresolved: "not resolved" }[m.productFrom] || "—";
-
-  $("drawerTitle").textContent = "Meta evidence";
-  $("drawerBody").innerHTML = `
-    <div class="evcard">
-      <div class="shot">${src ? `<img src="${esc(src)}" alt="" />` : `<div style="padding:24px;color:#8B99B5">No stored creative</div>`}</div>
-      <div class="m">
-        <b>${esc(m.institutionLabel || m.institution)}</b> · ${esc(m.pageName || "")}<br />
-        ${m.title ? `${esc(m.title)}<br />` : ""}
-        ${m.body ? `<span style="color:var(--ink-3)">${esc(m.body)}</span><br />` : ""}
-        ${m.offer
-          ? `<b>${esc(m.offer.value)}</b>${(m.offer.term || m.offer.minimum || m.offer.qualifier)
-              ? ` — ${esc([m.offer.term, m.offer.minimum, m.offer.qualifier].filter(Boolean).join(" · "))}`
-              : " — no term or minimum printed"} <span class="badge-prov">${esc(m.offerFrom === "vision" ? "read from artwork" : "from ad copy")}</span><br />`
-          : ""}
-        <br />
-        Product: <b>${esc(m.product || "unresolved")}</b> <span class="badge-prov">${esc(provLabel)}</span><br />
-        ${esc(metaTiming(m))}<br />
-        Platforms: ${esc((m.platforms || []).join(", ") || "—")} · Format: ${esc(m.displayFormat || "—")}<br />
-        ${m.adRecordCount > 1 ? `Served under ${m.adRecordCount} Meta ad records<br />` : ""}
-        ${m.assetCount > 1 ? `${m.assetCount} asset variants of this message<br />` : ""}
-        ${m.rainManaged ? `<span class="badge-rain">RAIN-managed</span> — the destination carries RAIN campaign tracking.<br />` : ""}
-        <br />
-        <span style="color:var(--ink-3)">Meta ad IDs: ${esc((m.sourceAdIds || []).join(", "))}</span><br />
-        ${safeUrl(m.destinationUrl) ? `<a href="${esc(safeUrl(m.destinationUrl))}" target="_blank" rel="noopener">Destination ↗</a> · ` : ""}
-        <a href="https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=US&view_all_page_id=${encodeURIComponent(m.pageId || "")}" target="_blank" rel="noopener">All ads for this Page ↗</a>
-        <br /><br />
-        <span style="color:var(--ink-3);font-size:11px">Provider end date (metadata, not a stop date): ${esc(m.providerEndDate || "—")}</span>
-      </div>
-    </div>`;
-  $("drawer").classList.add("on"); $("drawerBg").classList.add("on");
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   NEW CONTROLS
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-$("sourceSel").onchange = () => {
-  S.sourceChoice = $("sourceSel").value;
-  syncNationalsRow();
-  const showG = S.sourceChoice !== "meta";
-  const showM = sourcesForChoice(S.sourceChoice).includes("meta");
-  $("winGoogleWrap").classList.toggle("hidden", !showG);
-  $("winMetaWrap").classList.toggle("hidden", !showM);
-  refreshCost();
-};
-$("metaDaysSel").onchange = () => { S.metaDays = Number($("metaDaysSel").value); refreshCost(); };
-$("forceChk").onchange = () => { S.force = $("forceChk").checked; refreshCost(); };
-
-/* The nationals row applies to Google display only, so it hides itself rather
-   than sitting there inert for Meta or Benchmark — a control that cannot affect
-   the run it is next to is worse than no control. Hiding it never changes the
-   stored preference, so switching Meta -> Google display brings back whatever
-   the strategist last chose. */
+/* Nationals apply to both halves; the row only ever hides itself when there is
+   no capture it could affect. */
 $("nationalsChk").onchange = () => { S.includeNationals = $("nationalsChk").checked; refreshCost(); };
 
 function syncNationalsRow() {
@@ -1594,7 +1372,7 @@ function syncNationalsRow() {
   // One appeared in the results of a benchmark the user was never offered the
   // chance to opt out of. A capture the user did not agree to is the one thing
   // the cost line exists to prevent.
-  const applies = S.sourceChoice !== "meta";
+  const applies = true;
   $("natRow").classList.toggle("hidden", !applies);
   $("natWhy").textContent = S.mode === "benchmark"
     ? "Chase and Capital One as a reference ceiling. They are shown in their own block and are excluded from every finding and every denominator — we cannot tell whether their ads served in this market."
@@ -1622,7 +1400,7 @@ async function refreshCost() {
           mode: S.mode, sources, competitors, force: S.force,
           includeNationals: S.includeNationals,
           clientDomain: S.domain,
-          days: { google_display: S.days, google_search: S.days, meta: S.metaDays },
+          days: { google_display: S.days, google_search: S.days },
         }),
       })).json();
       if (!r.ok) return;

@@ -87,32 +87,20 @@
       <div class="scopebox">
         <label>Product scope</label>
         <select id="productSel"></select>
-        <!-- Chosen BEFORE anything is spent, so the cost line below can be
-             accurate. Creative work on display does not need Meta requests. -->
-        <!-- No source chooser. Each half of the tool captures exactly one
-             surface — the Wall is Google display, Competitive Intelligence is
-             Google search — so there is no choice to offer. Kept as a hidden
-             control because the capture request still carries a source and the
-             Meta provider is still wired underneath, unreachable from here. -->
+        <!-- No source chooser. Each half captures exactly one surface — the
+             Wall is Google display, Competitive Intelligence is Google search —
+             so there is no choice to offer. Kept as a hidden control because
+             the capture request still carries a source. -->
         <label class="lead" style="display:none">Sources</label>
         <select id="sourceSel" class="primary-select" style="display:none">
           <option value="google_display">Google display</option>
         </select>
-        <!-- Two windows, because the two filters ask different questions.
-             Google: served during the window. Meta: started within it. -->
+        <!-- The Transparency Center filters on a SERVED window. -->
         <span class="winwrap" id="winGoogleWrap">
           <label>Google · served in</label>
           <select id="daysSel">
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
-          </select>
-        </span>
-        <span class="winwrap hidden" id="winMetaWrap">
-          <label>Meta · started in</label>
-          <select id="metaDaysSel">
-            <option value="30">Last 30 days</option>
-            <option value="90" selected>Last 3 months</option>
-            <option value="180">Last 6 months</option>
           </select>
         </span>
       </div>
@@ -123,8 +111,7 @@
     <!-- The standing nationals. On by default, mirroring RAIN's six-column
          analysis where slots 4 and 5 never change — but visible and switchable,
          because they cost two SerpApi requests on a cold cache and a strategist
-         asking a purely local question is entitled to say so. Google display
-         only, so the row hides itself for Meta and Benchmark. -->
+         asking a purely local question is entitled to say so. -->
     <label class="natrow" id="natRow">
       <input type="checkbox" id="nationalsChk" checked />
       <span class="nattick" aria-hidden="true"></span>
