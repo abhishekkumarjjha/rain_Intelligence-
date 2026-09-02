@@ -107,25 +107,79 @@ copy the folder and the cache comes with it.
 
 **The trap, and it has caused two separate bugs:** a `_captures` entry stores
 the ads it **read**, not the listing it read them from. So raising a read cap
-was invisible — the entry replayed its old count forever. `server.js` now
-treats an entry as a miss when the provider had more renderable creatives than
-the entry holds *and* the current cap has room. If you add another dial that
-affects *how much* gets read, check it against this.
+was invisible — the entry replayed its old count forever.
+
+The fix, and the wrong version of it, are both worth knowing. Captures record
+the cap they ran under (`run.readCap`), and an entry is a miss only when that
+recorded cap is below the one now in force. The obvious alternative — compare
+read-count against renderable — is wrong: dedupe collapses identical artwork
+before the cap is spent, so `held < renderable` is routine (Chase holds 70 of
+85 and always will). That version re-fetched three of seven advertisers on
+every run, forever, and the cost line said 0 requests first. If you add another
+dial that changes *how much* gets read, record it the same way.
 
 Caps today: local `RI_MAX_READ=60`, national `RI_NATIONAL_READ=100` (= `num`
 in the listing request, so nothing fetched goes unread).
 
+## Sharing the cache with another app
+
+The cache is portable by construction and has been verified as such — copied to
+an unrelated directory, pointed at with `RI_DATA_DIR`, and read back with hits
+on all three entries. Roughly 50 MB today.
+
+- **Capture key** is `sha256(source | domain | days)`. Nothing machine-specific,
+  no absolute paths, no hostnames.
+- **Evidence** is base64 *inside* the JSON, so a copied cache needs no network
+  and no image re-fetch.
+- **One root**: `RI_DATA_DIR`. Copy the folder, set the variable. On Render use
+  a persistent disk; on AWS sync from S3 at boot and back on write.
+
+Three things a second app must respect:
+
+1. **Use the same `days` values.** The window is in the capture key, so a
+   30-day cache is a miss for a 28-day request. Same for `source`
+   (`google_search` / `google_display`).
+2. **Declare your own reader version.** Extractions are keyed on
+   `creativeId + reader version`. A second app with a different extraction
+   prompt but the same reader key will silently consume extractions written for
+   *this* prompt and treat them as its own. That exact bug — banner records
+   served to benchmark runs — is why the version is in the key at all. Bump it,
+   don't reuse it.
+3. **Treat it as a cache, not a database.** Writes are plain `writeFileSync`,
+   not atomic. Concurrent readers are safe, and a torn entry fails `JSON.parse`
+   and degrades to a miss rather than to wrong data — but two processes writing
+   the same key at the same moment is not coordinated. If both apps will
+   capture (rather than one capturing and one reading), give them separate
+   roots and sync, or put a lock in front.
+
+The natural split, if the second app is also competitive intelligence: let this
+one own capture and let the other read. Nationals in particular are captured
+once a quarter and shared, so a reader gets them for free.
+
 ## State of the nationals
 
-Chase and Capital One are captured once per 30 days and **shared by all 40
-clients**, so their read cost amortises to nothing. They are excluded from
+Chase and Capital One are captured once per **90 days** — national creative
+turns over quarterly — and are **shared by all 40 clients**, so their read cost
+amortises to nothing. Because that TTL can outrun the window the client is read
+over, `benchmarkFor()` states the capture age on the reference note whenever it
+exceeds that window, and stays quiet when it does not. They are excluded from
 every local denominator — we cannot tell from the Transparency Center whether
 their ads served in a given market — but they do produce findings via
 `national_gap`, which fires only when **every** captured national advertises
 something the client does not.
 
-Current cached read: Chase 70, Capital One 97, across all products
-(Chase: 30 credit-card, 21 checking, 6 auto-loan; Capital One: 78 credit-card).
+Cached today, search (text) creatives:
+Chase 70 read (30 credit-card, 21 checking, 6 auto-loan);
+Capital One 97 (78 credit-card).
+
+Cached today, display (image) creatives:
+Chase 15 of 18 renderable — and only **27 exist**, so that is near-complete
+rather than a sample; 14 of them are credit cards.
+Capital One 47, led by savings (16), then checking (9), with credit cards fifth
+(5) — the inverse of their search mix. Different channel, different message.
+
+Seed them with `POST /api/capture {"seed": true, ...}` — a national-only
+capture that takes no competitors and produces no client-facing wall.
 
 **Not done: pagination.** The listing request is `num: 100` with no use of
 `serpapi_pagination.next_page_token`, against ~4,000 listed for Chase. One page
@@ -143,9 +197,9 @@ rebuilt around a client picker + product select; regional/national scope tags.
 
 Known and deliberate:
 
-- **The Wall has had far less attention than the board.** It has never been
-  captured on this install — zero `banner` extractions — so any Wall work needs
-  a display capture first.
+- **The Wall has had far less attention than the board.** Nationals are now
+  captured for display (62 banner extractions), so it can be opened — but no
+  local competitor has ever been captured for display on this install.
 - OCR triage (tesseract.js) not built.
 - Playwright not installed, so the UI suite never runs.
 
