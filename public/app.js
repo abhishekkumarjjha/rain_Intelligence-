@@ -883,7 +883,7 @@ function renderBenchmark(r) {
   // Fulfillment for quasi-analysis: counted facts a client draws their own
   // conclusion from. That gate belongs in Creative and Sales.
   $("resultBody").innerHTML = `
-    ${boardHtml(r.board, r.industry)}
+    ${boardHtml(r.board)}
     <details class="auditwrap">
       <summary>Full benchmark table and capture detail</summary>
       ${findings ? `<div class="findings">${findings}</div>` : ""}
@@ -898,7 +898,7 @@ function renderBenchmark(r) {
 // THE FINDINGS BOARD
 // ===========================================================================
 
-function boardHtml(board, industry) {
+function boardHtml(board) {
   if (!board) return "";
 
   // Coverage first, because every denominator below depends on it and a reader
@@ -932,11 +932,22 @@ function boardHtml(board, industry) {
           ${board.empty?.remedy ? `<div class="femptyr">${esc(board.empty.remedy)}</div>` : ""}
         </div>` : `
         <div class="scoreboard">
-          ${columnHtml("lead", "Where you lead", b.lead,
+          ${columnHtml("lead", "Where you lead", b.lead.filter(notIsolated),
             "Nothing in the captured ads put this client ahead.")}
-          ${columnHtml("pressure", "Where competitors lead", b.pressure,
-            "No competitor was ahead in the captured ads.")}
+          <!-- "Where competitors LEAD" was too strong for what sat under it.
+               One competitor printing a $5 minimum does not establish that they
+               lead — it is a difference observed in a single advertiser. The
+               column now holds only shared or comparable pressure; lone tactics
+               move to their own block below, where they cannot be mistaken for
+               a market standard. -->
+          ${columnHtml("pressure", "Competitive pressure", b.pressure.filter(notIsolated),
+            "No competitor was ahead across the captured set.")}
         </div>
+        ${isolatedOf(b).length ? `
+          <details class="ctxwrap" open>
+            <summary>Other differences observed — ${isolatedOf(b).length}</summary>
+            <div class="fgrid ctx">${isolatedOf(b).map(cardHtml).join("")}</div>
+          </details>` : ""}
         ${b.context.length ? `
           <!-- OPEN by default, and named neutrally. These are the findings that
                are neither a win nor a loss — the mixed-message question, the age
@@ -950,7 +961,6 @@ function boardHtml(board, industry) {
       `}
 
       ${setShapeHtml(board.setShape)}
-      ${industryHtml(industry)}
       ${snapshotHtml(board.snapshot)}
     </section>`;
 }
@@ -974,6 +984,12 @@ function primaryReadHtml(pr) {
       <div class="preadframe">${esc(pr.framing)}</div>
       <h4 class="preadhead">${esc(pr.headline)}</h4>
       <div class="preaddiff">${esc(pr.differences)}</div>
+      ${pr.localVsNational ? `<div class="preadlocal">${esc(pr.localVsNational)}</div>` : ""}
+      ${pr.changes?.length ? `
+        <div class="preadchange">
+          <div class="preadchangeh">Since the previous review</div>
+          ${pr.changes.map((c) => `<div class="preadchangeline">${esc(c.text)}</div>`).join("")}
+        </div>` : ""}
       <div class="preadbound">${esc(pr.boundary)}</div>
     </div>`;
 }
@@ -1019,6 +1035,9 @@ const chipTone = (f) => CHIP_TONE[f.metric] || "t-slate";
 
 /* Heaviest first inside a column, so the order carries weight as well as the type size. */
 const SIG_ORDER = ["primary", "supporting", "isolated", "internal"];
+/* A tactic used by one advertiser is a difference, not a competitor leading. */
+const notIsolated = (f) => f.significance !== "isolated";
+const isolatedOf = (b) => [...b.lead, ...b.pressure].filter((f) => f.significance === "isolated");
 
 /** One finding: one bold sentence, one line of detail, one evidence chip. */
 function cardHtml(f) {
@@ -1044,11 +1063,10 @@ function cardHtml(f) {
 /**
  * What the captured set is competing on — counted, never written.
  *
- * Sits ABOVE the industry block deliberately. This is arithmetic over the ads
- * we actually read and it names its denominator on every line; the industry
- * block below is general category knowledge with no evidence behind it. Putting
- * the observed thing first, and the received wisdom second, is the order of
- * decreasing certainty — and it is the order a reader should trust them in.
+ * Arithmetic over the ads we actually read, naming its denominator on every
+ * line. This replaced a model-written "what generally holds in this category"
+ * block: on a page a client reads over your shoulder, "bonuses convert faster"
+ * invites the question "based on what?" and this capture cannot answer it.
  */
 function setShapeHtml(shape) {
   if (!shape?.observations?.length) return "";
@@ -1069,26 +1087,6 @@ function setShapeHtml(shape) {
             </div>
           </div>`).join("")}
       </div>
-    </div>`;
-}
-
-/**
- * General category patterns — explicitly not recommendations.
- *
- * The framing line is rendered verbatim and is part of the guarantee, not
- * decoration: it tells a client reading over a shoulder that these are
- * observations about how the category behaves, not RAIN advising them to change
- * their product. See lib/industry-context.js for the constraints in code.
- */
-function industryHtml(industry) {
-  if (!industry?.observations?.length) return "";
-  return `
-    <h3 class="bh">What generally holds in this category</h3>
-    <div class="industry">
-      <div class="indframe">${esc(industry.framing)}</div>
-      <ul class="indlist">
-        ${industry.observations.map((o) => `<li>${esc(o.text)}</li>`).join("")}
-      </ul>
     </div>`;
 }
 

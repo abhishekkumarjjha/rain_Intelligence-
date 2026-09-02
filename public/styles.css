@@ -779,6 +779,25 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
   letter-spacing: -.3px;
 }
 .preaddiff { font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
+/* Local and national never share a sentence, so they never share a line. */
+.preadlocal {
+  font-size: 13.5px; line-height: 1.6; color: var(--ink-2);
+  margin-top: 10px; opacity: .88;
+}
+/* What MOVED, when there is a prior capture to compare against. For a
+   performance review this is usually the most useful line here — a static
+   comparison says how things stand, a change says what is new. */
+.preadchange {
+  margin-top: 14px; padding: 12px 14px;
+  border-left: 3px solid var(--amber); border-radius: 0 8px 8px 0;
+  background: rgba(255,159,26,.07);
+}
+.preadchangeh {
+  font-size: 10.5px; letter-spacing: .10em; text-transform: uppercase;
+  font-weight: 700; color: var(--amber); margin-bottom: 6px;
+}
+.preadchangeline { font-size: 14px; line-height: 1.55; }
+.preadchangeline + .preadchangeline { margin-top: 5px; }
 .preadbound {
   font-size: 12px; line-height: 1.55; color: var(--ink-3);
   margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line);

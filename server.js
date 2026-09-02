@@ -28,7 +28,6 @@ import { capture, hasKey, normDomain, buildDomainLink, MAX_READ_PER_ADVERTISER, 
 import { extractByFormat, readerFor } from "./lib/extract.js";
 import { buildBoard } from "./lib/benchmark.js";
 import { readThemes } from "./lib/themes.js";
-import { industryContext } from "./lib/industry-context.js";
 import { readRatePages } from "./lib/rate-page.js";
 import {
   putEvidence, getEvidence, putSnapshot, previousSnapshot,
@@ -493,11 +492,6 @@ async function executeRun(run) {
       const board = boardFor(run);
 
       // Runs AFTER findings are final and receives them read-only, anonymised.
-      // Never fails a run: a board with no industry block is a complete board.
-      try {
-        run.industry = await industryContext(board.findings, board.productLabel);
-      } catch { run.industry = null; }
-
       putSnapshot({
         clientDomain: run.client.domain,
         product: run.product,
@@ -660,7 +654,6 @@ app.get("/api/run/:id", (req, res) => {
     payload.board = boardFor(run);
     // Generated once per run and cached on it: the observations are about the
     // shape of the findings, and the findings do not change between polls.
-    payload.industry = run.industry || null;
     payload.benchmark = benchmarkFor(run);
     payload.funnel = captureFunnel(run.runs, run.ads,
       payload.benchmark.columns.reduce((n, c) => n + c.adCount, 0));

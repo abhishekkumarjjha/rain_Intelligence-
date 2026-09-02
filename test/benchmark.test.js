@@ -899,6 +899,57 @@ test("the framing says this is read after delivery, not instead of it", () => {
   assert.match(BOARD.primaryRead.framing, /delivery|execution/i);
 });
 
+test("local and national conclusions never merge into one claim", () => {
+  const t = BOARD.primaryRead.localVsNational;
+  if (!t) return;
+  // "The market is moving toward bonuses" is the sentence to prevent: a
+  // national's ads may never have served in this client's market.
+  assert.doesNotMatch(t, /\bthe market is\b|\bthe industry is\b|\bmoving toward\b|\btrend\b/i,
+    `a market-wide claim was made from reference data: ${t}`);
+  if (/national/i.test(t)) {
+    assert.match(t, /not as evidence of this local market|shown for context/i,
+      "national behaviour must be attributed as reference, not local evidence");
+  }
+});
+
+test("every finding carries a stable id its evidence can be cited by", () => {
+  const ids = BOARD.findings.map((f) => f.id);
+  for (const id of ids) assert.match(id, /^[a-z_]+$/, `unusable finding id: ${id}`);
+  assert.equal(ids.length, new Set(ids).size, "finding ids must be unique on a board");
+  assert.ok(ids.includes("rate_advantage_apy") || ids.includes("rate_position_apy"),
+    `expected a stable id on the primary-rate finding, got: ${ids.join(", ")}`);
+});
+
+test("month-over-month change is surfaced in the read when it exists", () => {
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Checking"], description: "Earn 6.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })] },
+    competitors: ["a", "b", "c"].map((k) => ({
+      label: `Comp ${k.toUpperCase()}`, domain: `${k}.org`, ads: [chk(`${k}.org`, `Comp ${k.toUpperCase()}`, {
+        headlines: ["Checking"], description: "Earn $600 with checking.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$600", qualifiers: {}, sourceField: "description" }],
+      })],
+    })),
+    product: "checking",
+    progress: Object.fromEntries(["lacapfcu.org", "a.org", "b.org", "c.org"].map((d) => [d, { listed: 1, read: 1 }])),
+    previous: {
+      label: "July 2026",
+      competitorSet: { hash: "x", domains: ["a.org", "b.org", "c.org"] },
+      brands: [{ domain: "a.org", label: "Comp A", positions: {} },
+               { domain: "b.org", label: "Comp B", positions: {} },
+               { domain: "c.org", label: "Comp C", positions: {} }],
+    },
+  });
+  assert.ok(board.primaryRead.changes.length, "a newly observed offer must reach the read");
+  for (const c of board.primaryRead.changes) {
+    assert.ok(c.id, "a change must cite the finding it came from");
+    assert.doesNotMatch(c.text, /newly launched|started offering/i,
+      "newly OBSERVED is not newly launched");
+  }
+});
+
 test("below three readable competitors there is no read at all", () => {
   const thin = buildBoard({
     client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
