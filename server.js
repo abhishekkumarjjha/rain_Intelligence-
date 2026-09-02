@@ -361,13 +361,20 @@ async function executeRun(run) {
       // on saying "30 of about 4,000 listed ads were sampled" as though that
       // were a fact about Chase rather than about our own cap.
       //
-      // An entry is short when the provider had more renderable creatives than
-      // the entry actually read AND the current cap has room for them. Only
-      // then is it worth paying for the listing again; an entry that already
-      // read everything available stays a hit however high the cap goes.
+      // An entry is short when it was captured under a LOWER cap than the one
+      // in force now. Comparing read-count against renderable instead looks
+      // more direct and is wrong: dedupe collapses identical artwork and some
+      // reads fail, so held is routinely below renderable through no fault of
+      // the cap. That version re-fetched three of seven advertisers on every
+      // single run and could never catch up.
+      //
+      // Entries captured before readCap existed are treated as current. They
+      // expire on their own TTL, and refusing to guess is cheaper than
+      // re-fetching the whole directory on a hunch.
       const capNow = opts.max || MAX_READ_PER_ADVERTISER;
       const held = (cached?.ads || []).length;
-      const shortRead = !!cached && held < Math.min(capNow, cached.run?.renderable ?? 0);
+      const capThen = cached?.run?.readCap;
+      const shortRead = !!cached && Number.isFinite(capThen) && capThen < capNow;
 
       if (cached && !shortRead) {
         p.status = "done";
