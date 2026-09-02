@@ -227,6 +227,10 @@ body {
 .acmeta { font-size: 12px; color: var(--ink-3); margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acnone { padding: 12px; font-size: 13px; color: var(--ink-3); }
+/* Marks the letters the user actually typed, so a row matched deep inside a
+   word explains itself instead of looking like a guess. */
+.achit { color: var(--blue); font-weight: 700; }
+.acnote { padding: 8px 12px 6px; font-size: 12px; color: var(--ink-3); }
 
 /* Quieter than the in-page .linkbtn on purpose: this is the path out of the
    common case, and it should not compete with the bar above it. */

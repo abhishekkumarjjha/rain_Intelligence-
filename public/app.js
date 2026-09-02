@@ -128,29 +128,40 @@ function fillLandingProducts() {
   sel.required = true;                        // drives :invalid, which greys the placeholder
 }
 
-/* Substring, not prefix. "capitol" has to find La Capitol Federal Credit Union,
-   because nobody types the article. Domains match too — several of these are
-   known internally by their URL. */
+/* Ranking and spelling live in client-search.js, which is where they can be
+   tested. This is the thin wrapper the page needs: the eight best rows, and
+   whether the last query had to be spell-corrected to find any. */
+let lastFuzzy = false;
 function matchClients(q) {
-  const t = q.trim().toLowerCase();
-  if (!t) return CLIENTS.slice(0, 8);
-  const hit = CLIENTS.filter((c) =>
-    c.name.toLowerCase().includes(t) || (c.domain || "").toLowerCase().includes(t));
-  // Name-start matches first: typing "hor" should put Horicon on top even
-  // though other rows contain those letters further in.
-  hit.sort((a, b) => {
-    const s = (c) => (c.name.toLowerCase().startsWith(t) ? 0 : 1);
-    return s(a) - s(b) || a.name.localeCompare(b.name);
-  });
-  return hit.slice(0, 8);
+  const r = ClientSearch.match(CLIENTS, q, 8);
+  lastFuzzy = r.fuzzy;
+  return r.list;
+}
+
+/* Showing WHY a row matched. "ho" ranks Horicon first but still offers Brazos
+   Valley Schools, and without the mark on "Sc(ho)ols" that second row looks
+   like the tool guessing. Only marks a literal hit — a row found by initials
+   or by corrected spelling has nothing to underline, and inventing a
+   highlight for it would be worse than none. */
+function hl(text, q) {
+  const t = String(q || "").trim();
+  const s = String(text || "");
+  if (!t) return esc(s);
+  const i = s.toLowerCase().indexOf(t.toLowerCase());
+  if (i < 0) return esc(s);
+  return esc(s.slice(0, i)) + `<b class="achit">` + esc(s.slice(i, i + t.length)) +
+         `</b>` + esc(s.slice(i + t.length));
 }
 
 function renderMenu(list) {
   const m = $("clientMenu");
+  const q = $("clientInput").value;
+  const head = lastFuzzy && list.length
+    ? `<div class="acnote">No exact match for “${esc(q.trim())}” — closest spelling:</div>` : "";
   m.innerHTML = list.length
-    ? list.map((c, i) => `<div class="acitem${i === acIdx ? " on" : ""}" role="option" data-i="${i}">
-         <div class="acname">${esc(c.name)}</div>
-         <div class="acmeta">${esc(c.domain || "")}${c.market ? " · " + esc(c.market) : ""}</div>
+    ? head + list.map((c, i) => `<div class="acitem${i === acIdx ? " on" : ""}" role="option" data-i="${i}">
+         <div class="acname">${hl(c.name, q)}</div>
+         <div class="acmeta">${hl(c.domain || "", q)}${c.market ? " · " + esc(c.market) : ""}</div>
        </div>`).join("")
     : `<div class="acnone">No client by that name. Use a landing page URL below.</div>`;
   m.hidden = false;
