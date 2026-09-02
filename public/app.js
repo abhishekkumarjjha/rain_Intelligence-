@@ -6,7 +6,7 @@
 
 const S = {
   url: "", domain: "", clientLabel: "", product: "other", productLabel: "",
-  mode: "", days: 30,
+  mode: "", days: 30, productConfirmed: true,
   sourceChoice: "google_display",   // google_display | google_search
   force: false,
   includeNationals: true,   // the standing tier; on unless switched off
@@ -123,8 +123,10 @@ async function resolve() {
 
     // A homepage names the institution but not the product, and every count in
     // this tool is product-scoped. Say so instead of quietly analysing "other".
+    // Detected or not. Until the user settles it, the capture stays blocked.
+    S.productConfirmed = !r.looksLikeHomepage;
     if (r.looksLikeHomepage) {
-      $("compSub").innerHTML += `<br><span style="color:var(--amber)">No product detected in that URL — set the product scope on the right, or re-enter using the product page.</span>`;
+      $("compSub").innerHTML += `<br><span style="color:var(--amber)">No product detected in that URL — choose a product scope on the right, or re-enter using the product page.</span>`;
     }
 
     buildProductSelect();
@@ -156,7 +158,12 @@ function buildProductSelect() {
   // Competitor ordering is product-dependent — a competitor scoped to "checking"
   // outranks a market-wide one — so changing the scope has to re-ask the
   // directory rather than just re-render a stale list.
-  sel.onchange = () => { S.product = sel.value; S.productLabel = productLabel(S.product); refreshCompetitors(); };
+  sel.onchange = () => {
+    S.product = sel.value; S.productLabel = productLabel(S.product);
+    // An explicit choice settles it, including a deliberate "Other".
+    S.productConfirmed = true;
+    refreshCompetitors();
+  };
   $("daysSel").onchange = () => { S.days = Number($("daysSel").value); renderCost(); };
 }
 
@@ -288,7 +295,19 @@ $("addBtn").onclick = () => {
    each, which was right before the cache existed and is now an overstatement
    every time somebody re-tests a competitor the team already captured. */
 function renderCost() {
-  $("captureBtn").disabled = !S.competitors.some((c) => c.on);
+  // AN UNDETECTED PRODUCT BLOCKS THE CAPTURE. It used to be a note the user
+  // could read past, and reading past it scoped the whole benchmark to "other"
+  // — which matches every ad ever captured, so every finding and every piece of
+  // evidence came back about the wrong product while looking entirely
+  // confident. A scope this tool cannot infer is one the user has to supply.
+  const needsProduct = !S.productConfirmed;
+  $("captureBtn").disabled = needsProduct || !S.competitors.some((c) => c.on);
+  if (needsProduct) {
+    $("costNote").innerHTML = `<span class="bad">No product was detected in that URL. `
+      + `Choose a product scope above before capturing — every count on the board is scoped to one product, `
+      + `and "Other" matches everything.</span>`;
+    return;
+  }
   refreshCost();
 }
 

@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import { shapeSearch } from "../lib/extract-search.js";
 import { normalizeObservation, rollUpBrand, rankAgainst } from "../lib/observations.js";
+import { productFromUrl } from "../lib/products.js";
 import { comparable, better } from "../lib/metrics.js";
 import { buildBoard } from "../lib/benchmark.js";
 
@@ -928,6 +929,62 @@ test("a discount off a rate is never read as the rate", () => {
     `a discount became the advertised rate: ${c.positions.apr.raw}`);
   assert.doesNotMatch(JSON.stringify(board.findings), /0\.65% off/,
     "a discount reached a finding as if it were a rate");
+});
+
+test("a product page URL is detected, plural or singular", () => {
+  // "/credit-cards" resolved to `other`, which matches every ad ever captured —
+  // so every finding and every piece of evidence on that board was about the
+  // wrong product, while looking exactly as confident as a correct one.
+  for (const [path, want] of [
+    ["/credit-cards", "credit-card"], ["/credit-card", "credit-card"],
+    ["/personal-loans", "personal-loan"], ["/home-loans", "mortgage"],
+    ["/money-markets", "money-market"], ["/equity-lines", "heloc"],
+    ["/checking-accounts", "checking"], ["/auto-loan", "auto-loan"],
+  ]) {
+    assert.equal(productFromUrl(`https://lacapfcu.org${path}`).product, want, `${path} misread`);
+  }
+  assert.equal(productFromUrl("https://lacapfcu.org/").from, "none", "a homepage must not guess");
+});
+
+test("an advertiser's own name is never a message strategy", () => {
+  // "Federal credit union" is the institution's legal type and appears in the
+  // verified-advertiser line of essentially every credit-union ad. Counted as
+  // member-owned positioning it produces a message gap against a competitor who
+  // never chose to say anything.
+  for (const v of ["Federal credit union", "Your Local Credit Union", "Credit Union"]) {
+    const ad = normalizeObservation({ product: "checking", rawEconomicFacts: [], allText: v,
+      rawClaims: [{ claim: "member_owned", verbatim: v }] });
+    assert.equal(ad.claims.length, 0, `identity counted as a claim: ${v}`);
+  }
+  // A real selling claim still passes.
+  const real = normalizeObservation({ product: "checking", rawEconomicFacts: [], allText: "x",
+    rawClaims: [{ claim: "member_owned", verbatim: "where it pays to be a member" }] });
+  assert.equal(real.claims.length, 1, "a genuine member claim was rejected");
+});
+
+test("one offer mechanic produces one claim, not two", () => {
+  // "No Payments For 60 Days" was returned as both payment_deferral and
+  // no_payment_days, and rendered as two advantages quoting one sentence.
+  const ad = normalizeObservation({ product: "auto-loan", rawEconomicFacts: [], allText: "x",
+    rawClaims: [
+      { claim: "payment_deferral", verbatim: "No Payments For 60 Days" },
+      { claim: "no_payment_days", verbatim: "No Payments For 60 Days" },
+    ] });
+  assert.deepEqual(ad.claims.map((c) => c.claim), ["payment_deferral"]);
+});
+
+test("an amount you can borrow is never a cash bonus", () => {
+  // "Borrow Funds Up To $30,000*" was filed as a bonus and ranked against
+  // Chase's $3,000 welcome offer. Both are dollars; only one is a payment.
+  const ad = normalizeObservation({ product: "personal-loan", rawClaims: [],
+    allText: "Apply For A Personal Loan - Borrow Funds Up To $30,000*",
+    rawEconomicFacts: [{ metric: "cash_bonus", raw: "$30,000*", qualifiers: {} }] });
+  assert.ok(ad.facts.every((f) => f.isLoanAmount), "a loan size was left countable as a bonus");
+  // A genuine bonus on the same product is untouched.
+  const bonus = normalizeObservation({ product: "personal-loan", rawClaims: [],
+    allText: "Earn a $300 bonus when you open a personal loan",
+    rawEconomicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {} }] });
+  assert.ok(bonus.facts.every((f) => !f.isLoanAmount), "a real bonus was refused");
 });
 
 test("participation is stated before any ratio is read", () => {
