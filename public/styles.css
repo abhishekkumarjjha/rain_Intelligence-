@@ -763,6 +763,37 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
 .fcard.mixed    { border-left-color: #6f9fd8; }
 .fcard.neutral  { border-left-color: #4a5a68; }
 
+/* THE PRIMARY READ. The one thing on this page a strategist should be able to
+   quote without having assembled it themselves, so it sits above the columns
+   and is the largest type in the section. */
+.pread {
+  border: 1px solid var(--line-2, #303b4d);
+  background: linear-gradient(180deg, rgba(92,211,232,.06), transparent 70%);
+  border-radius: var(--r, 16px); padding: 20px 24px 18px; margin-bottom: 22px;
+}
+.preadframe {
+  font-size: 12px; color: var(--ink-3); line-height: 1.55; margin-bottom: 12px;
+}
+.preadhead {
+  margin: 0 0 10px; font-size: 20px; line-height: 1.38; font-weight: 700;
+  letter-spacing: -.3px;
+}
+.preaddiff { font-size: 14.5px; line-height: 1.6; color: var(--ink-2); }
+.preadbound {
+  font-size: 12px; line-height: 1.55; color: var(--ink-3);
+  margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line);
+}
+
+/* A tactic used by ONE advertiser must not read like a market standard. Marked
+   on the card and sorted last, because size alone is a hint and this is a fact. */
+.fcard.sig-isolated { opacity: .82; }
+.fcard.sig-isolated h4 { font-size: 14.5px; }
+.flabel .fsig {
+  font-weight: 600; font-size: 9.5px; letter-spacing: .08em;
+  padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+  color: var(--ink-3); border: 1px solid var(--line-2, #303b4d);
+}
+
 /* The eyebrow leads with the METRIC, so a card is identifiable before the
    sentence is read. The rule name stays as a quieter second chip — the taxonomy
    is still available to anyone who wants it, just no longer in the way. */

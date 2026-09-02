@@ -811,6 +811,111 @@ test("below three readable brands the set has no shape", () => {
 });
 
 // ===========================================================================
+console.log("\nSTAGE 9 — weight, and the one sentence at the top");
+// ===========================================================================
+
+test("a lone advertiser's tactic is not weighted like a shared pattern", () => {
+  // The complaint this fixes: "1 of 3 competitors advertise a $5 minimum" was
+  // rendering identically to "2 of 3 mention member-owned", telling the reader
+  // they carried the same diagnostic weight.
+  const byRule = Object.fromEntries(BOARD.findings.map((f) => [f.rule, f]));
+  for (const f of BOARD.findings) {
+    assert.ok(f.significance, `${f.rule} has no significance`);
+    const n = Number(f.count), d = Number(f.denominator);
+    if (Number.isFinite(n) && Number.isFinite(d) && d >= 3 && n === 1 && f.outcome !== "context") {
+      assert.equal(f.significance, "isolated", `${f.rule} at ${n}/${d} should be isolated`);
+    }
+    if (Number.isFinite(n) && Number.isFinite(d) && d > 0 && n / d >= 0.5 && f.outcome !== "context") {
+      assert.equal(f.significance, "primary", `${f.rule} at ${n}/${d} should be primary`);
+    }
+  }
+  assert.ok(Object.values(byRule).some((f) => f.significance === "primary"), "expected a primary finding");
+});
+
+test("the client's stance on the headline rate is always primary", () => {
+  const rate = BOARD.findings.find((f) => f.metric === "apy" && f.outcome !== "context");
+  assert.ok(rate, "expected a finding on the primary rate");
+  assert.equal(rate.significance, "primary");
+});
+
+test("the client's own inconsistency is internal, never a competitor win", () => {
+  for (const f of BOARD.findings.filter((f) => f.outcome === "context")) {
+    assert.equal(f.significance, "internal", `${f.rule} should be internal`);
+  }
+});
+
+test("the primary read states where the client stands, with its denominator", () => {
+  const pr = BOARD.primaryRead;
+  assert.ok(pr, "no primary read produced");
+  assert.match(pr.headline, /\d+ comparable local competitor/,
+    `the headline must name the comparable count: ${pr.headline}`);
+});
+
+test("the read separates a shared pattern from a single advertiser's tactic", () => {
+  const pr = BOARD.primaryRead;
+  // Only PRESSURE findings reach the differences line — a lone thing the client
+  // LEADS on is not a competitor difference.
+  const isolated = BOARD.findings.filter((f) => f.significance === "isolated" && f.outcome === "pressure");
+  if (isolated.length) {
+    assert.match(pr.differences, /one advertiser only/,
+      `a lone tactic must be marked as one: ${pr.differences}`);
+  }
+  for (const f of BOARD.findings.filter((x) => x.significance === "primary" && x.outcome === "pressure")) {
+    assert.match(pr.differences, new RegExp(`${f.count} of ${f.denominator}`),
+      `a shared pattern must carry its share: ${pr.differences}`);
+  }
+});
+
+test("the read never recommends anything", () => {
+  const ADVICE = /\b(should|recommend|consider|adopt|improve|increase|ought|need to|try)\b/i;
+  for (const k of ["framing", "headline", "differences", "boundary"]) {
+    assert.doesNotMatch(BOARD.primaryRead[k], ADVICE, `advice in ${k}`);
+  }
+});
+
+test("the read never claims a difference caused performance", () => {
+  // Scoped to the ASSERTIVE lines. The boundary is where causation is denied —
+  // "it cannot show what any of it caused" — so a blanket ban would fail the one
+  // sentence doing the guarding.
+  const CAUSATION = /\b(because of|caused by|driving|drove|due to|resulted in|led to)\b/i;
+  for (const k of ["headline", "differences"]) {
+    assert.doesNotMatch(BOARD.primaryRead[k], CAUSATION, `causation asserted in ${k}`);
+  }
+  assert.match(BOARD.primaryRead.boundary, /cannot show what any of it caused/i,
+    "the boundary must deny causation explicitly");
+});
+
+test("the read never calls the product weak — only the advertising", () => {
+  const BANNED = /\b(inferior|weak|uncompetitive|worse|poor|behind the market)\b/i;
+  const all = Object.values(BOARD.primaryRead).filter((v) => typeof v === "string").join(" ");
+  assert.doesNotMatch(all, BANNED);
+});
+
+test("the read states what the capture cannot establish", () => {
+  assert.match(BOARD.primaryRead.boundary, /no click, conversion or spend/i);
+});
+
+test("the framing says this is read after delivery, not instead of it", () => {
+  assert.match(BOARD.primaryRead.framing, /delivery|execution/i);
+});
+
+test("below three readable competitors there is no read at all", () => {
+  const thin = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Checking"], description: "Earn 6.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })] },
+    competitors: [{ label: "Campus Federal", domain: "campusfederal.org", ads: [chk("campusfederal.org", "Campus Federal", {
+      headlines: ["Lagniappe"], description: "Earn 4.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "4.50% APY", qualifiers: {}, sourceField: "description" }],
+    })] }],
+    product: "checking",
+    progress: { "lacapfcu.org": { listed: 1, read: 1 }, "campusfederal.org": { listed: 1, read: 1 } },
+  });
+  assert.equal(thin.primaryRead, null, "two brands is a comparison, not a read");
+});
+
+// ===========================================================================
 console.log("\nSTAGE 7 — the board reads at a glance");
 // ===========================================================================
 

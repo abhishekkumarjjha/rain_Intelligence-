@@ -924,6 +924,7 @@ function boardHtml(board, industry) {
           : ""}
       </div>
       ${warnings}${drift}
+      ${primaryReadHtml(board.primaryRead)}
 
       ${nothing ? `
         <div class="fempty">
@@ -955,6 +956,29 @@ function boardHtml(board, industry) {
 }
 
 /**
+ * THE PRIMARY READ — the one sentence at the top.
+ *
+ * Six true cards still leave the reader assembling the picture themselves, and
+ * two readers assemble it differently. This is the same findings arranged into
+ * a read: where the client stands on the headline figure, what is creating the
+ * difference, and what the evidence cannot settle.
+ *
+ * Written in code, never by a model — see lib/primary-read.js for why. It is
+ * the most quotable thing on this page and the most likely to be read aloud to
+ * a client, which is exactly the wrong place for prose that can drift.
+ */
+function primaryReadHtml(pr) {
+  if (!pr) return "";
+  return `
+    <div class="pread">
+      <div class="preadframe">${esc(pr.framing)}</div>
+      <h4 class="preadhead">${esc(pr.headline)}</h4>
+      <div class="preaddiff">${esc(pr.differences)}</div>
+      <div class="preadbound">${esc(pr.boundary)}</div>
+    </div>`;
+}
+
+/**
  * One scoreboard column.
  *
  * "Where you lead" / "Where competitors lead" — NOT "winning" and "losing".
@@ -974,7 +998,7 @@ function columnHtml(kind, title, findings, emptyText) {
         <span class="scount">${findings.length}</span>
       </div>
       ${findings.length
-        ? findings.map(cardHtml).join("")
+        ? [...findings].sort((a, b) => SIG_ORDER.indexOf(a.significance) - SIG_ORDER.indexOf(b.significance)).map(cardHtml).join("")
         : `<div class="scolempty">${esc(emptyText)}</div>`}
     </div>`;
 }
@@ -993,14 +1017,22 @@ const CHIP_TONE = {
 };
 const chipTone = (f) => CHIP_TONE[f.metric] || "t-slate";
 
+/* Heaviest first inside a column, so the order carries weight as well as the type size. */
+const SIG_ORDER = ["primary", "supporting", "isolated", "internal"];
+
 /** One finding: one bold sentence, one line of detail, one evidence chip. */
 function cardHtml(f) {
   const ev = [...new Set(f.evidence || [])];
   return `
-    <article class="fcard ${esc(f.outcome || "context")}">
+    <article class="fcard ${esc(f.outcome || "context")} sig-${esc(f.significance || "supporting")}">
       <div class="flabel">
         <span class="fchip ${esc(chipTone(f))}">${esc(f.chip || f.label)}</span>${
-        f.chip && f.chip !== f.label ? `<span class="frule">${esc(f.label)}</span>` : ""}</div>
+        f.chip && f.chip !== f.label ? `<span class="frule">${esc(f.label)}</span>` : ""}${
+        f.significance === "isolated"
+          // Said on the card, not just implied by size. "One competitor prints a
+          // $5 minimum" is a tactic; without this it reads as a market standard.
+          ? `<span class="fsig" title="Advertised by a single competitor in the captured set — a tactic, not a pattern across the local market">One advertiser</span>`
+          : ""}</div>
       <h4>${esc(f.headline)}</h4>
       ${f.detail ? `<div class="fdetail">${esc(f.detail)}</div>` : ""}
       ${(f.excluded || []).length ? `<div class="fexcl">Not ranked: ${
