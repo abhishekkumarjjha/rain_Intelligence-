@@ -624,6 +624,70 @@ section("the Wall is display only — search is never bought twice");
   });
 }
 
+// ---------------------------------------------------------------------------
+// KEY INSIGHTS — descriptive themes over the Wall's creatives.
+//
+// This replaces the recommended-strategy pass for the Wall, and the difference
+// is the whole point: a theme says what the ads ARE, a recommendation says what
+// someone should DO. The model is asked for the first and will sometimes return
+// the second, so the rules are enforced here, after it answers.
+// ---------------------------------------------------------------------------
+section("key insights — themes describe, they never advise");
+{
+  const { body: started } = await S.post("/api/capture", {
+    mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+    product: "checking", days: 30,
+    competitors: [
+      { label: "Campus Federal", domain: "campusfederal.org" },
+      { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+    ],
+  });
+  const wall = await S.awaitRun(started.runId);
+
+  const { body: t } = await S.post(`/api/run/${wall.id}/themes`);
+  await check("themes generate for a finished Wall run", () => {
+    ok(t.ok, `generation failed: ${t.reason}`);
+    ok(t.themes.themes.length > 0, "expected at least one theme");
+  });
+
+  await check("a theme that advises is DROPPED, not softened", () => {
+    const all = JSON.stringify(t.themes.themes);
+    ok(!/\byou should\b/i.test(all), `advice survived: ${all}`);
+    ok(!t.themes.themes.some((x) => x.name === "Switching moment"), "the prescriptive theme rendered");
+  });
+
+  await check("a theme claiming performance is dropped", () => {
+    ok(!t.themes.themes.some((x) => x.name === "Bonus-forward creative"),
+      "a performance claim survived a capture with no performance data");
+  });
+
+  await check("a theme citing no real creative is dropped", () => {
+    ok(!t.themes.themes.some((x) => x.name === "Trust signals"), "a theme with invented evidence rendered");
+  });
+
+  await check("every surviving theme points at creatives from this run", () => {
+    const known = new Set(wall.ads.map((a) => a.creativeId));
+    for (const x of t.themes.themes) {
+      ok(x.creativeIds.length >= 2, `${x.name} has too little evidence`);
+      for (const id of x.creativeIds) ok(known.has(id), `${x.name} cites unknown ${id}`);
+    }
+  });
+
+  await check("the framing states the register in the user's own reading", () => {
+    ok(/not what anyone should do/i.test(t.themes.framing), `weak framing: ${t.themes.framing}`);
+  });
+
+  await check("themes are refused for Competitive Intelligence", async () => {
+    const { body } = await S.post(`/api/run/${benchRun.id}/themes`);
+    eq(body.reason, "wrong_mode", "reason");
+  });
+
+  await check("themes on an unknown run 404 rather than throwing", async () => {
+    const { status } = await S.post("/api/run/run_nope/themes");
+    eq(status, 404, "status");
+  });
+}
+
 summary();
 } finally {
   S.stop();

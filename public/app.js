@@ -549,6 +549,15 @@ function renderResults() {
     + (r.sourceLabel ? ` · ${r.sourceLabel}` : "");
   $("resTitle").textContent = `${r.client.label} · ${r.productLabel}`;
 
+  // Each half gets the one extra view that belongs to it. The search wall is
+  // free because Competitive Intelligence already captured and read those ads;
+  // Key insights is a model call, so it lives behind a click on the Wall.
+  const isGoogleRun = r.source !== "meta";
+  $("searchWallBtn").classList.toggle("hidden", !(r.mode === "benchmark" && r.ads?.length));
+  $("insightsBtn").classList.toggle("hidden", !(r.mode === "creative" && isGoogleRun && (r.ads?.length || 0) >= 4));
+  $("insightsBtn").textContent = "Key insights";
+  $("insightsBtn").disabled = false;
+
   const cross = $("crossBtn");
   cross.textContent = CROSS_LABEL[r.mode] || "";
   cross.title = r.mode === "creative"
@@ -1227,7 +1236,116 @@ function openEvidence(ids, title) {
 const closeDrawer = () => { $("drawer").classList.remove("on"); $("drawerBg").classList.remove("on"); };
 $("drawerClose").onclick = closeDrawer;
 $("drawerBg").onclick = closeDrawer;
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+
+/* ---------------------------------------------------------------------------
+   THE WIDE SHEET — the search wall, and the themes popup.
+   Both render from data already in S.run: no fetch, no capture, no cost.
+   --------------------------------------------------------------------------- */
+function openSheet(title, sub, html) {
+  $("sheetTitle").textContent = title;
+  $("sheetSub").textContent = sub || "";
+  $("sheetBody").innerHTML = html;
+  wireImages($("sheetBody"));
+  $("sheet").classList.add("on"); $("sheetBg").classList.add("on");
+}
+const closeSheet = () => { $("sheet").classList.remove("on"); $("sheetBg").classList.remove("on"); };
+$("sheetClose").onclick = closeSheet;
+$("sheetBg").onclick = closeSheet;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeSheet(); closeDrawer(); } });
+
+/**
+ * Every search ad this run captured, laid out as a wall.
+ *
+ * Competitive Intelligence already captured these and already spent a vision
+ * call reading each one — they were simply only reachable one evidence chip at
+ * a time. That is right for "show me the ad behind this number" and useless for
+ * "show me what everyone is running". Same creatives, same card as the display
+ * wall, grouped by advertiser so whose ad is whose survives the layout.
+ */
+function openSearchWall() {
+  const ads = S.run?.ads || [];
+  if (!ads.length) {
+    return openSheet("All search ads", "", `<div class="empty">No search ads were captured in this run.</div>`);
+  }
+
+  // Client first, then locals by volume, then the national reference tier — the
+  // same ordering the board uses, so the two screens agree on who matters.
+  const rank = (a) => (a.isClient ? 0 : a.tier === "national" ? 2 : 1);
+  const groups = new Map();
+  for (const a of ads) {
+    if (!groups.has(a.institution)) groups.set(a.institution, []);
+    groups.get(a.institution).push(a);
+  }
+  const rows = [...groups.entries()]
+    .map(([domain, list]) => ({ domain, list, head: list[0] }))
+    .sort((x, y) => rank(x.head) - rank(y.head) || y.list.length - x.list.length);
+
+  openSheet(
+    "All search ads",
+    `${ads.length} creatives across ${rows.length} advertisers — every one already captured and read for this run. This is what was captured, not the whole market.`,
+    rows.map((g) => `
+      <div class="sheetgroup">
+        <h4>
+          ${esc(g.head.institutionLabel || g.domain)}
+          ${g.head.isClient ? `<span class="clienttag">Your client</span>` : ""}
+          ${g.head.tier === "national" ? `<span class="clienttag" style="color:var(--ink-3)">National reference</span>` : ""}
+          <span class="n">${g.list.length} ad${g.list.length === 1 ? "" : "s"}</span>
+        </h4>
+        <div class="wall">${g.list.map(adCard).join("")}</div>
+      </div>`).join(""));
+}
+$("searchWallBtn").onclick = openSearchWall;
+
+/**
+ * Key insights — the recurring ideas across the captured display creatives.
+ *
+ * Fetched on click, then cached on the run so reopening is instant and costs
+ * nothing twice. Descriptive only: see lib/themes.js for the constraints, which
+ * are enforced in code after the model answers rather than asked for in a
+ * prompt and hoped for.
+ */
+function themesHtml(t) {
+  return `
+    <div class="shapeframe" style="margin-bottom:16px">${esc(t.framing)}</div>
+    <div class="shapelist">
+      ${t.themes.map((x) => `
+        <div class="shapeitem">
+          <span class="fchip t-violet">Theme</span>
+          <div class="shapebody">
+            <div class="shapetext"><b>${esc(x.name)}</b></div>
+            <div class="shapedetail">${esc(x.description)}</div>
+            ${x.creativeIds?.length
+              ? `<span class="ev sm" data-ev="${esc(x.creativeIds.join(","))}">View ${x.creativeIds.length} ad${x.creativeIds.length > 1 ? "s" : ""}</span>`
+              : ""}
+          </div>
+        </div>`).join("")}
+    </div>`;
+}
+
+$("insightsBtn").onclick = async () => {
+  const btn = $("insightsBtn");
+  if (S.run?.themes) return openSheet("Key insights", "", themesHtml(S.run.themes));
+
+  btn.disabled = true; btn.textContent = "Reading…";
+  let r;
+  try {
+    r = await (await fetch(`/api/run/${S.run.id}/themes`, { method: "POST" })).json();
+  } catch {
+    btn.disabled = false; btn.textContent = "Key insights";
+    return showError("Could not reach the server to read the creatives.");
+  }
+  btn.disabled = false; btn.textContent = "Key insights";
+
+  if (!r.ok) {
+    return showError(r.reason === "anthropic_not_configured"
+      ? "ANTHROPIC_API_KEY is not set on the server, so themes cannot be read."
+      : r.reason === "not_enough_creative"
+        ? "Too few legible creatives on this wall to name a recurring idea. Widen the window or add a competitor."
+        : `Could not read themes: ${r.reason}`);
+  }
+  S.run.themes = r.themes;
+  openSheet("Key insights", "", themesHtml(r.themes));
+};
 
 function monthYear(iso) {
   const d = new Date(iso + "T00:00:00Z");

@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { capture, hasKey, normDomain, buildDomainLink, MAX_READ_PER_ADVERTISER, DEFAULT_LOOKBACK_DAYS } from "./lib/atc-provider.js";
 import { extractByFormat, readerFor, extractMetaMessages } from "./lib/extract.js";
 import { buildBoard } from "./lib/benchmark.js";
+import { readThemes } from "./lib/themes.js";
 import { industryContext } from "./lib/industry-context.js";
 import { readRatePages } from "./lib/rate-page.js";
 import {
@@ -1036,6 +1037,39 @@ app.post("/api/meta/confirm-page", (req, res) => {
     note: "confirmed by a strategist in the capture flow",
   });
   res.json({ ok: saved, domain, pageId });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/run/:id/themes — the recurring ideas on the Wall.
+//
+// Gated behind a click for the same reason the strategy pass was: it is the one
+// model call on that screen, and a strategist scrolling a wall should not be
+// billed for an analysis they did not ask for.
+//
+// Wall only. Competitive Intelligence answers a different question with counted
+// facts, and a model-written summary sitting beside a counted board invites the
+// reader to trust them equally.
+// ---------------------------------------------------------------------------
+app.post("/api/run/:id/themes", async (req, res) => {
+  const run = ACTIVE.get(req.params.id) || loadRun(req.params.id);
+  if (!run) return res.status(404).json({ ok: false, reason: "not_found" });
+  if (run.status !== "done") return res.status(409).json({ ok: false, reason: "run_not_finished" });
+  if (run.mode !== "creative") return res.status(400).json({ ok: false, reason: "wrong_mode" });
+
+  try {
+    // Read over what is ON THE WALL — the product-scoped slice the user is
+    // actually looking at — rather than everything captured. Themes named over
+    // ads the reader cannot see would be unverifiable by design.
+    const scoped = filterByProduct(run.ads || [], run.product);
+    const themes = await readThemes(scoped.length >= 4 ? scoped : (run.ads || []), run.productLabel);
+    if (!themes) return res.json({ ok: false, reason: "not_enough_creative" });
+    run.themes = themes;
+    ACTIVE.set(run.id, run);
+    saveRun(run);
+    res.json({ ok: true, themes });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e?.code === "NO_API_KEY" ? "anthropic_not_configured" : "generation_failed" });
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -153,6 +153,38 @@ const anthropic = http.createServer((req, res) => {
           text = "{}";
         }
       }
+    } else if (String(body.system || "").includes("You are a DESCRIBER")) {
+      // THE THEMES PASS, answered like a real model that does not fully obey.
+      //
+      // Two themes are clean. The other three each break a rule the prompt
+      // states plainly — because a fixture where the model behaves proves only
+      // that the happy path renders. The constraints in themes.js exist for
+      // exactly the answers below, and they are enforced in code AFTER the
+      // model speaks rather than requested in a prompt and hoped for.
+      const ids = (String(body.messages?.[0]?.content || "").match(/"id":\s*"([^"]+)"/g) || [])
+        .map((m) => m.replace(/.*"id":\s*"/, "").replace(/"$/, ""));
+      text = JSON.stringify({
+        themes: [
+          { name: "Rate-led typography",
+            description: "The figure set large with no photography, offer carried in the headline slot.",
+            creativeIds: ids.slice(0, 2) },
+          { name: "Community photography",
+            description: "Local imagery and member portraits carrying a membership message rather than a figure.",
+            creativeIds: ids.slice(1, 3) },
+          // Prescriptive: addresses a reader and advises. Must be dropped.
+          { name: "Switching moment",
+            description: "You should lead with the switching offer to stand out here.",
+            creativeIds: ids.slice(0, 2) },
+          // Claims performance the capture cannot support. Must be dropped.
+          { name: "Bonus-forward creative",
+            description: "Bonus-led banners perform better than rate-led ones in this category.",
+            creativeIds: ids.slice(0, 2) },
+          // Cites nothing real. Must be dropped.
+          { name: "Trust signals",
+            description: "Longevity and member counts used as reassurance throughout the set.",
+            creativeIds: ["NOT_A_REAL_ID"] },
+        ],
+      });
     } else {
       // The gated strategy pass. Digit-free on purpose: the contract is that
       // this model is handed pre-counted facts and never emits a number.
