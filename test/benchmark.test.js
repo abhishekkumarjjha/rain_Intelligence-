@@ -566,7 +566,7 @@ test("a national never appears inside a finding headline", () => {
 
 test("the national is still visible, in its own labelled block", () => {
   assert.ok(SB.snapshot.reference.length >= 1);
-  assert.match(SB.snapshot.referenceNote, /not counted in any finding/);
+  assert.match(SB.snapshot.referenceNote, /never counted among the selected local competitors/);
 });
 
 test("a BaZing add-on price is never ranked against an account fee", () => {
@@ -1102,6 +1102,70 @@ test("below three readable competitors there is no read at all", () => {
 // ===========================================================================
 console.log("\nSTAGE 7 — the board reads at a glance");
 // ===========================================================================
+
+test("every finding declares the population it was counted over", () => {
+  for (const f of BOARD.findings) {
+    assert.ok(["regional", "national"].includes(f.scope), `${f.rule} has no scope`);
+  }
+});
+
+test("a regional denominator never grows past the local set", () => {
+  const local = BOARD.brands.filter((b) => !b.isClient && (b.tier || "local") !== "national" && b.hasCoverage).length;
+  for (const f of BOARD.findings.filter((x) => x.scope === "regional")) {
+    if (Number.isFinite(Number(f.denominator))) {
+      assert.ok(Number(f.denominator) <= local + 1, `${f.rule} counted beyond the local set`);
+    }
+  }
+});
+
+test("a national finding names its population and carries its caveat", () => {
+  // Excluding nationals from the COUNT was never a reason to hide them from the
+  // PAGE. Both nationals leading on a bonus the client does not advertise is
+  // real, and a scoreboard reading zero while that is true is its own wrong
+  // answer. But a reader who misses that it is national reads it as a local
+  // competitor, so the sentence says so and the caveat travels with the card.
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Checking"], description: "Earn 6.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })] },
+    competitors: [
+      { label: "Comp A", domain: "a.org", tier: "local", ads: [chk("a.org", "Comp A", {
+        headlines: ["Checking"], description: "Earn 4.00% APY.",
+        economicFacts: [{ metric: "apy", raw: "4.00% APY", qualifiers: {}, sourceField: "description" }],
+      })] },
+      { label: "Chase", domain: "chase.com", tier: "national", ads: [chk("chase.com", "Chase", {
+        headlines: ["Checking"], description: "Earn a $3,000 bonus.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$3,000", qualifiers: {}, sourceField: "description" }],
+      })] },
+      { label: "Capital One", domain: "capitalone.com", tier: "national", ads: [chk("capitalone.com", "Capital One", {
+        headlines: ["Checking"], description: "Earn a $500 bonus.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "description" }],
+      })] },
+    ],
+    product: "checking",
+    progress: Object.fromEntries(["lacapfcu.org", "a.org", "chase.com", "capitalone.com"]
+      .map((d) => [d, { listed: 1, read: 1 }])),
+  });
+  const nat = board.findings.find((f) => f.scope === "national");
+  assert.ok(nat, "both nationals advertise a bonus the client does not — that must reach the page");
+  assert.match(nat.headline, /national reference advertiser/i, "the sentence must name the population");
+  assert.match(nat.detail, /whether it served in this market/i, "the caveat must travel with the card");
+  assert.equal(nat.denominator, 2, "a national finding counts nationals, never locals");
+  // And the local counts are untouched by it.
+  for (const f of board.findings.filter((x) => x.scope === "regional")) {
+    assert.ok(Number(f.denominator) <= 2, `${f.rule} absorbed a national into its denominator`);
+  }
+});
+
+test("every advertiser in the summary is clickable, figures or not", () => {
+  // "Baton Rouge Telco — 1 credit card ad, no figure printed" is exactly the row
+  // a strategist wants to open: "no figure" is a claim about their advertising,
+  // and the ad is the only thing that settles it.
+  for (const sum of BOARD.snapshot.summaries) {
+    assert.ok(sum.evidence?.length, `${sum.label} has no way to see its ads`);
+  }
+});
 
 test("every finding carries a short subject chip", () => {
   for (const f of BOARD.findings) {

@@ -973,8 +973,11 @@ function boardHtml(board) {
                column now holds only shared or comparable pressure; lone tactics
                move to their own block below, where they cannot be mistaken for
                a market standard. -->
+          <!-- The empty text has to name its POPULATION. "No competitor was
+               ahead" read as nobody anywhere, on a board where both national
+               advertisers led on a bonus the client does not advertise. -->
           ${columnHtml("pressure", "Competitive pressure", b.pressure.filter(notIsolated),
-            "No competitor was ahead across the captured set.")}
+            "No local competitor was ahead in the captured ads.")}
         </div>
         ${isolatedOf(b).length ? `
           <details class="ctxwrap" open>
@@ -1080,10 +1083,16 @@ const isolatedOf = (b) => [...b.lead, ...b.pressure].filter((f) => f.significanc
 function cardHtml(f) {
   const ev = [...new Set(f.evidence || [])];
   return `
-    <article class="fcard ${esc(f.outcome || "context")} sig-${esc(f.significance || "supporting")}">
+    <article class="fcard ${esc(f.outcome || "context")} sig-${esc(f.significance || "supporting")}${f.scope === "national" ? " natscope" : ""}">
       <div class="flabel">
         <span class="fchip ${esc(chipTone(f))}">${esc(f.chip || f.label)}</span>${
         f.chip && f.chip !== f.label ? `<span class="frule">${esc(f.label)}</span>` : ""}${
+        f.scope === "national"
+          // Named on the card, not implied by position. A national's ad is
+          // context: we cannot tell whether it served in this market, and a
+          // reader who misses that reads it as a local competitor.
+          ? `<span class="fsig natsig" title="National advertising, shown as context. Not counted among the selected local competitors.">National reference</span>`
+          : `<span class="fsig regsig" title="Counted over the selected local competitors">Regional</span>`}${
         f.significance === "isolated"
           // Said on the card, not just implied by size. "One competitor prints a
           // $5 minimum" is a tactic; without this it reads as a market standard.
@@ -1145,7 +1154,10 @@ function snapshotHtml(snap) {
   if (!snap?.summaries?.length) return "";
   const row = (x) => `
     <div class="osrow${x.isClient ? " client" : ""}${x.tier === "national" ? " ref" : ""}">
-      <div class="osname">${esc(x.label)}${x.isClient ? `<span class="ostag">Your client</span>` : ""}</div>
+      <div class="osname">${esc(x.label)}${x.isClient ? `<span class="ostag">Your client</span>` : ""}${
+        x.evidence?.length
+          ? `<span class="ev sm" data-ev="${esc(x.evidence.join(","))}">View ${x.evidence.length} ad${x.evidence.length > 1 ? "s" : ""}</span>`
+          : ""}</div>
       <div class="ostext">${esc(x.text)}</div>
       ${x.figures?.length
         ? `<div class="osfigs">${x.figures.map((f) => `
@@ -1158,7 +1170,7 @@ function snapshotHtml(snap) {
     <h3 class="bh">What each advertiser is competing on</h3>
     <div class="oslist">${snap.summaries.map(row).join("")}</div>
     ${snap.referenceSummaries?.length ? `
-      <div class="osrefhead">National reference — not counted in any finding</div>
+      <div class="osrefhead">National reference — never counted among the local competitors</div>
       <div class="oslist">${snap.referenceSummaries.map(row).join("")}</div>` : ""}
     ${snap.absent?.length ? `
       <div class="osabsent">

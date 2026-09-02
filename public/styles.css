@@ -834,6 +834,11 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
    on the card and sorted last, because size alone is a hint and this is a fact. */
 .fcard.sig-isolated { opacity: .82; }
 .fcard.sig-isolated h4 { font-size: 14.5px; }
+/* Which population a card was counted over. Regional is the default and stays
+   quiet; national is the one a reader must not mistake for a local competitor. */
+.flabel .natsig { color: var(--accent); border-color: rgba(124,92,224,.45); }
+.flabel .regsig { opacity: .55; }
+.fcard.natscope { border-left-style: dashed; }
 .flabel .fsig {
   font-weight: 600; font-size: 9.5px; letter-spacing: .08em;
   padding: 2px 7px; border-radius: 4px; white-space: nowrap;
