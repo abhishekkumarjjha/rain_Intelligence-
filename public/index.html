@@ -153,8 +153,11 @@
         <div class="eyebrow" id="resEyebrow">—</div>
         <h2 id="resTitle">—</h2>
       </div>
+      <!-- ACTIONS ON THEIR OWN ROW, hard right and directly under the top bar.
+           Inline with the stats they crowded the numbers, and the one control
+           that navigates somewhere else was competing with three that do not. -->
       <div class="resright">
-        <div class="resstats" id="resStats"></div>
+        <div class="resactions">
         <!-- The other half of the tool. One capture set, two ways of reading
              it: the Wall is what competitors MADE, Competitive Intelligence is
              how the client COMPARES. This lands on the confirm screen with the
@@ -164,12 +167,14 @@
              and already on the client — until now it was only reachable one
              evidence chip at a time. This is the same creatives laid out as a
              wall. It costs nothing: no capture, no vision call, no request. -->
-        <button class="btn amber hidden" id="searchWallBtn">See all search ads →</button>
+        <button class="btn accent hidden" id="searchWallBtn">See all search ads →</button>
         <!-- Descriptive themes across the captured display creatives. Gated
              behind a click because it is the one model call on this screen. -->
         <button class="btn ghost sm hidden" id="insightsBtn">Key insights</button>
         <button class="btn ghost sm hidden" id="crossBtn"></button>
         <button class="btn ghost sm" id="reanalyzeBtn" title="Ignore the cache and capture again">↻ Re-analyze</button>
+        </div>
+        <div class="resstats" id="resStats"></div>
       </div>
     </div>
 

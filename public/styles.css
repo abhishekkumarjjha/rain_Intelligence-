@@ -1,5 +1,5 @@
 /* =========================================================================
-   RAIN Intelligence — royal blue, orange, green.
+   RAIN Intelligence — cyan, periwinkle, green.
 
    The canvas is a vivid royal blue, not a navy. Panels are lighter blues laid
    on it, so depth comes from the blue itself rather than from black.
@@ -8,14 +8,17 @@
    nothing on the page could be emphasised — everything that mattered had to
    shout in the same colour as everything that did not.
 
-     BLUE    the surface, and the primary action
-     ORANGE  the number or offer the eye should land on first, and the
-             secondary action. Never used for a warning.
-     GREEN   confirmed, complete, retrieved in full — outcomes that are good news
-     RED     only for failure
+     CYAN        the surface, and the primary action
+     PERIWINKLE  the number or offer the eye should land on first, and the
+                 secondary action
+     GREEN       confirmed, complete, retrieved in full — good news
+     AMBER       caution, and ONLY caution: a clipped figure, a thin capture
+     RED         only for failure
 
-   Orange doing emphasis is why warnings moved to red: a colour cannot mean
-   "look here" and "be careful" on the same screen.
+   Emphasis used to be orange, and orange was also doing caution. A colour
+   cannot mean "look here" and "be careful" on the same screen — and a page that
+   opens with a full-width orange banner on every single run teaches the reader
+   to stop seeing orange at all, which costs you the warnings that matter.
 
    CONTRAST: all 28 text/surface combinations clear WCAG AA (4.5:1); the worst
    is 4.52. Text colours and fill colours are SEPARATE tokens on purpose — a
@@ -66,7 +69,21 @@
   --on-amber:    #2A1500;
   --on-green:    #04231A;
 
-  --blue-glow:  rgba(44,191,212,.30);
+  /* EMPHASIS, and deliberately not amber.
+     Amber was doing two jobs on this page — "look here" on offers and buttons,
+     and "be careful" on clipped figures and coverage gaps — and a reader cannot
+     hold both. Worse, a full-width orange banner on EVERY run trains people to
+     stop reading amber at all, which is the opposite of what a caution is for.
+     Periwinkle carries no traffic-light association, sits well on the near-black
+     ground, and is distinct from cyan (structure), green (complete) and red
+     (failure). Amber now means caution and nothing else. */
+  --accent:      #B9A7F5;
+  --accent-fill: #7C5CE0;
+  --on-accent:   #120A2A;
+
+  --blue-glow:   rgba(44,191,212,.30);
+  --accent-glow: rgba(124,92,224,.30);
+  --grad-accent: linear-gradient(96deg, #7C5CE0 0%, #A78BFA 100%);
   --amber-glow: rgba(255,159,26,.28);
   --grad:       linear-gradient(96deg, #2CBFD4 0%, #45D6B4 100%);
   --grad-amber: linear-gradient(96deg, #F58E00 0%, #FFAE33 100%);
@@ -83,7 +100,7 @@ body {
   background:
     radial-gradient(1500px 900px at 78% -12%, rgba(44,191,212,.10), transparent 62%),
     radial-gradient(1100px 700px at 12% 8%, rgba(69,214,180,.06), transparent 66%),
-    radial-gradient(900px 900px at 96% 92%, rgba(255,159,26,.05), transparent 64%),
+    radial-gradient(900px 900px at 96% 92%, rgba(124,92,224,.06), transparent 64%),
     linear-gradient(158deg, #07090D 0%, #0A0E15 52%, #07090D 100%);
   background-attachment: fixed;
   color: var(--ink);
@@ -130,9 +147,7 @@ body {
 }
 /* RAIN's own site accents one word of the headline in cyan — "grow their
    conversions". Matching that is what makes this read as their tool rather than
-   a generic dashboard. It also returns amber to being purely semantic: on this
-   wall amber means an OFFER, and a brand flourish in the same colour teaches
-   the eye to stop trusting it. */
+   a generic dashboard. */
 .hero h1 .hl {
   background: var(--grad);
   -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -177,12 +192,12 @@ body {
 /* The wall of search ads. Orange because it is the one thing on the results
    screen that goes SOMEWHERE rather than changing what is on this page — and
    because unlike everything else offered here, it costs nothing to open. */
-.btn.amber {
-  background: var(--grad-amber); color: var(--on-amber);
-  box-shadow: 0 8px 24px var(--amber-glow);
+.btn.accent {
+  background: var(--grad-accent); color: #fff;
+  box-shadow: 0 8px 24px var(--accent-glow);
   font-size: 14px; padding: 11px 20px; font-weight: 700;
 }
-.btn.amber:hover { filter: brightness(1.08); }
+.btn.accent:hover { filter: brightness(1.1); }
 .btn.primary:hover { filter: brightness(1.1); }
 .btn.primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 .btn.lg { padding: 15px 34px; font-size: 15px; }
@@ -218,7 +233,7 @@ body {
 }
 .modecard.disabled { opacity: .42; cursor: default; }
 .mc-icon { width: 38px; height: 38px; border-radius: 11px; margin-bottom: 16px; }
-.mc-icon.creative { background: var(--grad-amber); }
+.mc-icon.creative { background: var(--grad-accent); }
 .mc-icon.bench    { background: linear-gradient(140deg,#2FCB8B,#12A0A0); }
 
 .mc-title { font-size: 17px; font-weight: 700; margin-bottom: 5px; }
@@ -230,7 +245,7 @@ body {
    display creative and search advertising. */
 .mc-source {
   font-size: 15px; font-weight: 800; letter-spacing: -.2px;
-  margin-bottom: 10px; color: var(--amber);
+  margin-bottom: 10px; color: var(--accent);
 }
 .modecard.bench .mc-source { color: var(--green); }
 
@@ -288,7 +303,7 @@ body {
   border-radius: var(--r-sm); padding: 15px 18px;
   cursor: pointer; user-select: none; transition: .15s;
 }
-.natrow:hover { border-color: var(--amber); }
+.natrow:hover { border-color: var(--accent); }
 .natrow input { position: absolute; opacity: 0; width: 0; height: 0; }
 .natrow .nattick {
   flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 6px;
@@ -296,21 +311,21 @@ body {
   transition: .15s;
 }
 .natrow .nattick::after {
-  content: "✓"; font-size: 12px; font-weight: 700; color: var(--on-amber);
+  content: "✓"; font-size: 12px; font-weight: 700; color: #fff;
   opacity: 0; transition: .15s;
 }
-.natrow:has(input:checked) { border-style: solid; border-color: var(--amber); background: var(--panel-2); }
-.natrow:has(input:checked) .nattick { background: var(--amber-fill); border-color: var(--amber-fill); }
+.natrow:has(input:checked) { border-style: solid; border-color: var(--accent); background: var(--panel-2); }
+.natrow:has(input:checked) .nattick { background: var(--accent-fill); border-color: var(--accent-fill); }
 .natrow:has(input:checked) .nattick::after { opacity: 1; }
-.natrow:has(input:focus-visible) { outline: 2px solid var(--amber); outline-offset: 2px; }
+.natrow:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .natbody { display: grid; gap: 3px; }
 .natname { font-size: 14px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .natbadge2 {
   font-size: 10px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase;
-  color: var(--amber); background: rgba(255,159,26,.12);
-  border: 1px solid rgba(255,159,26,.3); border-radius: 999px; padding: 2px 8px;
+  color: var(--accent); background: rgba(124,92,224,.16);
+  border: 1px solid rgba(124,92,224,.36); border-radius: 999px; padding: 2px 8px;
 }
-.natwho { font-size: 12.5px; color: var(--amber); font-weight: 600; }
+.natwho { font-size: 12.5px; color: var(--accent); font-weight: 600; }
 .natwhy { font-size: 12px; color: var(--ink-3); line-height: 1.5; }
 .natrow.hidden { display: none; }
 
@@ -379,10 +394,13 @@ body {
 .resstats .k { font-size: 11.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .6px; margin-top: 2px; }
 
 /* the sentence that keeps every superlative honest */
+/* Neutral on purpose. This sentence appears on EVERY run — it is the standing
+   caveat that keeps superlatives honest, not news — and rendering it as a
+   full-width orange banner made every board look like it had a problem. */
 .samplingbar {
-  background: rgba(255,159,26,.10); border: 1px solid rgba(255,159,26,.28);
+  background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--r-sm); padding: 12px 16px; margin-bottom: 22px;
-  font-size: 12.5px; color: var(--amber); line-height: 1.6;
+  font-size: 12.5px; color: var(--ink-2); line-height: 1.6;
 }
 .samplingbar.clean { background: rgba(47,203,139,.12); border-color: rgba(74,222,148,.30); color: var(--green); }
 
@@ -419,8 +437,8 @@ body {
 .adcard .sh { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
 .adcard .offer {
   display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 700;
-  color: var(--amber); background: rgba(255,159,26,.12);
-  border: 1px solid rgba(255,159,26,.34); border-radius: 8px; padding: 5px 10px;
+  color: var(--accent); background: rgba(124,92,224,.14);
+  border: 1px solid rgba(124,92,224,.38); border-radius: 8px; padding: 5px 10px;
 }
 .adcard .foot {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -440,7 +458,7 @@ table.bench tbody tr:last-child td { border-bottom: 0; }
 table.bench td.rl { font-weight: 600; font-size: 13.5px; color: var(--ink-2); width: 220px; }
 table.bench td .val { font-size: 16px; font-weight: 700; }
 /* Offer figures are the reason this table exists. Same orange as the wall. */
-table.bench tr.offerrow td .val { color: var(--amber); }
+table.bench tr.offerrow td .val { color: var(--accent); }
 table.bench td .val.absent { color: var(--ink-3); font-weight: 500; }
 table.bench td .det { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; line-height: 1.5; }
 table.bench td .note { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
@@ -641,8 +659,8 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
 .fstep .fv { font-size: 20px; font-weight: 800; line-height: 1.1; }
 .fstep .fl { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; line-height: 1.35; }
 /* The last step is the number on screen, so it carries the emphasis colour. */
-.fstep.last { border-color: rgba(255,159,26,.45); background: rgba(255,159,26,.10); }
-.fstep.last .fv { color: var(--amber); }
+.fstep.last { border-color: rgba(124,92,224,.48); background: rgba(124,92,224,.12); }
+.fstep.last .fv { color: var(--accent); }
 .flost {
   margin-top: 12px; font-size: 12.5px; color: var(--ink-2); line-height: 1.7;
   border-top: 1px solid var(--line); padding-top: 11px;
@@ -674,7 +692,8 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
 .forcetoggle { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-3); cursor: pointer; user-select: none; }
 .forcetoggle input { accent-color: var(--blue); cursor: pointer; }
 .forcetoggle:hover { color: var(--ink-2); }
-.resright { display: flex; align-items: center; gap: 18px; }
+.resright { display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+.resactions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* cost line: cached vs will-fetch, stated before spending */
 .costnote .cached { color: var(--green); }
@@ -789,12 +808,12 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
    comparison says how things stand, a change says what is new. */
 .preadchange {
   margin-top: 14px; padding: 12px 14px;
-  border-left: 3px solid var(--amber); border-radius: 0 8px 8px 0;
-  background: rgba(255,159,26,.07);
+  border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0;
+  background: rgba(124,92,224,.09);
 }
 .preadchangeh {
   font-size: 10.5px; letter-spacing: .10em; text-transform: uppercase;
-  font-weight: 700; color: var(--amber); margin-bottom: 6px;
+  font-weight: 700; color: var(--accent); margin-bottom: 6px;
 }
 .preadchangeline { font-size: 14px; line-height: 1.55; }
 .preadchangeline + .preadchangeline { margin-top: 5px; }
@@ -835,9 +854,8 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
   color: var(--tone, #9fb3c4);
 }
 .fchip.t-green  { --tone: #5fd0a0; }
-.fchip.t-amber  { --tone: #e8b14c; }
 .fchip.t-pink   { --tone: #ef8fb4; }
-.fchip.t-violet { --tone: #a99bf0; }
+.fchip.t-violet { --tone: #b9a7f5; }
 .fchip.t-cyan   { --tone: #5ec4d8; }
 .fchip.t-slate  { --tone: #9fb3c4; }
 .fcard h4 { margin: 0 0 8px; font-size: 16px; line-height: 1.42; font-weight: 600; }

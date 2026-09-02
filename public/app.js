@@ -1026,10 +1026,13 @@ function columnHtml(kind, title, findings, emptyText) {
    would spend all the colour on a distinction the layout has made twice. */
 const CHIP_TONE = {
   apy: "t-green", apr: "t-green", intro_apr: "t-green",
-  cash_bonus: "t-amber",
+  // No amber in the chip set. Amber now means caution on this page and nothing
+  // else, so a metric label cannot borrow it — "Cash bonus" in a warning colour
+  // reads as a problem rather than as the figure it names.
+  cash_bonus: "t-violet",
   monthly_fee: "t-pink", annual_fee: "t-pink", closing_costs: "t-pink",
-  minimum_opening_deposit: "t-violet", minimum_balance: "t-violet", down_payment: "t-violet",
-  rewards_rate: "t-cyan", points: "t-cyan", term_months: "t-cyan",
+  minimum_opening_deposit: "t-cyan", minimum_balance: "t-cyan", down_payment: "t-cyan",
+  rewards_rate: "t-slate", points: "t-slate", term_months: "t-slate",
 };
 const chipTone = (f) => CHIP_TONE[f.metric] || "t-slate";
 
@@ -1263,7 +1266,17 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeShe
 const SW = { product: "all", brand: "all" };
 
 function openSearchWall() {
-  SW.product = "all"; SW.brand = "all";
+  // OPEN ON THE SCOPED PRODUCT, matching the title above it and the display
+  // wall's own convention. The heading reads "· Checking" and the run is a
+  // checking analysis, so landing on all 131 creatives contradicted both.
+  //
+  // Falls back to everything when the scope has nothing in it — landing on an
+  // empty wall is the one failure worse than landing on a broad one. The chips
+  // still reach every captured ad, so the scope narrows and never hides.
+  const ads = S.run?.ads || [];
+  const scoped = ads.filter((a) => (a.product || "other") === S.run?.product).length;
+  SW.product = scoped ? S.run.product : "all";
+  SW.brand = "all";
   renderSearchWall();
   show("s-searchwall");
   window.scrollTo(0, 0);
@@ -1273,8 +1286,16 @@ function renderSearchWall() {
   const r = S.run;
   const ads = r?.ads || [];
   $("swTitle").textContent = `${r.client.label} · ${r.productLabel}`;
-  $("swSub").textContent =
-    `${ads.length} creatives already captured and read for this run. This is what was captured, not the whole market.`;
+  // The subtitle describes WHAT IS ON SCREEN, then the capture total. "131
+  // creatives" over a wall showing thirty is the same confusion as the title
+  // saying Checking while the filter said All.
+  const shownCount = ads
+    .filter((a) => SW.product === "all" || (a.product || "other") === SW.product)
+    .filter((a) => SW.brand === "all" || a.institution === SW.brand).length;
+  const scopeName = SW.product === "all" ? "" : ` ${productLabel(SW.product).toLowerCase()}`;
+  $("swSub").textContent = shownCount === ads.length
+    ? `All ${ads.length} creatives captured and read for this run. This is what was captured, not the whole market.`
+    : `Showing ${shownCount}${scopeName} of ${ads.length} creatives captured and read for this run. This is what was captured, not the whole market.`;
 
   // Counts are over EVERYTHING captured, never over the current slice — a chip
   // whose number only describes the filtered view cannot be used to escape it.
