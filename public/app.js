@@ -339,6 +339,7 @@ async function startCapture({ force = false } = {}) {
       anthropic_not_configured: "ANTHROPIC_API_KEY is not set on the server, so creatives cannot be read.",
       no_competitors: "Select at least one competitor before capturing.",
       bad_client_domain: "That client domain could not be read. Re-enter the landing page URL.",
+      product_required: "Competitive Intelligence needs a product scope. Every count on the board means \"among the ads about this product\", and \"Other\" matches everything — pick a product and capture again.",
     }[r.reason] || `Could not start the capture: ${r.reason}`);
     return;
   }

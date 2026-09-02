@@ -688,6 +688,82 @@ section("key insights — themes describe, they never advise");
   });
 }
 
+// ---------------------------------------------------------------------------
+// FAIL CLOSED. The system used to be fail-OPEN: when one stage was wrong or
+// uncertain, every later stage carried on producing confident analysis over a
+// population nobody had validated. These are the gates that stop that.
+// ---------------------------------------------------------------------------
+section("an invalid scope produces no analysis at all");
+{
+  const comps = [{ label: "Campus Federal", domain: "campusfederal.org" }];
+
+  await check("Competitive Intelligence refuses to start without a product", async () => {
+    const { status, body } = await S.post("/api/capture", {
+      mode: "benchmark", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "other", days: 30, competitors: comps,
+    });
+    eq(status, 400, "status");
+    eq(body.reason, "product_required", "reason");
+  });
+
+  await check("...and refuses an absent product the same way", async () => {
+    const { status, body } = await S.post("/api/capture", {
+      mode: "benchmark", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      days: 30, competitors: comps,
+    });
+    eq(status, 400, "status");
+    eq(body.reason, "product_required", "reason");
+  });
+
+  // The Wall is a browse. "Other" is a legitimate scope there — most display
+  // banners carry no product signal at all, and the product chips are a filter
+  // over everything captured rather than a gate on the analysis.
+  await check("the Wall still accepts a scope of Other", async () => {
+    const { body } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "other", days: 30, competitors: comps,
+    });
+    ok(body.ok, `the Wall should not be gated: ${body.reason}`);
+  });
+}
+
+section("no finding cites evidence from another product");
+{
+  const { body: started } = await S.post("/api/capture", {
+    mode: "benchmark", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+    product: "checking", days: 30,
+    competitors: [
+      { label: "Campus Federal", domain: "campusfederal.org" },
+      { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+    ],
+  });
+  const run = await S.awaitRun(started.runId);
+
+  // The credit-card run cited Google Maps listings and auto-loan ads as
+  // credit-card message-gap evidence, because the scope filter was off. Every
+  // id a finding points at must be an ad classified as the scoped product.
+  await check("every finding's evidence is on the scoped product", () => {
+    const onProduct = new Set(run.ads.filter((a) => a.product === run.product).map((a) => a.creativeId));
+    for (const f of run.board.findings) {
+      for (const id of f.evidence || []) {
+        ok(onProduct.has(id), `${f.rule} cites ${id}, which is not a ${run.product} ad`);
+      }
+    }
+  });
+
+  await check("the funnel's on-product count is a real subset, not everything read", () => {
+    const scoped = run.ads.filter((a) => a.product === run.product).length;
+    ok(scoped < run.ads.length,
+      `every captured ad counted as on-product — the scope filter is off (${scoped}/${run.ads.length})`);
+  });
+
+  await check("no client-facing line contains a null or undefined", () => {
+    const text = JSON.stringify(run.board.primaryRead || {}) + JSON.stringify(run.board.findings || []);
+    ok(!/\b(null|undefined)\b/.test(text.replace(/"[a-zA-Z]+":null/g, "")),
+      "a missing value reached client-facing text");
+  });
+}
+
 summary();
 } finally {
   S.stop();

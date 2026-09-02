@@ -227,6 +227,26 @@ app.post("/api/capture", (req, res) => {
   if (!chosen.length) return res.status(400).json({ ok: false, reason: "no_competitors" });
   if (!hasAnthropicKey()) return res.status(400).json({ ok: false, reason: "anthropic_not_configured" });
 
+  // ---- FAIL CLOSED ON AN UNKNOWN PRODUCT ----------------------------------
+  //
+  // Competitive Intelligence is product-scoped by definition: every
+  // denominator, every ratio and every piece of evidence means "among the ads
+  // about THIS product". "Other" is not a product — bucketFor() treats it as a
+  // wildcard, so the scope filter switches OFF and every captured ad becomes
+  // on-product.
+  //
+  // That is how a credit-card run came back citing Google Maps listings and
+  // auto-loan ads as message-gap evidence, over a funnel proudly reporting
+  // "131 of 131 on the product in scope". Nothing downstream was broken. Every
+  // engine worked correctly on a population that had never been filtered.
+  //
+  // The UI blocks this as well, but a UI guard is a courtesy and this is an
+  // invariant: no later stage can repair an invalid scope, so the run must not
+  // start at all. The Wall is unaffected — browsing everything is its job.
+  if (mode === "benchmark" && (!product || product === "other")) {
+    return res.status(400).json({ ok: false, reason: "product_required" });
+  }
+
   // Per-source key checks.
   // and leaves a Google capture in the same request running normally.
   const usable = [], refused = [];
