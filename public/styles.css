@@ -1199,6 +1199,26 @@ table.snap .rl .sm { display: block; font-size: 11px; opacity: .45; font-weight:
    and NOT like the model-written industry block below — it is counted evidence
    with a denominator on every line, and it should look like the rest of the
    counted evidence rather than like commentary. */
+/* Key insights: the counted line, then the model's reading, visibly separate.
+   Arithmetic over capture records and a model reading creatives are different
+   kinds of claim, and a panel that renders them identically invites the reader
+   to trust them equally. */
+.thkey {
+  border: 1px solid var(--line-2); border-left: 3px solid var(--accent);
+  border-radius: var(--r-sm); padding: 14px 16px; margin-bottom: 18px;
+  background: var(--panel-2);
+}
+.thkeyh { font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.45; }
+.thkeyd { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; margin-top: 7px; }
+.thkeyt { font-size: 11px; color: var(--ink-3); margin-top: 9px; letter-spacing: .02em; }
+
+.thsec { margin-top: 20px; }
+.thsech {
+  font-size: 11.5px; letter-spacing: .07em; text-transform: uppercase;
+  font-weight: 700; color: var(--ink-3); padding-bottom: 9px;
+}
+.thmeta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
 .shape { display: grid; gap: 0; }
 .shapeframe {
   font-size: 12px; opacity: .58; line-height: 1.55; margin-bottom: 13px;

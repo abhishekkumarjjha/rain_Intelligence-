@@ -111,36 +111,58 @@ const anthropic = http.createServer((req, res) => {
         : /checking/.test(path) ? ["checking", 0.9]
         : ["other", 0.96];
       text = JSON.stringify({ product: pick[0], confidence: pick[1], why: "test fixture" });
-    } else if (String(body.system || "").includes("You are a DESCRIBER")) {
+    } else if (String(body.system || "").includes("evidence-bound display advertising analyst")) {
       // THE THEMES PASS, answered like a real model that does not fully obey.
       //
-      // Two themes are clean. The other three each break a rule the prompt
-      // states plainly — because a fixture where the model behaves proves only
-      // that the happy path renders. The constraints in themes.js exist for
-      // exactly the answers below, and they are enforced in code AFTER the
-      // model speaks rather than requested in a prompt and hoped for.
-      const ids = (String(body.messages?.[0]?.content || "").match(/"id":\s*"([^"]+)"/g) || [])
-        .map((m) => m.replace(/.*"id":\s*"/, "").replace(/"$/, ""));
+      // Two entries are clean. The rest each break a rule the prompt states
+      // plainly — because a fixture where the model behaves proves only that
+      // the happy path renders. Every constraint in themes.js exists for one of
+      // the answers below, and all of them are enforced in code AFTER the model
+      // speaks rather than requested in a prompt and hoped for.
+      const ids = (String(body.messages?.[0]?.content || "").match(/"familyId":\s*"([^"]+)"/g) || [])
+        .map((m) => m.replace(/.*"familyId":\s*"/, "").replace(/"$/, ""));
       text = JSON.stringify({
-        themes: [
+        messageThemes: [
           { name: "Rate-led typography",
-            description: "The figure set large with no photography, offer carried in the headline slot.",
-            creativeIds: ids.slice(0, 2) },
+            observation: "The figure set large with no photography, offer carried in the headline slot.",
+            familyIds: ids.slice(0, 2) },
           { name: "Community photography",
-            description: "Local imagery and member portraits carrying a membership message rather than a figure.",
-            creativeIds: ids.slice(1, 3) },
+            observation: "Local imagery and member portraits carrying a membership message rather than a figure.",
+            familyIds: ids.slice(1, 3) },
           // Prescriptive: addresses a reader and advises. Must be dropped.
           { name: "Switching moment",
-            description: "You should lead with the switching offer to stand out here.",
-            creativeIds: ids.slice(0, 2) },
+            observation: "You should lead with the switching offer to stand out here.",
+            familyIds: ids.slice(0, 2) },
           // Claims performance the capture cannot support. Must be dropped.
           { name: "Bonus-forward creative",
-            description: "Bonus-led banners perform better than rate-led ones in this category.",
-            creativeIds: ids.slice(0, 2) },
+            observation: "Bonus-led banners perform better than rate-led ones in this category.",
+            familyIds: ids.slice(0, 2) },
           // Cites nothing real. Must be dropped.
           { name: "Trust signals",
-            description: "Longevity and member counts used as reassurance throughout the set.",
-            creativeIds: ["NOT_A_REAL_ID"] },
+            observation: "Longevity and member counts used as reassurance throughout the set.",
+            familyIds: ["NOT_A_REAL_ID"] },
+          // A number written in WORDS. The old rule stripped digits and said
+          // "no digits", so this walked straight through — a model-written
+          // figure with no digit in it is still a model-written figure.
+          { name: "Spelled-out counting",
+            observation: "Several of the designs foreground a cash incentive over a rate figure.",
+            familyIds: ids.slice(0, 2) },
+          // Infers intent. "Strategy" is the word that does it.
+          { name: "Acquisition strategy",
+            observation: "The bonus strategy targets switchers rather than existing account holders.",
+            familyIds: ids.slice(0, 2) },
+        ],
+        executionPatterns: [
+          { name: "Single branded system",
+            observation: "One branded layout repeats across different products with only the message swapped.",
+            familyIds: ids.slice(0, 2) },
+        ],
+        cohortContrasts: [
+          // Both sides cite the SAME cohort, so this is not a contrast at all.
+          // The model labelled it one; the code has to check rather than trust.
+          { name: "False contrast",
+            observation: "Regional designs foreground rate figures where national designs foreground incentives.",
+            regionalFamilyIds: ids.slice(0, 2), nationalFamilyIds: ids.slice(0, 2) },
         ],
       });
     } else {

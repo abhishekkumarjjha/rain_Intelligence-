@@ -1618,21 +1618,55 @@ $("swBack").onclick = () => { show("s-results"); window.scrollTo(0, 0); };
  * prompt and hoped for.
  */
 function themesHtml(t) {
-  return `
-    <div class="shapeframe" style="margin-bottom:16px">${esc(t.framing)}</div>
-    <div class="shapelist">
-      ${t.themes.map((x) => `
-        <div class="shapeitem">
-          <div class="shapechip"><span class="fchip t-violet">Theme</span></div>
-          <div class="shapebody">
-            <div class="shapetext"><b>${esc(x.name)}</b></div>
-            <div class="shapedetail">${esc(x.description)}</div>
-            ${x.creativeIds?.length
-              ? `<span class="ev sm" data-ev="${esc(x.creativeIds.join(","))}">View ${x.creativeIds.length} ad${x.creativeIds.length > 1 ? "s" : ""}</span>`
-              : ""}
-          </div>
-        </div>`).join("")}
+  /* One entry, whatever section it came from. The chips carry the two things
+     that decide how much weight it deserves — how many advertisers are behind
+     it, and which cohort — because "four designs, one advertiser" and "four
+     designs, four advertisers" are completely different findings and used to
+     render identically. */
+  const item = (x, chip, tone) => `
+    <div class="shapeitem">
+      <div class="shapechip"><span class="fchip ${tone}">${esc(chip)}</span></div>
+      <div class="shapebody">
+        <div class="shapetext"><b>${esc(x.name)}</b></div>
+        <div class="shapedetail">${esc(x.observation || x.description || "")}</div>
+        <div class="thmeta">
+          ${x.scope === "mixed"
+            ? `<span class="fsig">Regional and national</span>`
+            : x.scope === "national"
+              ? `<span class="fsig natsig" title="National advertising, shown as context — we cannot tell whether it served in this market">National</span>`
+              : x.scope === "regional" ? `<span class="fsig regsig">Regional</span>` : ""}
+          ${x.supportType === "within_advertiser"
+            ? `<span class="fsig" title="Every design behind this comes from a single advertiser — that advertiser repeating itself, not a pattern across the set">One advertiser</span>`
+            : `<span class="fsig" title="Carried by designs from more than one advertiser">${x.advertiserCount} advertisers</span>`}
+          ${x.familyCount ? `<span class="fsig" title="Distinct designs, not sizes — one design cut into five banner slots counts once">${x.familyCount} designs</span>` : ""}
+        </div>
+        ${x.creativeIds?.length
+          ? `<span class="ev sm" data-ev="${esc(x.creativeIds.join(","))}">View ${x.creativeIds.length} ad${x.creativeIds.length > 1 ? "s" : ""}</span>`
+          : ""}
+      </div>
     </div>`;
+
+  const section = (title, rows, chip, tone) => rows?.length
+    ? `<div class="thsec"><div class="thsech">${esc(title)}</div>
+         <div class="shapelist">${rows.map((x) => item(x, chip, tone)).join("")}</div></div>`
+    : "";
+
+  // The counted line first, and visibly not of a piece with what follows. It is
+  // arithmetic over capture records; everything below it is a model reading
+  // creatives, and the reader is entitled to know which is which.
+  const channel = t.channel ? `
+    <div class="thkey">
+      <div class="thkeyh">${esc(t.channel.headline)}</div>
+      <div class="thkeyd">${esc(t.channel.detail)}</div>
+      <div class="thkeyt">Counted from the capture records, not written by a model.</div>
+    </div>` : "";
+
+  return `
+    ${channel}
+    <div class="shapeframe" style="margin-bottom:16px">${esc(t.framing)}</div>
+    ${section("What the ads say", t.messageThemes || t.themes, "Message", "t-violet")}
+    ${section("How they say it", t.executionPatterns, "Execution", "t-cyan")}
+    ${section("Regional against national", t.cohortContrasts, "Contrast", "t-slate")}`;
 }
 
 $("insightsBtn").onclick = async () => {

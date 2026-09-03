@@ -28,6 +28,7 @@ import { capture, hasKey, normDomain, buildDomainLink, MAX_READ_PER_ADVERTISER, 
 import { extractByFormat, readerFor, readerKey } from "./lib/extract.js";
 import { buildBoard } from "./lib/benchmark.js";
 import { readThemes } from "./lib/themes.js";
+import { channelShape } from "./lib/channel-shape.js";
 import { readRatePages } from "./lib/rate-page.js";
 import {
   putEvidence, getEvidence, putSnapshot, previousSnapshot,
@@ -913,8 +914,23 @@ app.post("/api/run/:id/themes", async (req, res) => {
     // actually looking at — rather than everything captured. Themes named over
     // ads the reader cannot see would be unverifiable by design.
     const scoped = filterByProduct(run.ads || [], run.product);
-    const themes = await readThemes(scoped.length >= 4 ? scoped : (run.ads || []), run.productLabel);
+    const pool = (scoped.length >= 4 ? scoped : (run.ads || [])).filter(isShowable);
+
+    // CLUSTERED FIRST, and this is the fix rather than a tidy-up. Handed raw
+    // ads, the model saw one design cut into five banner sizes as five
+    // independent confirmations of a theme, so the most heavily resized
+    // creative always looked like the strongest pattern in the set.
+    const themes = await readThemes(clusterAds(pool), run.productLabel);
     if (!themes) return res.json({ ok: false, reason: "not_enough_creative" });
+
+    // The set-level line is COUNTED, never written. It compares capture records
+    // across channels, which is a fact no display creative contains — so a
+    // model asked for a takeaway here could only have invented one.
+    themes.channel = channelShape({
+      advertisers: (run.competitors || []).map((c) => ({ domain: c.domain, label: c.label, tier: c.tier || "local" })),
+      days: run.days,
+      peek: (q) => captureCache.peek({ ...q, ttlDays: Number.MAX_SAFE_INTEGER }),
+    });
     run.themes = themes;
     ACTIVE.set(run.id, run);
     saveRun(run);

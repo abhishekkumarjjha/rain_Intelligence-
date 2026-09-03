@@ -711,6 +711,52 @@ section("key insights — themes describe, they never advise");
     ok(/not what anyone should do/i.test(t.themes.framing), `weak framing: ${t.themes.framing}`);
   });
 
+  await check("a number written in WORDS is dropped like a digit", async () => {
+    // The old rule stripped digits and said "no digits", so "several of the
+    // designs" sailed through. A model-written figure with no digit in it is
+    // still a model-written figure and still traces back to nothing counted.
+    ok(!t.themes.messageThemes.some((x) => x.name === "Spelled-out counting"),
+      "a spelled-out quantity survived");
+  });
+
+  await check("a theme that infers intent is dropped", () => {
+    // "Strategy" claims to know why an advertiser did something. The capture
+    // shows what ran, never why.
+    ok(!t.themes.messageThemes.some((x) => x.name === "Acquisition strategy"),
+      "an intent claim survived");
+  });
+
+  await check("a contrast whose two sides are the same cohort is not a contrast", () => {
+    // The model labelled it a regional-vs-national contrast and cited the same
+    // ids on both sides. Labels are verified against the real cohorts, never
+    // taken on trust.
+    ok(!(t.themes.cohortContrasts || []).some((x) => x.name === "False contrast"),
+      "a contrast with one cohort on both sides rendered");
+  });
+
+  await check("support is derived from the evidence, not asked for", () => {
+    // Four designs from ONE advertiser and four from four are completely
+    // different findings, and used to render identically because advertiser
+    // identity was stripped before the model ever saw it.
+    for (const x of [...t.themes.messageThemes, ...(t.themes.executionPatterns || [])]) {
+      ok(["cross_advertiser", "within_advertiser"].includes(x.supportType),
+        `${x.name} has no support type`);
+      eq(x.supportType === "within_advertiser", x.advertiserCount === 1,
+        `${x.name}: support type disagrees with its own advertiser count`);
+      ok(["regional", "national", "mixed", "unknown"].includes(x.scope), `${x.name} has no scope`);
+    }
+  });
+
+  await check("one design cut into many sizes is one piece of evidence", () => {
+    // The defect this whole pass exists to fix: handed raw ads, the model read
+    // one design resized five ways as five confirmations of a theme.
+    for (const x of t.themes.messageThemes) {
+      ok(x.familyCount >= 2, `${x.name} rests on fewer than two designs`);
+      ok(x.familyCount <= x.creativeIds.length,
+        `${x.name}: more designs than creatives, which cannot happen`);
+    }
+  });
+
   await check("themes are refused for Competitive Intelligence", async () => {
     const { body } = await S.post(`/api/run/${benchRun.id}/themes`);
     eq(body.reason, "wrong_mode", "reason");
