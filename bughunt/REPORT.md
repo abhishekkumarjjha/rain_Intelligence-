@@ -728,7 +728,11 @@ run of the same suite and the suite had to be made runnable before any of them
 could be seen; and F-009 has a follow-up commit for the browser assertions that
 matched its old wording.
 
-`npm test` passes at **every** commit.
+`npm test` passes at **every** commit. The browser suite passes at every commit
+except `3c46e4a`, where two of its assertions still matched the cost line's old
+wording; `00727ec`, the next commit, is the fix. Saying so rather than rounding it
+to "both suites green throughout", because an auditor checking out that one commit
+would find it and be right to.
 
 ```
 $ git diff --stat 7010b4e..HEAD | tail -1
