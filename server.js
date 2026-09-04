@@ -1331,8 +1331,18 @@ async function readThemesForScope({ run, scope, isAll, scopeLabel }) {
 
   try {
     // The framing line names the product only when a product is what was read.
+    //
+    // The client's designs go INTO the read — the cohort contrast cannot be
+    // read without them — and the counts go in beside them so the sentence
+    // that comes back names the competitor figure and says the client's work
+    // was read alongside it, instead of quietly counting the two together.
     const { themes, audit } = await readThemes(
-      [...families, ...clientFamilies], isAll ? "" : scopeLabel);
+      [...families, ...clientFamilies], isAll ? "" : scopeLabel,
+      {
+        competitorDesigns: designs,
+        clientDesigns: usableFamilies(clientFamilies).length,
+        clientLabel: run.client?.label,
+      });
 
     // Reached, answered, and nothing it proposed held up. Not an error — and
     // not the end of the panel either: the counted observations go back

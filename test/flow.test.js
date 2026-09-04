@@ -1428,6 +1428,58 @@ section("sweep — every string in every payload");
   });
 }
 
+  // -------------------------------------- whose designs are in that number
+  //
+  // H15. The client's own designs are handed to the themes model on purpose —
+  // the cohort contrast is not readable without them — but the framing line
+  // counted them into "the N distinct designs captured" while the panel's own
+  // readOver.designs counted competitors only. One panel, two Ns for the same
+  // noun, and the larger one presented as a competitor figure.
+  section("key insights — the framing counts competitors, and says the client was read too");
+  {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [
+        { label: "Campus Federal", domain: "campusfederal.org" },
+        { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+        { label: "EFCU Financial", domain: "efcufinancial.org" },
+      ],
+    });
+    const wall = await S.awaitRun(started.runId);
+    const { body: t } = await S.post(`/api/run/${wall.id}/themes`, { scope: "all" });
+
+    if (!t.themes) {
+      await check("themes were read for the wall", () => ok(t.themes, `no themes: ${t.reason}`));
+    } else {
+      await check("the framing's design count is the panel's own competitor count", () => {
+        const m = String(t.themes.framing).match(/across the (\d+) distinct/);
+        ok(m, `the framing states no count: "${t.themes.framing}"`);
+        eq(Number(m[1]), t.designs,
+          `the framing says ${m[1]} designs, the panel's readOver says ${t.designs}`);
+      });
+
+      await check("and it says so — the number is named as a competitor figure", () =>
+        ok(/competitor/i.test(t.themes.framing), `the framing does not say whose designs: "${t.themes.framing}"`));
+
+      await check("creativesRead is the competitor count, not the total handed to the model", () => {
+        eq(t.themes.creativesRead, t.designs, "creativesRead");
+        ok(t.themes.designsHandedToTheModel >= t.themes.creativesRead,
+          "the model was handed fewer designs than the panel counted");
+      });
+
+      await check("the client's designs are reported separately, never folded in", () => {
+        eq(typeof t.themes.clientDesignsRead, "number", "clientDesignsRead");
+        eq(t.themes.designsHandedToTheModel, t.themes.creativesRead + t.themes.clientDesignsRead,
+          "the two populations do not add up to what was read");
+      });
+
+      await check("no count on this panel names a network the capture cannot establish", () =>
+        ok(!/display design|display ad/i.test(JSON.stringify(t.themes)),
+          "F-014: a 'display' claim survived in the themes panel"));
+    }
+  }
+
 summary();
 } finally {
   S.stop();

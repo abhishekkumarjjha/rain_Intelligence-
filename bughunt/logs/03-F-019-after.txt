@@ -1,0 +1,10 @@
+# F-019 AFTER
+
+── key insights — the framing counts competitors, and says the client was read too
+  ok  the framing's design count is the panel's own competitor count
+  ok  and it says so — the number is named as a competitor figure
+  ok  creativesRead is the competitor count, not the total handed to the model
+  ok  the client's designs are reported separately, never folded in
+  ok  no count on this panel names a network the capture cannot establish
+
+138 passed, 0 failed

@@ -1,0 +1,16 @@
+# F-019 BEFORE — the framing counted the client's designs as competitor designs.
+
+── key insights — the framing counts competitors, and says the client was read too
+  FAIL the framing's design count is the panel's own competitor count
+       the framing says 18 designs, the panel's readOver says 16: expected 16, got 18
+  FAIL and it says so — the number is named as a competitor figure
+       the framing does not say whose designs: "Recurring ideas across the 18 distinct display designs captured — one entry per design, however many sizes it was cut into. These describe what the ads are, not what anyone should do, and they cover what was captured rather than the whole market."
+  FAIL creativesRead is the competitor count, not the total handed to the model
+       creativesRead: expected 16, got 18
+  FAIL the client's designs are reported separately, never folded in
+       clientDesignsRead: expected "number", got "undefined"
+  FAIL no count on this panel names a network the capture cannot establish
+       F-014: a 'display' claim survived in the themes panel
+
+133 passed, 5 failed
+
