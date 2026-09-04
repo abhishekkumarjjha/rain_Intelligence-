@@ -308,10 +308,10 @@ try {
       // The control is only real if the price follows it. Two advertisers
       // dropped from the capture must be two advertisers dropped from the quote.
       const before = await settledCostLine(page);
-      const nBefore = Number((before.match(/(\d+) requests?/) || [])[1] || 0);
+      const nBefore = Number((before.match(/(\d+) SerpApi requests?/) || [])[1] || 0);
       await page.click("#natRow");
       const after = await settledCostLine(page);
-      const nAfter = Number((after.match(/(\d+) requests?/) || [])[1] || 0);
+      const nAfter = Number((after.match(/(\d+) SerpApi requests?/) || [])[1] || 0);
       ok(nAfter === nBefore - 2, `expected two fewer requests, got ${nBefore} -> ${nAfter}`);
       await page.click("#natRow");                       // back on for the capture below
       eq(await page.locator("#nationalsChk").isChecked(), true, "restored");
@@ -320,8 +320,19 @@ try {
     await check("the cost line states what will be spent before anything is spent", async () => {
       const cost = await settledCostLine(page);
       ok(/Google display/.test(cost), `cost line was: ${cost}`);
-      ok(/\d+ requests?|nothing to spend/.test(cost), `cost line was: ${cost}`);
+      ok(/\d+ SerpApi requests?|nothing to spend/.test(cost), `cost line was: ${cost}`);
       ok(/reused for \d+ days/.test(cost), `cost line was: ${cost}`);
+      // BOTH BILLS. Quoting SerpApi credits and staying silent about up to
+      // thirty vision calls per advertiser is the bug F-009 is about, and it
+      // is exactly the kind of omission this line can regress into silently.
+      ok(/fresh creative reads?|already read|nothing to spend/.test(cost),
+        `the quote says nothing about model spend: ${cost}`);
+      ok(/up to/.test(cost) || /nothing to spend/.test(cost),
+        `a vision quote stated as a flat number is a promise: ${cost}`);
+      ok(/Key insights is a separate model call/.test(cost),
+        `the quote does not say what it excludes: ${cost}`);
+      ok(/does NOT re-read creatives/.test(cost),
+        `the quote does not say which cache force bypasses: ${cost}`);
     });
 
     await page.click("#captureBtn");
