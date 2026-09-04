@@ -43,7 +43,7 @@ import { suggestCompetitors, findClient, listClients, DIRECTORY_SIZE } from "./l
 import { productFromUrl, normalizeProduct, PRODUCT_LABELS, PRODUCT_CODES } from "./lib/products.js";
 import { readProductFromUrl, CONFIDENT } from "./lib/product-reader.js";
 import { hasAnthropicKey } from "./lib/claude.js";
-import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, findPreviousRun, diffRuns, writeManifest, readManifest, storageHealth, CACHE_SCHEMA } from "./lib/store.js";
+import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, forgetCachedExtraction, findPreviousRun, diffRuns, writeManifest, readManifest, storageHealth, CACHE_SCHEMA } from "./lib/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -1106,6 +1106,36 @@ app.get("/api/evidence/:creativeId", (req, res) => {
   const bundle = getEvidence(req.params.creativeId);
   if (!bundle) return res.status(404).json({ ok: false, reason: "not_found" });
   res.json({ ok: true, evidence: bundle });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/extraction/:creativeId/reread — forget ONE transcription.
+//
+// A wrong reading used to be permanent until the reader version moved, and
+// moving it retires every extraction in the cache: hundreds of correct
+// readings re-bought to fix one. So wrong readings stayed, in the evidence
+// drawer where somebody had already spotted them.
+//
+// This does not re-read anything by itself, and it deliberately costs nothing
+// when it is called. It forgets the record, so the next capture that meets
+// this creative pays for exactly one vision call. Spending money is what the
+// capture screen is for, and it quotes the bill first (F-009).
+// ---------------------------------------------------------------------------
+app.post("/api/extraction/:creativeId/reread", (req, res) => {
+  const creativeId = String(req.params.creativeId || "");
+  if (!/^[A-Za-z0-9_-]{4,80}$/.test(creativeId)) {
+    return res.status(400).json({ ok: false, reason: "bad_creative_id" });
+  }
+  // An optional reader narrows it to one reading of the creative. Without one,
+  // every reader's reading goes — which is what "re-read this creative" means
+  // to the person asking, and the search and banner readings of one creative
+  // are equally likely to be the wrong one.
+  const reader = req.body?.reader ? String(req.body.reader) : null;
+  const { dropped, readers } = forgetCachedExtraction(creativeId, reader);
+  // Not a 404 when nothing was cached: "there is no stored reading of this
+  // creative" is the state the caller asked for, and reporting it as a failure
+  // would make a second click look broken.
+  res.json({ ok: true, creativeId, dropped, readers, nextCaptureWillReRead: true });
 });
 
 // ---------------------------------------------------------------------------

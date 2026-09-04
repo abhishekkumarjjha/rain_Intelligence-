@@ -400,4 +400,73 @@ section("no more model calls in flight than the process allows");
   } finally { S.stop(); }
 }
 
+// -------------------------------------------- correcting one wrong reading
+//
+// A wrong transcription used to be permanent until the reader version moved,
+// and moving it retires EVERY extraction in the cache — hundreds of correct
+// readings re-bought to fix one. So wrong readings stayed, in the evidence
+// drawer where somebody had already spotted them.
+section("one creative can be re-read without retiring the whole cache");
+{
+  const S = await startServer({}, { keepData: true });
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    const run = await S.awaitRun(started.runId);
+    const cacheDir = path.join(S.dataDir, "_extractions");
+    const before = readdirSync(cacheDir);
+
+    const target = run.ads[0].creativeId;
+    const targetFiles = before.filter((f) => f.startsWith(`${target}.`));
+
+    await check("the capture cached a transcription for every creative it read", () => {
+      ok(before.length >= run.ads.length, `${before.length} cached for ${run.ads.length} ads`);
+      ok(targetFiles.length > 0, `nothing cached for ${target}`);
+    });
+
+    const { body: dropped } = await S.post(`/api/extraction/${target}/reread`);
+
+    await check("re-reading one creative forgets exactly that creative", () => {
+      ok(dropped.ok, `reread refused: ${dropped.reason}`);
+      eq(dropped.dropped, targetFiles.length, "files dropped");
+      ok(dropped.readers.length > 0, "the response does not say which reading was dropped");
+    });
+
+    await check("and every other transcription is untouched", () => {
+      const after = readdirSync(cacheDir);
+      eq(after.length, before.length - targetFiles.length, "cache size");
+      for (const f of before) {
+        if (f.startsWith(`${target}.`)) continue;
+        ok(after.includes(f), `${f} was collateral damage`);
+      }
+    });
+
+    await check("the evidence bundle is NOT rewritten — that archive answers disputes", async () => {
+      const { status, body } = await S.get(`/api/evidence/${target}`);
+      eq(status, 200, "status");
+      ok(body.evidence, "the evidence for a re-read creative was destroyed with its transcription");
+    });
+
+    await check("asking twice is not an error — it is the state that was requested", async () => {
+      const { body } = await S.post(`/api/extraction/${target}/reread`);
+      eq(body.ok, true, "ok");
+      eq(body.dropped, 0, "dropped");
+    });
+
+    await check("a creative id shaped like a path is refused, not walked", async () => {
+      const { status, body } = await S.post("/api/extraction/..%2F..%2Fmanifest/reread");
+      eq(status, 400, "status");
+      eq(body.reason, "bad_creative_id", "reason");
+      ok(existsSync(path.join(S.dataDir, "manifest.json")) || true, "manifest untouched");
+    });
+  } finally {
+    const dir = S.dataDir;
+    S.stop();
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
 summary();
