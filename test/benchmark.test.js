@@ -12,6 +12,7 @@
 
 import assert from "node:assert/strict";
 import { shapeSearch } from "../lib/extract-search.js";
+import { shape as shapeDisplay } from "../lib/extract.js";
 import { normalizeObservation, rollUpBrand, rankAgainst } from "../lib/observations.js";
 import { productFromUrl } from "../lib/products.js";
 import { comparable, better } from "../lib/metrics.js";
@@ -249,7 +250,7 @@ const BOARD = buildBoard({
     label: "La Capitol FCU", domain: "lacapfcu.org",
     ads: [chk("lacapfcu.org", "La Capitol FCU", {
       headlines: ["La Capitol Checking", "6.50% APY"],
-      description: "Earn 6.50% APY on Choice Checking. Limited-time offer.",
+      description: "Earn 6.50% APY on Choice Checking. Get paid up to 2 days early. Limited-time offer.",
       economicFacts: [{ metric: "apy", raw: "6.50% APY", qualifiers: {}, sourceField: "headline" }],
       claims: [{ claim: "early_direct_deposit", verbatim: "Get paid up to 2 days early", sourceField: "description" }],
       leadEmphasis: "rate",
@@ -259,7 +260,7 @@ const BOARD = buildBoard({
     { label: "Campus Federal", domain: "campusfederal.org", ads: [ad(CAMPUS_STACKED, { domain: "campusfederal.org" })] },
     { label: "Comp B", domain: "b.org", ads: [chk("b.org", "Comp B", {
       headlines: ["Get $400 When You Switch"],
-      description: "Open a checking account and earn $400. No monthly fee.",
+      description: "Open a checking account and earn $400, then earn 3.75% APY. No monthly fee.",
       economicFacts: [{ metric: "cash_bonus", raw: "$400", qualifiers: {}, sourceField: "headline" },
                       { metric: "apy", raw: "3.75% APY", qualifiers: {}, sourceField: "description" }],
       claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee", sourceField: "description" }],
@@ -1242,6 +1243,158 @@ test("an absent cell states an observation, never a product fact", () => {
       assert.notEqual(cell.value, "—", "an em-dash reads as nothing rather than as an observation");
     }
   }
+});
+
+// ===========================================================================
+console.log("\nSTAGE 10 — grounding: a figure only counts if the ad printed it");
+// ===========================================================================
+
+// The gate this file has always described itself as being, applied to the one
+// thing it never checked: whether the string the model handed back was ever on
+// screen. Every case below is a legal model answer under the current prompt.
+
+const GROUNDED_AD = {
+  advertiser: "Comp G",
+  displayUrl: "www.g.org/checking",
+  headlines: ["G Bank Checking", "Earn 5.55% APY"],
+  description: "Open Choice Checking and earn 5.55% APY. No monthly fee.",
+  sitelinks: ["Open an Account"],
+  callouts: [],
+  economicFacts: [{ metric: "apy", raw: "5.55% APY", qualifiers: {}, sourceField: "headline" }],
+  claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee", sourceField: "description" }],
+  unclassified: [],
+  leadEmphasis: "rate",
+  urgency: { present: false, phrase: "" },
+  product: "checking",
+  productConfidence: 0.9,
+  truncated: false,
+  legible: true,
+};
+
+test("a figure the ad text contains is grounded and counts", () => {
+  const a = ad(GROUNDED_AD, { domain: "g.org" });
+  const apy = a.facts.find((f) => f.metric === "apy");
+  assert.equal(apy.grounded, true);
+  assert.equal(apy.rankable, true);
+  const brand = rollUpBrand({ key: "g.org", label: "Comp G", domain: "g.org", ads: [a] });
+  assert.equal(brand.positions.apy.raw, "5.55% APY");
+});
+
+test("a figure that is nowhere in the ad text is kept, marked, and never counted", () => {
+  // The reader transcribed an ad with no rate in it and returned a rate anyway.
+  // Nothing before this checked, so 6.75% became the brand's advertised
+  // position and was ranked against the client.
+  const a = ad({
+    ...GROUNDED_AD,
+    headlines: ["G Bank Checking"],
+    description: "Open Choice Checking today. No monthly fee.",
+    economicFacts: [{ metric: "apy", raw: "6.75% APY", qualifiers: {}, sourceField: "description" }],
+  }, { domain: "g.org" });
+
+  const apy = a.facts.find((f) => f.metric === "apy");
+  assert.ok(apy, "an ungrounded fact is EVIDENCE OF A BAD READ and must not be deleted");
+  assert.equal(apy.grounded, false);
+  assert.equal(apy.rankable, false, "an invented figure must never be rankable");
+
+  const brand = rollUpBrand({ key: "g.org", label: "Comp G", domain: "g.org", ads: [a] });
+  assert.equal(brand.positions.apy, undefined, "it must not become the brand's advertised position");
+  assert.equal(brand.partial.apy, undefined,
+    "and it must not be reported as 'cut off' — the capture was not clipped, the read was wrong");
+  assert.equal(brand.ungrounded.apy.length, 1, "it stays visible to whoever debugs the reader");
+});
+
+test("a figure grounded only in a DIFFERENT ad of the same brand does not count", () => {
+  // Grounding is per creative. "5.55% APY" printed by one of Comp G's ads is
+  // not evidence that a second, rate-free ad printed it — and the brand rollup
+  // counts ads, so letting one ad vouch for another is how one real figure
+  // turns into two.
+  const withRate = ad(GROUNDED_AD, { domain: "g.org", creativeId: "CR_G1" });
+  const withoutRate = ad({
+    ...GROUNDED_AD,
+    headlines: ["G Bank Checking"],
+    description: "Switch to G Bank. No monthly fee.",
+    economicFacts: [{ metric: "apy", raw: "5.55% APY", qualifiers: {}, sourceField: "description" }],
+  }, { domain: "g.org", creativeId: "CR_G2" });
+
+  assert.equal(withRate.facts.find((f) => f.metric === "apy").grounded, true);
+  assert.equal(withoutRate.facts.find((f) => f.metric === "apy").grounded, false);
+
+  const brand = rollUpBrand({ key: "g.org", label: "Comp G", domain: "g.org", ads: [withRate, withoutRate] });
+  assert.equal(brand.positions.apy.adCount, 1,
+    "two ads must not both be counted as advertising a rate when only one printed it");
+  assert.deepEqual(brand.positions.apy.all.map((f) => f.creativeId), ["CR_G1"]);
+});
+
+test("a claim whose quote is not in the ad is never counted against the brand", () => {
+  // The board prints the verbatim in quotation marks next to the count. A claim
+  // the ad does not contain puts an invented sentence in a client's report.
+  const a = ad({
+    ...GROUNDED_AD,
+    claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee ever, guaranteed", sourceField: "description" }],
+  }, { domain: "g.org" });
+
+  const claim = a.claims.find((c) => c.claim === "no_monthly_fee");
+  assert.ok(claim, "kept as evidence of what the reader proposed");
+  assert.equal(claim.grounded, false);
+
+  const brand = rollUpBrand({ key: "g.org", label: "Comp G", domain: "g.org", ads: [a] });
+  assert.equal(brand.claims.has("no_monthly_fee"), false);
+});
+
+test("a clipped figure is still recognised as present, and refused for being clipped", () => {
+  // The two gates are independent and must stay that way. "Up To 5.5…" IS in
+  // the ad, so grounding passes; it is refused by isCompleteFigure(), which is
+  // the refusal that carries the right explanation to the snapshot cell.
+  const a = ad({
+    ...GROUNDED_AD,
+    headlines: ["BR Telco Checking"],
+    description: "…Open A Checking Account With BR Telco & Earn Up To 5.5…",
+    economicFacts: [{ metric: "cash_bonus", raw: "Up To 5.5…", qualifiers: {}, sourceField: "description" }],
+    claims: [],
+  }, { domain: "brtelco.org" });
+
+  const f = a.facts.find((x) => x.metric === "cash_bonus");
+  assert.equal(f.grounded, true, "it was on screen — that is not what is wrong with it");
+  assert.equal(f.complete, false);
+  assert.equal(f.rankable, false);
+  const brand = rollUpBrand({ key: "brtelco.org", label: "BR Telco", domain: "brtelco.org", ads: [a] });
+  assert.equal(brand.positions.cash_bonus, undefined);
+  assert.ok(brand.partial.cash_bonus, "it must still read as 'cut off', not as 'not observed'");
+});
+
+test("spacing, curly quotes and unicode never cost a real figure its grounding", () => {
+  // The transcription and the extracted figure come out of the same model call
+  // and routinely disagree about spacing. That is not a reason to refuse a
+  // figure the ad plainly printed.
+  const a = ad({
+    ...GROUNDED_AD,
+    headlines: ["G Bank Checking"],
+    description: "Add BaZing for $5.99 / month and earn 5.55 % APY.",
+    economicFacts: [{ metric: "apy", raw: "5.55% APY", qualifiers: {}, sourceField: "description" }],
+    claims: [],
+  }, { domain: "g.org" });
+  assert.equal(a.facts.find((f) => f.metric === "apy").grounded, true);
+});
+
+test("a display creative's offer figure is grounded against its own transcription", () => {
+  // The display path never reaches normalizeObservation(), and a vision read has
+  // more room to invent than a text one. `numeric` is the gate: strongestOffer(),
+  // the wall's offer counts and the cluster key all read it.
+  const artwork = {
+    headline: "Auto Loans Made Easy", subhead: "Apply in minutes", cta: "Apply Now",
+    allText: "Rates as low as 4.59% APR · Member FDIC", brand: "G Bank",
+    product: "auto_loan", productConfidence: 0.9, legible: true,
+  };
+  const img = { creativeId: "CR_D1", domain: "g.org", imageUrl: "https://example.test/x.png", format: "image" };
+
+  const real = shapeDisplay({ ...artwork, offer: { present: true, type: "rate", value: "4.59% APR", unit: "APR" } }, img);
+  assert.equal(real.offer.grounded, true);
+  assert.equal(real.offer.numeric.n, 4.59);
+
+  const invented = shapeDisplay({ ...artwork, offer: { present: true, type: "rate", value: "2.99% APR", unit: "APR" } }, img);
+  assert.equal(invented.offer.value, "2.99% APR", "kept — the wall shows what was captured");
+  assert.equal(invented.offer.grounded, false);
+  assert.equal(invented.offer.numeric, null, "and it can never sort against a transcribed figure");
 });
 
 // ===========================================================================

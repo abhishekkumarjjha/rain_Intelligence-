@@ -1,0 +1,57 @@
+# F-001 BEFORE — the new grounding tests run against the pre-fix engine.
+# (lib/extract.js carries only the `export` on shape() so the test file can import it;
+#  test/benchmark.test.js carries the two fixture corrections described in the report.)
+
+STAGE 10 — grounding: a figure only counts if the ad printed it
+  FAIL a figure the ad text contains is grounded and counts
+       Expected values to be strictly equal:
++ actual - expected
+
++ undefined
+- true
+
+  FAIL a figure that is nowhere in the ad text is kept, marked, and never counted
+       Expected values to be strictly equal:
++ actual - expected
+
++ undefined
+- false
+
+  FAIL a figure grounded only in a DIFFERENT ad of the same brand does not count
+       Expected values to be strictly equal:
++ actual - expected
+
++ undefined
+- true
+
+  FAIL a claim whose quote is not in the ad is never counted against the brand
+       Expected values to be strictly equal:
++ actual - expected
+
++ undefined
+- false
+
+  FAIL a clipped figure is still recognised as present, and refused for being clipped
+       it was on screen — that is not what is wrong with it
++ actual - expected
+
++ undefined
+- true
+
+  FAIL spacing, curly quotes and unicode never cost a real figure its grounding
+       Expected values to be strictly equal:
++ actual - expected
+
++ undefined
+- true
+
+  FAIL a display creative's offer figure is grounded against its own transcription
+       Expected values to be strictly equal:
++ actual - expected
+
++ undefined
+- true
+
+
+85 passed, 7 failed
+
