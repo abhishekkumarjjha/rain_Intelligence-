@@ -398,6 +398,67 @@ try {
     });
   }
 
+  // ------------------------------------------- how sure the reader actually was
+  //
+  // Both extractors compute productConfidence and clamp it. Nothing read it, so
+  // a creative the reader placed on auto loans at 0.15 — the reader correctly
+  // saying it could not tell — sat in the auto-loan denominator beside one at
+  // 0.9. PEL2 is that creative: headline "Bank With Us", offer "1.99% APR".
+  section("a creative the reader could not place is captured, shown, and not counted");
+  {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "benchmark", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "auto-loan", days: 30,
+      competitors: [{ label: "Pelican State CU", domain: "pelicanstatecu.com" }],
+    });
+    const run = await S.awaitRun(started.runId);
+    const low = run.ads.find((a) => a.creativeId === "PEL2");
+
+    await check("it was captured, and it is still in the run", () => {
+      ok(low, "PEL2 is not in run.ads — it must be reachable, it really ran");
+      ok(low.productConfidence < 0.5, `confidence ${low.productConfidence}`);
+    });
+
+    await check("the product chips still count it — it WAS captured", () => {
+      const auto = run.breakdown.find((b) => b.code === "auto-loan");
+      ok(auto, "auto loan is missing from the breakdown entirely");
+      ok(auto.count >= 2, `chips show ${auto.count}; the capture holds 2 auto-loan creatives`);
+    });
+
+    await check("no finding on the board is built on it", () => {
+      for (const f of run.board.findings) {
+        ok(!(f.evidence || []).includes("PEL2"), `${f.rule} cites a creative the reader could not place`);
+      }
+    });
+
+    await check("no snapshot cell quotes its figure", () => {
+      const cells = run.board.snapshot.rows.flatMap((r) => r.cells);
+      ok(!cells.some((c) => String(c.value).includes("1.99")),
+        "1.99% APR reached the snapshot from a creative classified at 0.15 confidence");
+      for (const row of run.board.snapshot.rows) {
+        for (const cell of row.cells) ok(!(cell.evidence || []).includes("PEL2"), "a cell cites it as evidence");
+      }
+    });
+
+    await check("the audit table agrees with the board rather than counting it separately", () => {
+      // Two aggregations over two different ad sets is the 4.84%-vs-6.74% bug.
+      const col = run.benchmark.columns.find((c) => c.domain === "pelicanstatecu.com");
+      eq(col.adCount, 1, "the audit table's column count");
+    });
+
+    await check("the funnel still reconciles, and says where it went in its own words", () => {
+      const f = run.funnel;
+      const onProduct = f.steps.find((s) => s.key === "onProduct");
+      const counted = f.steps.find((s) => s.key === "counted");
+      ok(onProduct, "the funnel lost its on-product step");
+      ok(counted, "a creative dropped from the counts with no step to say so");
+      eq(counted.value, onProduct.value - counted.lost, "counted + lost must equal on-product");
+      ok(/confidence/i.test(counted.why), `the reason must name what happened: "${counted.why}"`);
+      ok(!/different product/i.test(counted.why),
+        "it was classified as THIS product, unsurely — saying otherwise reconciles by lying");
+    });
+  }
+
   // ------------------------------------------------- the removed strategy gate
   //
   // The UI stopped offering this months ago; the route stayed mounted, kept

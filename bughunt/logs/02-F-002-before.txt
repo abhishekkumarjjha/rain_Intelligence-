@@ -1,0 +1,14 @@
+# F-002 BEFORE — PEL2 ("Bank With Us", auto-loan at 0.15 confidence) against the pre-fix engine.
+
+── a creative the reader could not place is captured, shown, and not counted
+  ok  it was captured, and it is still in the run
+  ok  the product chips still count it — it WAS captured
+  ok  no finding on the board is built on it
+  FAIL no snapshot cell quotes its figure
+       1.99% APR reached the snapshot from a creative classified at 0.15 confidence
+  FAIL the audit table agrees with the board rather than counting it separately
+       the audit table's column count: expected 1, got 2
+  FAIL the funnel still reconciles, and says where it went in its own words
+       a creative dropped from the counts with no step to say so
+
+── the strategy gate is gone, not merely hidden

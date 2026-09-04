@@ -855,7 +855,14 @@ app.get("/api/run/:id", (req, res) => {
     // aggregations over the same ads is how one screen showed 4.84% APR in a
     // finding and 6.74% in the table below it.
     payload.benchmark = benchmarkFor(run, payload.board.brands);
-    payload.funnel = captureFunnel(run.runs, run.ads,
+    // TWO NUMBERS, NOT ONE. "on the product in scope" is every ad classified as
+    // this product, at any confidence — it is what was captured. "counted in the
+    // comparison" is the subset the reader placed firmly enough to compare, and
+    // it is what the board and the table are built from. Collapsing them would
+    // report a creative the reader was unsure about as one "classified as a
+    // different product", which is not what happened to it. See F-002.
+    const onProduct = filterByProduct(run.ads, run.product).length;
+    payload.funnel = captureFunnel(run.runs, run.ads, onProduct,
       payload.benchmark.columns.reduce((n, c) => n + c.adCount, 0));
     // Recommended strategies are a Creative/Sales deliverable. Han asked
     // Fulfillment for quasi-analysis — counted facts the client draws their own

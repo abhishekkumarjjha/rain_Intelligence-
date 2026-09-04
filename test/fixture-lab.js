@@ -142,6 +142,13 @@ export const MARKET = {
     { id: "PEL1", headline: "Drive Away Happy", product: "auto-loan",
       offer: { present: true, type: "rate", value: "5.49% APR", unit: "APR", term: "60-month", minimum: "", qualifier: "" },
       daysShown: 150, first: ago(180), last: ago(5), w: 300, h: 250 },
+    // A creative the reader itself says it could not place. The prompt asks for
+    // exactly this answer — "a creative that just says Bank With Us is other at
+    // low confidence" — and until F-002 the 0.15 entered the auto-loan
+    // denominator beside PEL1 at 0.9 with nothing to tell them apart.
+    { id: "PEL2", headline: "Bank With Us", product: "auto-loan", productConfidence: 0.15,
+      offer: { present: true, type: "rate", value: "1.99% APR", unit: "APR", term: "", minimum: "", qualifier: "" },
+      daysShown: 30, first: ago(40), last: ago(2), w: 300, h: 250 },
   ],
   // ---- THE STANDING NATIONALS ---------------------------------------------
   // Deep inventory, because that is the point of the tier: a community bank
@@ -240,7 +247,9 @@ export function extractionFor(id) {
         ? { ...r.offer, finePrintVisible: !!r.offer.minimum }
         : { present: false, type: "none", value: "", unit: "none", term: "", minimum: "", qualifier: "", finePrintVisible: false },
       product: r.product,
-      productConfidence: 0.9,
+      // The fixture may set its own: a low-confidence read is a legal model
+      // answer and the counting gate has to be exercised by one.
+      productConfidence: r.productConfidence ?? 0.9,
       visualStyle: "typographic",
       hasPeople: false,
       tone: "direct confident",
@@ -298,7 +307,9 @@ export function searchExtractionFor(id) {
       urgency: { present: false, phrase: "" },
       audience: "",
       product: r.product,
-      productConfidence: 0.9,
+      // The fixture may set its own: a low-confidence read is a legal model
+      // answer and the counting gate has to be exercised by one.
+      productConfidence: r.productConfidence ?? 0.9,
       truncated: false,
       legible: true,
     };
