@@ -1,0 +1,32 @@
+# F-014 — the evidence, and what changed.
+
+## What the provider actually documents
+
+SerpApi's Google Ads Transparency Center API describes creative_format as a filter
+on the TYPE OF CREATIVE: 'Available options: text - Text, image - Image, video - Video',
+described as 'Ads that primarily contain text' / 'Ads using visuals' / 'Video ads'.
+Nothing in that description is about a delivery network.
+
+The repo's own provider comment (lib/atc-provider.js:9-13) already records the other half:
+//   2. `platform` is OMITTED for image/video. There is no DISPLAY value in the
+//      provider's platform enum (only PLAY/MAPS/SEARCH/SHOPPING/YOUTUBE), so
+//      pinning platform=SEARCH while asking for image creatives asks for
+//      something that barely exists. Format is what separates display-style
+//      banner creatives from search text ads.
+
+i.e. there is no DISPLAY value in the platform enum at all. Google's Transparency
+Center carries image creatives that ran on Discover, in Gmail, as YouTube companions
+and on Display, and the response does not distinguish them.
+
+## Verdict
+'Display ads' was a claim about a delivery network built out of a filter on artwork
+type. Changed to 'image ads' / 'image creatives' in every user-facing string.
+The source KEY google_display is unchanged — see the commit message.
+
+## Strings changed
+ README.md            |  6 +++++-
+ lib/channel-shape.js |  4 ++--
+ lib/sources.js       | 25 +++++++++++++++++++++++--
+ public/app.js        | 14 +++++++-------
+ public/index.html    | 10 +++++-----
+ 5 files changed, 42 insertions(+), 17 deletions(-)

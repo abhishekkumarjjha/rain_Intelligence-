@@ -664,7 +664,7 @@ async function startCapture({ force = false } = {}) {
   for (const run of r.runs) poll(run.source);
 }
 
-const SRC_LABEL = { google_display: "Google display", google_search: "Google search" };
+const SRC_LABEL = { google_display: "Google image ads", google_search: "Google search ads" };
 
 /* A capture takes tens of seconds and the poll is the only thing driving the UI
    forward. A single failed request used to end the loop silently, leaving the
@@ -1033,7 +1033,7 @@ function renderCreative(r) {
   const scope = $("scopeBar");
   if (S.productFilter === "all" && c.scopedCount === 0 && c.capturedCount > 0) {
     scope.classList.remove("hidden");
-    scope.innerHTML = `No creative in this capture classified as <b>${esc(r.productLabel)}</b> — most display banners carry no product signal at all, so they read as <b>Other</b>. Showing all <b>${c.capturedCount}</b> creatives captured.`;
+    scope.innerHTML = `No creative in this capture classified as <b>${esc(r.productLabel)}</b> — most image creatives carry no product signal at all, so they read as <b>Other</b>. Showing all <b>${c.capturedCount}</b> creatives captured.`;
   } else if (S.productFilter !== "all" && shown.length < c.summary.ideas) {
     scope.classList.remove("hidden");
     scope.innerHTML = `Showing <b>${esc(productLabel(S.productFilter))}</b> only. <button class="linkbtn" id="showAllProducts">Show all ${c.capturedCount} creatives captured</button>`;
@@ -1108,7 +1108,7 @@ function renderCreative(r) {
   // is entitled to see the reasons behind.
   if (t && natCards.length && localCards.length < 4) {
     const caveat = localCards.length
-      ? `Only <b>${localCards.length}</b> local creative${localCards.length === 1 ? "" : "s"} matched — local institutions often run very little display. The national benchmarks below are a reference ceiling, not this client's market.`
+      ? `Only <b>${localCards.length}</b> local creative${localCards.length === 1 ? "" : "s"} matched — local institutions often run very little image advertising. The national benchmarks below are a reference ceiling, not this client's market.`
       : `<b>No local creatives were read in this capture.</b> Everything below is a national benchmark — a reference ceiling, not this client's market. Nothing was invented to fill the gap; here is what each advertiser returned:`;
     const detail = localCards.length ? "" :
       `<ul class="whylist">${outcomeRows(r, (t.local?.domains) || [])}</ul>`;
@@ -1798,15 +1798,15 @@ function openClientWall(r) {
   const body = ads.length
     ? `<div class="wall">${ads.map(adCard).join("")}</div>`
     : `<div class="empty">
-         <b>No display creative was captured for ${esc(cl.label || "the client")} in this window.</b><br />
+         <b>No image creative was captured for ${esc(cl.label || "the client")} in this window.</b><br />
          ${cl.status?.reason ? `The capture reported: ${esc(cl.status.reason)}. ` : ""}
          That is what the Transparency Center listed over these ${r.days} days — it is not evidence that they are
-         running none. A 90-day window, or a check that display is actually part of the current plan, would
+         running none. A 90-day window, or a check that image advertising is actually part of the current plan, would
          settle it.
        </div>`;
 
   openSheet(
-    `${cl.label || "The client"} · own display creative`,
+    `${cl.label || "The client"} · own image creative`,
     ads.length
       ? `${cl.captured} captured, ${cl.designs} distinct design${cl.designs === 1 ? "" : "s"} · ${scope}. `
         + `Captured beside the wall and counted in none of its figures.`
@@ -2074,7 +2074,7 @@ function syncNationalsRow() {
   $("natRow").classList.toggle("hidden", !applies);
   $("natWhy").textContent = S.mode === "benchmark"
     ? "Chase and Capital One as a reference ceiling. They are shown in their own block and are excluded from every finding and every denominator — we cannot tell whether their ads served in this market."
-    : "A fixed national ceiling added to every display capture, shown in their own section below the local results — not as local competitors.";
+    : "A fixed national ceiling added to every image capture, shown in their own section below the local results — not as local competitors.";
 }
 /* HELD BACK BY REQUEST, not removed. A button that does nothing and says
    nothing is indistinguishable from one that is broken, so it keeps its click

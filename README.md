@@ -25,7 +25,11 @@ creatives are retrieved but never read. `/api/health` reports both. `/api/health
 ## The two modes
 
 **Creative Inspiration** — *"What are competitors making?"*
-Captures **Google display** (`creative_format=image`). Groups near-identical
+Captures **Google image creatives** (`creative_format=image`). Called *image*, not
+*display*: `creative_format` filters on what the creative IS, and the provider has
+no DISPLAY value in its platform enum, so nothing in the response says an image
+creative served on the Display Network. The source KEY stays `google_display`
+because it is written into every cache filename and every snapshot. Groups near-identical
 executions into ideas and shows longevity; collapses
 DCO cards into distinct messages. Chosen on the competitor screen, before
 anything is spent.

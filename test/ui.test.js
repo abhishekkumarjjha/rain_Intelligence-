@@ -319,7 +319,7 @@ try {
 
     await check("the cost line states what will be spent before anything is spent", async () => {
       const cost = await settledCostLine(page);
-      ok(/Google display/.test(cost), `cost line was: ${cost}`);
+      ok(/Google image ads/.test(cost), `cost line was: ${cost}`);
       ok(/\d+ SerpApi requests?|nothing to spend/.test(cost), `cost line was: ${cost}`);
       ok(/reused for \d+ days/.test(cost), `cost line was: ${cost}`);
       // BOTH BILLS. Quoting SerpApi credits and staying silent about up to
