@@ -1,0 +1,17 @@
+# F-011 BEFORE — health reports keys only.
+
+── health checks whether anything can actually be stored
+  FAIL a working install reports its storage, writable, with free space
+       health does not mention storage at all
+  FAIL an unwritable data directory is reported, not painted green
+       Cannot read properties of undefined (reading 'writable')
+  FAIL and health itself stops claiming to be ok
+       ok — a capture run now would complete and save nothing: expected false, got true
+  ok  the keys are still reported truthfully alongside it
+
+48 passed, 3 failed
+
+Failures:
+  · a working install reports its storage, writable, with free space: health does not mention storage at all
+  · an unwritable data directory is reported, not painted green: Cannot read properties of undefined (reading 'writable')
+  · and health itself stops claiming to be ok: ok — a capture run now would complete and save nothing: expected false, got true

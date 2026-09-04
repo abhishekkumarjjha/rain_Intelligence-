@@ -8,7 +8,8 @@
 
 import { startServer, check, section, summary, eq, ok } from "./harness.js";
 import { checkPublicUrl, readRatePages } from "../lib/rate-page.js";
-import { mkdirSync, existsSync, readdirSync, readFileSync, statSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, existsSync, readdirSync, readFileSync, writeFileSync, statSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const COMPETITORS = [
@@ -289,6 +290,51 @@ section("a half-written run file is never left on disk");
     const dir = S.dataDir;
     S.stop();
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+// ----------------------------------------------------------- readiness, not keys
+//
+// /api/health reported which keys were present and called that healthy. Every
+// capture ends in a write, so a green line over a data directory that cannot be
+// written is the specific lie that lets somebody spend SerpApi credits and
+// vision calls on a run that cannot be saved.
+section("health checks whether anything can actually be stored");
+{
+  const S = await startServer();
+  try {
+    const { body } = await S.get("/api/health");
+    await check("a working install reports its storage, writable, with free space", () => {
+      ok(body.storage, "health does not mention storage at all");
+      eq(body.storage.writable, true, "writable");
+      eq(body.ok, true, "ok");
+      ok(typeof body.storage.freeBytes === "number" && body.storage.freeBytes > 0,
+        `free space not reported: ${body.storage.freeBytes}`);
+    });
+  } finally { S.stop(); }
+}
+{
+  // A directory path that cannot exist, because a component of it is a file.
+  // Fails for root exactly as it fails for anyone else, which chmod does not.
+  const blocker = path.join(mkdtempSync(path.join(tmpdir(), "ri-block-")), "not-a-dir");
+  writeFileSync(blocker, "x");
+  const S = await startServer({}, { dataDir: path.join(blocker, "runs"), keepData: true });
+  try {
+    const { body } = await S.get("/api/health");
+    await check("an unwritable data directory is reported, not painted green", () => {
+      eq(body.storage.writable, false, "writable");
+      ok(body.storage.reason, "a refusal with no reason cannot be acted on");
+    });
+    await check("and health itself stops claiming to be ok", () => {
+      eq(body.ok, false, "ok — a capture run now would complete and save nothing");
+    });
+    await check("the keys are still reported truthfully alongside it", () => {
+      eq(body.serpapi, true, "serpapi");
+      eq(body.anthropic, true, "anthropic");
+    });
+  } finally {
+    S.stop();
+    try { rmSync(path.dirname(blocker), { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
 

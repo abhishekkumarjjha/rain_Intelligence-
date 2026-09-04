@@ -42,7 +42,7 @@ import { suggestCompetitors, findClient, listClients, DIRECTORY_SIZE } from "./l
 import { productFromUrl, normalizeProduct, PRODUCT_LABELS, PRODUCT_CODES } from "./lib/products.js";
 import { readProductFromUrl, CONFIDENT } from "./lib/product-reader.js";
 import { hasAnthropicKey } from "./lib/claude.js";
-import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, findPreviousRun, diffRuns, writeManifest, readManifest, CACHE_SCHEMA } from "./lib/store.js";
+import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, findPreviousRun, diffRuns, writeManifest, readManifest, storageHealth, CACHE_SCHEMA } from "./lib/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -182,10 +182,16 @@ const THEMES_INFLIGHT = new Map();
 // GET /api/health — what is configured, stated plainly.
 // ---------------------------------------------------------------------------
 app.get("/api/health", (_req, res) => {
+  // READINESS, NOT INVENTORY. Every capture ends in a write, so a green line
+  // over an unwritable or full data directory is a lie — and the specific lie
+  // that lets somebody spend SerpApi credits and vision calls on a run that
+  // cannot be saved. `ok` now means "a capture run today would survive".
+  const storage = storageHealth();
   res.json({
-    ok: true,
+    ok: storage.writable,
     serpapi: hasKey(),
     anthropic: hasAnthropicKey(),
+    storage,
     directorySize: DIRECTORY_SIZE,
     // How many finished runs are still held in memory. Diagnostic, not a
     // promise: the number a growing process would have shown climbing forever.

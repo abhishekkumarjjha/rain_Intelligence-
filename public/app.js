@@ -85,15 +85,24 @@ function crumbs(id) {
     const missing = [];
     if (!h.serpapi) missing.push("SERPAPI_API_KEY");
     if (!h.anthropic) missing.push("ANTHROPIC_API_KEY");
+    // A key that is set and a directory that can be written are the same kind
+    // of fact: both are the difference between this working and not, and both
+    // are cheaper to learn here than after paying for a capture.
+    const storage = h.storage && !h.storage.writable
+      ? `<span class="bad">Storage is not writable</span> — ${esc(h.storage.dir || "the data directory")}${h.storage.reason ? ` (${esc(h.storage.reason)})` : ""}. Runs will complete but will not be saved.`
+      : "";
     // Silent when everything is configured. The directory size and the read
     // cap were facts about the tool, not answers to anything the user was
     // asking on this screen, and a landing page that states its own internals
     // reads as unfinished. A MISSING key is different: it is the difference
     // between this working and not, and finding that out after clicking
     // Analyze is finding out too late.
-    $("healthLine").innerHTML = missing.length
-      ? `<span class="bad">Not configured: ${missing.join(", ")}</span> — captures will fail until this is set.`
-      : "";
+    $("healthLine").innerHTML = [
+      missing.length
+        ? `<span class="bad">Not configured: ${missing.join(", ")}</span> — captures will fail until this is set.`
+        : "",
+      storage,
+    ].filter(Boolean).join("<br>");
 
     fillLandingProducts();
   } catch { /* health is informational only */ }
