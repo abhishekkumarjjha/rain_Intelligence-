@@ -41,7 +41,6 @@ import { withNationals, isNational, captureOptionsFor, NATIONAL_BENCHMARKS, NATI
 import { suggestCompetitors, findClient, listClients, DIRECTORY_SIZE } from "./lib/directory.js";
 import { productFromUrl, normalizeProduct, PRODUCT_LABELS, PRODUCT_CODES } from "./lib/products.js";
 import { readProductFromUrl, CONFIDENT } from "./lib/product-reader.js";
-import { generateStrategies } from "./lib/strategies.js";
 import { hasAnthropicKey } from "./lib/claude.js";
 import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, findPreviousRun, diffRuns, writeManifest, readManifest, CACHE_SCHEMA } from "./lib/store.js";
 
@@ -861,6 +860,9 @@ app.get("/api/run/:id", (req, res) => {
     // Recommended strategies are a Creative/Sales deliverable. Han asked
     // Fulfillment for quasi-analysis — counted facts the client draws their own
     // conclusion from — so the benchmark no longer offers a strategy pass.
+    // The generator, its route and its client code are gone as of F-004; the
+    // field stays null so an older saved run rendering through this payload
+    // does not suddenly grow an undefined where a null used to be.
     payload.strategies = null;
     payload.ratePages = run.ratePages || null;
   }
@@ -1152,40 +1154,6 @@ async function readThemesForScope({ run, scope, isAll, scopeLabel }) {
     return { status: 500, body: { ok: false, scope, scopeLabel, reason, counted, ...counts } };
   }
 }
-
-// ---------------------------------------------------------------------------
-// POST /api/run/:id/strategies — the GATE.
-//
-// Interpretation happens here and only here, on an explicit click. The
-// benchmark table is the deliverable; this is the optional second screen.
-// ---------------------------------------------------------------------------
-app.post("/api/run/:id/strategies", async (req, res) => {
-  const run = ACTIVE.get(req.params.id) || loadRun(req.params.id);
-  if (!run) return res.status(404).json({ ok: false, reason: "not_found" });
-  if (run.status !== "done") return res.status(409).json({ ok: false, reason: "run_not_finished" });
-  if (run.mode !== "benchmark") return res.status(400).json({ ok: false, reason: "wrong_mode" });
-
-  try {
-    // Built from the same function that produced the table the user is looking
-    // at. Two call sites that assemble the benchmark separately is how the
-    // strategy pass ends up reasoning over numbers nobody was shown.
-    const benchmark = benchmarkFor(run, boardFor(run).brands);
-
-    const strategies = await generateStrategies({
-      benchmark,
-      product: run.product,
-      clientLabel: run.client.label,
-      sampling: run.sampling,
-    });
-
-    run.strategies = strategies;
-    ACTIVE.set(run.id, run);
-    saveRun(run);
-    res.json({ ok: true, strategies });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e?.code === "NO_API_KEY" ? "anthropic_not_configured" : "generation_failed" });
-  }
-});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

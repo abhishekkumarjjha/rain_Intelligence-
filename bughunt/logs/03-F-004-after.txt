@@ -1,0 +1,12 @@
+# F-004 AFTER
+
+── the strategy gate is gone, not merely hidden
+  ok  POSTing the old strategy route is not routed at all
+  ok  a finished benchmark payload carries no generated strategies
+
+
+$ grep -rn strategies server.js public/app.js lib/ | (route + generator gone)
+server.js:860:    // Recommended strategies are a Creative/Sales deliverable. Han asked
+server.js:866:    payload.strategies = null;
+public/app.js:1143:  // "Generate recommended strategies" is GONE from this mode. Han asked
+lib/themes.js:123:const PRESCRIPTIVE = /\b(you|your|should|shouldn't|must|consider|recommend|recommended|try|opportunity|opportunities|could|would|suggest|advise|better|best|improve|leverage|instead|need to|ought|strategy|strategic|strategies)\b/i;

@@ -73,9 +73,5 @@ await page.click("#captureBtn");
 await page.waitForSelector("table.bench", { timeout: 60000 });
 await shot("6-benchmark", { fullPage: true });
 
-await page.click("#genBtn");
-await page.waitForSelector(".angle", { timeout: 40000 });
-await shot("7-strategies", { fullPage: true });
-
 await browser.close();
 S.stop();

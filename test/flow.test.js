@@ -398,36 +398,22 @@ try {
     });
   }
 
-  // ------------------------------------------------------------ the gate
-  section("strategy gate");
+  // ------------------------------------------------- the removed strategy gate
+  //
+  // The UI stopped offering this months ago; the route stayed mounted, kept
+  // generating and kept billing. Anything that still POSTs to it — an old tab,
+  // a bookmark, a script — must now find nothing there rather than a model call.
+  section("the strategy gate is gone, not merely hidden");
   {
-    const { body } = await S.post(`/api/run/${creativeRun.id}/strategies`);
-    await check("strategies are refused for creative mode", () => eq(body.reason, "wrong_mode", "reason"));
-  }
-  {
-    const { body } = await S.post(`/api/run/${benchRun.id}/strategies`);
-    await check("strategies generate for a finished benchmark", () => {
-      ok(body.ok, `generation failed: ${body.reason}`);
-      ok(body.strategies.angles?.length > 0, "expected at least one angle");
+    const r = await fetch(`${S.base}/api/run/${benchRun.id}/strategies`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
     });
-    await check("no angle emits a digit — counting is the code's job", () => {
-      // Scoped to what the MODEL wrote. Code-authored text (the appended
-      // sampling caution, generatedAt) carries counts by design — those are the
-      // numbers the model is forbidden from recomputing.
-      const text = JSON.stringify(body.strategies.angles);
-      const digits = text.match(/\d/g) || [];
-      ok(digits.length === 0, `strategy angles contained digits: ${digits.join("")}`);
+    await check("POSTing the old strategy route is not routed at all", () => {
+      eq(r.status, 404, "status");
     });
-    await check("the sampling caveat is appended in code, every time", () => {
-      const cautions = body.strategies.cautions || [];
-      ok(cautions.some((c) => /captured|retrieved|window/i.test(c)),
-        `no sampling caution was appended: ${JSON.stringify(cautions)}`);
-    });
-  }
-  {
-    const { status, body } = await S.post("/api/run/run_does_not_exist/strategies");
-    await check("strategies on an unknown run 404 rather than throwing", () => {
-      eq(status, 404, "status"); eq(body.reason, "not_found", "reason");
+    await check("a finished benchmark payload carries no generated strategies", async () => {
+      const { body } = await S.get(`/api/run/${benchRun.id}`);
+      eq(body.strategies, null, "strategies");
     });
   }
 

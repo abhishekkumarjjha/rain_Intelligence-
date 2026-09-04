@@ -1453,52 +1453,6 @@ function wireReportLines() {
   };
 }
 
-function wireGate() {
-  const btn = $("genBtn");
-  if (!btn) return;
-  btn.onclick = async () => {
-    btn.disabled = true; btn.textContent = "Reading the evidence…";
-    let r;
-    try {
-      r = await (await fetch(`/api/run/${S.runId}/strategies`, { method: "POST" })).json();
-    } catch {
-      btn.disabled = false; btn.textContent = "Generate recommended strategies";
-      showError("Could not reach the server to generate strategies.");
-      return;
-    }
-    if (!r.ok) {
-      btn.disabled = false; btn.textContent = "Generate recommended strategies";
-      showError(r.reason === "anthropic_not_configured"
-        ? "ANTHROPIC_API_KEY is not set on the server, so strategies cannot be generated."
-        : `Could not generate strategies: ${r.reason}`);
-      return;
-    }
-    S.run.strategies = r.strategies;
-    $("strategyZone").innerHTML = strategyHtml(r.strategies);
-  };
-}
-
-function strategyHtml(s) {
-  const angles = (s.angles || []).map((a) => `
-    <div class="angle">
-      <h4>${esc(a.title)}</h4>
-      <div class="lab">What the captured ads show</div>
-      <div class="txt">${esc(a.evidence)}</div>
-      <div class="lab">What it opens up</div>
-      <div class="txt">${esc(a.opening)}</div>
-      ${a.question ? `<div class="q"><b>Confirm first:</b> ${esc(a.question)}</div>` : ""}
-    </div>`).join("");
-
-  const cautions = (s.cautions || []).map((c) => `<div class="finding">${esc(c)}</div>`).join("");
-
-  return `
-    <h3 style="margin:34px 0 14px;font-size:20px">Recommended strategies</h3>
-    <div class="samplingbar" style="margin-bottom:18px">
-      Generated from the counted facts above. Every angle is an internal prompt for the strategist — confirm anything it asks about the client before putting it in front of them.
-    </div>
-    ${angles}
-    ${cautions ? `<h3 style="margin:26px 0 12px;font-size:16px">Cautions</h3><div class="findings">${cautions}</div>` : ""}`;
-}
 
 /* ---------------- evidence drawer ---------------- */
 /* Scoped, because the sheet renders AFTER this has already run over the page.
