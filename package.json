@@ -2,7 +2,7 @@
   "name": "rain-intelligence",
   "version": "0.1.0",
   "type": "module",
-  "description": "RAIN Intelligence \u2014 competitive advertising evidence for Creative inspiration and Campaign benchmarking",
+  "description": "RAIN Intelligence — competitive advertising evidence for Creative inspiration and Campaign benchmarking",
   "engines": {
     "node": ">=20"
   },
@@ -17,5 +17,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   }
 }

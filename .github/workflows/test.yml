@@ -1,0 +1,58 @@
+# =============================================================================
+# Both suites, and neither may pass by not running.
+#
+# test/ui.test.js existed for months and never executed once: it exited 0 when
+# Playwright was missing, so every machine without a browser — a CI runner
+# included — recorded a pass for a file that had run nothing. It now exits 1
+# instead, and this workflow installs the browser so that exit never happens by
+# accident. RI_SKIP_UI is deliberately NOT set here; a runner that cannot open a
+# browser is a broken runner, not a reason to report green.
+# =============================================================================
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # npm ci, not npm install: the lockfile is the record of what was tested.
+      - run: npm ci
+
+      # The API suite needs no keys and no network — test/mock-net.js stubs both
+      # providers. If this ever starts needing a key, the arithmetic has moved
+      # somewhere it does not belong.
+      - name: API suite
+        run: npm test
+
+      - name: Install Chromium for the browser suite
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser suite
+        run: npm run test:ui
+
+      # Screenshots, traces and console output are the only way to read a
+      # browser failure after the fact. Uploaded on failure only, because a
+      # green run has nothing to look at.
+      - name: Upload browser artefacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-artefacts
+          path: |
+            test/shots/
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14

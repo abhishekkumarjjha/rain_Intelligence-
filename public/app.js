@@ -174,6 +174,20 @@ function hl(text, q) {
 function renderMenu(list) {
   const m = $("clientMenu");
   const q = $("clientInput").value;
+
+  // AN EMPTY BOX HAS NO SUGGESTIONS.
+  //
+  // With nothing typed, match() returns the first eight rows of a directory of
+  // forty in whatever order it holds them. They are not suggestions — nothing
+  // was asked — and the overlay they render into sits directly on top of "Use a
+  // landing page instead", which is the ONLY other way into the tool.
+  //
+  // The consequence is not a dead click. Menu rows handle mousedown and
+  // preventDefault() it, so the blur that would have closed the menu never
+  // fires: someone who clears the box and reaches for the landing-page button
+  // selects Bank of Missouri instead, and the next screen is scoped to a client
+  // they never chose. Found by the browser suite the first time it ran.
+  if (!q.trim()) { closeMenu(); return; }
   const head = lastFuzzy && list.length
     ? `<div class="acnote">No exact match for “${esc(q.trim())}” — closest spelling:</div>` : "";
   m.innerHTML = list.length
@@ -538,16 +552,43 @@ async function startCapture({ force = false } = {}) {
     : sourcesForChoice(S.sourceChoice);
 
   $("captureBtn").disabled = true;
-  const r = await (await fetch("/api/capture", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      mode: S.mode, clientDomain: S.domain, clientLabel: S.clientLabel,
-      product: S.product, competitors, sources, force,
-      includeNationals: S.includeNationals,
-      // Per-source windows, because "last 30 days" means a served window on
-      days: { google_display: S.days, google_search: S.days },
-    }),
-  })).json();
+
+  // THE BUTTON MUST COME BACK.
+  //
+  // This whole call had no try/catch. The button was disabled on the way in and
+  // re-enabled on the line after the await, so anything that threw before that
+  // line — the server down, a restart mid-click, a 502 from a proxy, a non-JSON
+  // error body — left the only button on the screen disabled forever with an
+  // unhandled rejection in the console. The user's only recovery was a reload,
+  // and nothing on screen said so.
+  //
+  // The two awaits are separated because they fail differently and the user can
+  // act on the difference: one is "the server was not reachable", the other is
+  // "the server answered with something that is not an answer".
+  let r;
+  try {
+    const res = await fetch("/api/capture", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mode: S.mode, clientDomain: S.domain, clientLabel: S.clientLabel,
+        product: S.product, competitors, sources, force,
+        includeNationals: S.includeNationals,
+        // Per-source windows, because "last 30 days" means a served window on
+        days: { google_display: S.days, google_search: S.days },
+      }),
+    });
+    try {
+      r = await res.json();
+    } catch {
+      $("captureBtn").disabled = false;
+      showError(`The server answered the capture request with something that is not JSON (HTTP ${res.status}). Nothing was captured and nothing was spent. Check the server log and try again.`);
+      return;
+    }
+  } catch {
+    $("captureBtn").disabled = false;
+    showError("Could not reach the server to start the capture. Nothing was captured and nothing was spent. Check that it is still running and try again.");
+    return;
+  }
   $("captureBtn").disabled = false;
 
   if (!r.ok) {
@@ -570,6 +611,28 @@ async function startCapture({ force = false } = {}) {
     $("runNote").innerHTML = r.refused.map((x) =>
       `<span class="bad">${esc(SRC_LABEL[x.source] || x.source)} skipped — ${esc(reasonText(x.reason))}.</span>`).join("<br>");
   }
+
+  // Every source refused is a legal ok:true answer, and reading runs[0] off an
+  // empty array is a TypeError that reads on screen as nothing happening at all.
+  if (!r.runs?.length) {
+    showError("No source could be captured, so nothing was started. The reason for each is above.");
+    return;
+  }
+
+  // A FILTER IS A VIEW OF A RUN, AND THIS IS A NEW RUN.
+  //
+  // productFilter is deliberately re-adopted once per run — renderCreative()
+  // only sets it "if (S.productFilter == null)" — and filter is the advertiser
+  // chip. Neither was ever cleared between captures, and "Add a competitor"
+  // returns to this screen and captures again WITHOUT a reload, so a second
+  // run opened under the first one's chips: the product scope of a capture
+  // that is over, and an advertiser who may not even be in the new set — in
+  // which case the wall renders empty and reads as "nothing was captured".
+  //
+  // "New analysis" hides this, because that button reloads the page. The
+  // one-click path that does not reload is the one that had the bug.
+  S.filter = "all";
+  S.productFilter = null;
 
   S.bySource = {};
   S.activeSource = r.runs[0].source;
