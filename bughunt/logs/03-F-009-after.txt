@@ -1,0 +1,15 @@
+# F-009 AFTER
+
+── the cost quote states model spend, and never under-counts it
+  ok  the quote states the model half at all
+  ok  it names which reader version the figure is about
+  ok  it says exactly which cache force bypasses
+  ok  Key insights is named as a separate call, not folded in or omitted
+  ok  the first run reads no more creatives than the quote allowed
+  ok  with every advertiser cached the quote spends nothing
+  ok  forcing re-buys the listing but not the transcriptions
+  ok  and the forced run really does not re-read what it already had
+  ok  every advertiser in the quote is accounted for individually
+  ok  turning the national tier on raises the quoted model spend
+
+125 passed, 0 failed

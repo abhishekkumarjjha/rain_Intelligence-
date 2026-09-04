@@ -2114,13 +2114,34 @@ async function refreshCost() {
       })).json();
       if (!r.ok) return;
 
+      // BOTH CURRENCIES. This line quoted SerpApi requests and cache hits and
+      // stopped there, so a run about to buy up to thirty Haiku vision reads
+      // read as "1 request, 3 from cache". The Key insights panel already says
+      // "one model call per product"; the screen where the money is actually
+      // committed said nothing at all.
       $("costNote").innerHTML = r.plans.map((p) => {
         const bits = [`<b>${SRC_LABEL[p.source]}</b>`];
-        if (p.willFetch) bits.push(`<span class="fetch">${p.willFetch} request${p.willFetch > 1 ? "s" : ""}</span>`);
-        if (p.fromCache) bits.push(`<span class="cached">${p.fromCache} from cache</span>`);
-        if (!p.willFetch) bits.push(`<span class="cached">nothing to spend</span>`);
+        if (p.willFetch) bits.push(`<span class="fetch">${p.willFetch} SerpApi request${p.willFetch > 1 ? "s" : ""}</span>`);
+        if (p.fromCache) bits.push(`<span class="cached">${p.fromCache} advertiser${p.fromCache > 1 ? "s" : ""} from cache</span>`);
+
+        const m = p.model;
+        if (m) {
+          // "up to", never a flat number: the creatives a listing will return
+          // are not knowable until it is fetched, so this is the advertiser's
+          // read cap less the transcriptions already in hand. Quoting the
+          // midpoint would be a promise nobody can keep.
+          if (m.freshVisionReadsAtMost) {
+            bits.push(`<span class="fetch">up to ${m.freshVisionReadsAtMost} fresh creative read${m.freshVisionReadsAtMost > 1 ? "s" : ""}</span>`);
+          }
+          if (m.extractionsReused) {
+            bits.push(`<span class="cached">${m.extractionsReused} creative${m.extractionsReused > 1 ? "s" : ""} already read</span>`);
+          }
+        }
+        if (!p.willFetch && !(m?.freshVisionReadsAtMost)) bits.push(`<span class="cached">nothing to spend</span>`);
         return bits.join(" · ");
-      }).join("<br>") + `<br><span class="cacheage">Captures are reused for ${r.plans[0]?.ttlDays ?? 7} days. Tick “Force fresh capture” to ignore them.</span>`;
+      }).join("<br>")
+        + `<br><span class="cacheage">One creative read is one model call. Key insights is a separate model call per product, bought later by clicking it on the Wall — it is not in this quote.</span>`
+        + `<br><span class="cacheage">Captures are reused for ${r.plans[0]?.ttlDays ?? 7} days. “Force fresh capture” re-fetches the listing from SerpApi; it does NOT re-read creatives that have already been transcribed, so those stay free.</span>`;
     } catch { /* the cost line is advisory; a failure must not block capture */ }
   }, 120);
 }

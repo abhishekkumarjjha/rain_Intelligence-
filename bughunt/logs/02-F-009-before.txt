@@ -1,0 +1,20 @@
+# F-009 BEFORE — the quote covers SerpApi only.
+
+── the cost quote states model spend, and never under-counts it
+  FAIL the quote states the model half at all
+       the quote says nothing about model calls
+  FAIL it names which reader version the figure is about
+       Cannot read properties of undefined (reading 'reader')
+  FAIL it says exactly which cache force bypasses
+       Cannot read properties of undefined (reading 'force')
+  FAIL Key insights is named as a separate call, not folded in or omitted
+       Cannot read properties of undefined (reading 'analysisCallsInThisCapture')
+file:///home/user/rain_Intelligence-/test/flow.test.js:1205
+    const quotedReads = plan.model.freshVisionReadsAtMost;
+                                   ^
+
+TypeError: Cannot read properties of undefined (reading 'freshVisionReadsAtMost')
+    at file:///home/user/rain_Intelligence-/test/flow.test.js:1205:36
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+Node.js v22.22.2

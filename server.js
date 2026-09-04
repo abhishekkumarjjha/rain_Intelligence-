@@ -220,6 +220,82 @@ app.get("/api/health", (_req, res) => {
 // Reads the per-advertiser cache without touching a provider, so the competitor
 // screen can say "1 request, 3 from cache" while the user is still choosing.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// WHAT THE MODEL HALF COSTS.
+//
+// The quote read the capture cache and stopped there, so it said "1 request, 3
+// from cache" for a run that was also about to buy up to thirty Haiku vision
+// reads. SerpApi credits were quoted; the larger line item was not mentioned.
+//
+// Two caches, and they are NOT the same cache, which is the thing the old line
+// hid:
+//   · the CAPTURE cache holds an advertiser's listing plus the records already
+//     read from it. A hit here costs nothing at all — no request, no vision.
+//   · the EXTRACTION cache holds one creative's transcription, keyed on
+//     creativeId AND reader version. A hit here saves a vision call even when
+//     the listing has to be fetched again.
+//
+// And FORCE only bypasses the first of them. That is not obvious from a button
+// labelled "re-analyze", and it is worth stating plainly rather than leaving a
+// user to infer either that force is free or that it re-buys everything.
+//
+// UPPER BOUNDS, ALWAYS. For an advertiser we are about to fetch, the creatives
+// the listing will return are not knowable without making the request, so the
+// quote uses that advertiser's read cap. Where a stale or force-bypassed cache
+// entry exists we DO know which creativeIds it held, so extractions already in
+// hand are subtracted — but only down to the ids we can actually see, because a
+// refetch may return creatives nobody has read yet. A quote that guesses low is
+// worse than no quote: it is a promise.
+// ---------------------------------------------------------------------------
+function modelSpendFor({ source, format, domains, days, force }) {
+  const reader = readerKey(readerFor({ format }));
+
+  const rows = domains.map((d) => {
+    const domain = typeof d === "string" ? d : d.domain;
+    const opts = captureOptionsFor(domain, {});
+    const cap = opts.max || MAX_READ_PER_ADVERTISER;
+    const ttlDays = (typeof d === "object" && Number.isFinite(d.ttlDays)) ? d.ttlDays : opts.ttlDays;
+
+    const p = captureCache.peek({ source, domain, days, ttlDays });
+    const servedFromCapture = !force && p.hit && !p.stale;
+
+    // Served whole from the capture cache: the run replays the records it
+    // already holds and never reaches the extractor. Nothing is spent.
+    if (servedFromCapture) {
+      return { domain, freshVisionReadsAtMost: 0, extractionsReused: (p.entry?.ads || []).length, willFetch: false };
+    }
+
+    // A listing we are going to fetch. Anything we know about its creatives
+    // comes from the entry we are bypassing or letting expire.
+    const knownIds = (p.entry?.ads || []).map((a) => a.creativeId).filter(Boolean);
+    const alreadyRead = knownIds.filter((id) => !!getCachedExtraction(id, reader)).length;
+    return {
+      domain,
+      freshVisionReadsAtMost: Math.max(0, cap - alreadyRead),
+      extractionsReused: alreadyRead,
+      willFetch: true,
+    };
+  });
+
+  return {
+    reader,
+    // One vision call per creative read. Named "atMost" in the field itself so
+    // it cannot be rendered as a flat number by a caller who did not read this.
+    freshVisionReadsAtMost: rows.reduce((n, r) => n + r.freshVisionReadsAtMost, 0),
+    extractionsReused: rows.reduce((n, r) => n + r.extractionsReused, 0),
+    // Key insights is one ANALYSIS call per scope, and it is bought on the
+    // Wall by an explicit click — never by this capture. Quoted as zero here,
+    // and named, because "not included" and "free" are different.
+    analysisCallsInThisCapture: 0,
+    force: {
+      // Exactly which cache the toggle bypasses, because it is only one of two.
+      bypassesCaptureCache: !!force,
+      bypassesExtractionCache: false,
+    },
+    perAdvertiser: rows,
+  };
+}
+
 app.post("/api/cost", (req, res) => {
   const body = req.body || {};
   const mode = body.mode === "benchmark" ? "benchmark" : "creative";
@@ -248,11 +324,17 @@ app.post("/api/cost", (req, res) => {
 
   res.json({
     ok: true,
-    plans: sources.map((source) => captureCache.planCost({
-      source, domains: domainsFor(source),
-      days: Number(body.days?.[source] ?? body.days) || defaultWindowFor(source),
-      force,
-    })),
+    plans: sources.map((source) => {
+      const days = Number(body.days?.[source] ?? body.days) || defaultWindowFor(source);
+      const domains = domainsFor(source);
+      return {
+        ...captureCache.planCost({ source, domains, days, force }),
+        // The other half of the bill. Quoted beside the SerpApi half rather
+        // than instead of it — they are different currencies and a strategist
+        // deciding whether to press the button needs both.
+        model: modelSpendFor({ source, format: googleFormatFor(source), domains, days, force }),
+      };
+    }),
   });
 });
 

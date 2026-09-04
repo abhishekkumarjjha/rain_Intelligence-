@@ -1148,6 +1148,128 @@ section("regression — an evicted run reads back off disk unchanged");
   } finally { S.stop(); }
 }
 
+// ------------------------------------------------ the quote covers both bills
+//
+// The cost line read the capture cache and stopped there, so a run about to buy
+// up to thirty Haiku vision reads was quoted as "1 request, 3 from cache".
+// SerpApi credits were quoted; the larger line item was not mentioned.
+//
+// The rule for every case below: THE QUOTE MUST NEVER UNDER-COUNT what the
+// capture then actually spends.
+section("the cost quote states model spend, and never under-counts it");
+{
+  const S = await startServer();
+  const COMPS = [
+    { label: "Campus Federal", domain: "campusfederal.org" },
+    { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+  ];
+  const quote = (over) => S.post("/api/cost", {
+    mode: "creative", sources: ["google_display"], competitors: COMPS,
+    clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+    includeNationals: false, days: { google_display: 30 }, ...over,
+  });
+  const capture = (over) => S.post("/api/capture", {
+    mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+    product: "checking", days: 30, competitors: COMPS, includeNationals: false, ...over,
+  });
+
+  try {
+    const first = await quote();
+    const plan = first.body.plans[0];
+
+    await check("the quote states the model half at all", () => {
+      ok(plan.model, "the quote says nothing about model calls");
+      ok(typeof plan.model.freshVisionReadsAtMost === "number", "no vision-read figure");
+      ok(typeof plan.model.extractionsReused === "number", "no reused-extraction figure");
+    });
+
+    await check("it names which reader version the figure is about", () =>
+      ok(plan.model.reader, "a vision quote with no reader version cannot be checked against the cache"));
+
+    await check("it says exactly which cache force bypasses", async () => {
+      // Force re-fetches the LISTING and does not re-buy transcriptions. A
+      // button labelled "force fresh capture" implies otherwise.
+      eq(plan.model.force.bypassesCaptureCache, false, "unforced");
+      eq(plan.model.force.bypassesExtractionCache, false, "extraction cache");
+      const forced = await quote({ force: true });
+      const fm = forced.body.plans[0].model;
+      eq(fm.force.bypassesCaptureCache, true, "forced");
+      eq(fm.force.bypassesExtractionCache, false, "force must not claim to re-buy transcriptions");
+    });
+
+    await check("Key insights is named as a separate call, not folded in or omitted", () =>
+      eq(plan.model.analysisCallsInThisCapture, 0,
+        "the capture quote must not silently include, or silently drop, the panel's call"));
+
+    // --------------------------------------------------- quote versus actual
+    const quotedReads = plan.model.freshVisionReadsAtMost;
+    const { body: started } = await capture();
+    const run = await S.awaitRun(started.runId);
+    const actuallyRead = run.ads.length;
+
+    await check("the first run reads no more creatives than the quote allowed", () =>
+      ok(actuallyRead <= quotedReads,
+        `quoted at most ${quotedReads} fresh reads, the capture read ${actuallyRead}`));
+
+    // ------------------------------------ second time round, everything cached
+    const second = await quote();
+    const p2 = second.body.plans[0];
+
+    await check("with every advertiser cached the quote spends nothing", () => {
+      eq(p2.willFetch, 0, "SerpApi requests");
+      eq(p2.model.freshVisionReadsAtMost, 0, "a fully cached capture must quote zero model calls");
+      ok(p2.model.extractionsReused > 0, "nothing was reported as reused");
+    });
+
+    // ------------------------------ forced: the listing is re-bought, the reads are not
+    const forced = await quote({ force: true });
+    const p3 = forced.body.plans[0];
+
+    await check("forcing re-buys the listing but not the transcriptions", () => {
+      ok(p3.willFetch > 0, "force must quote the SerpApi requests it is about to make");
+      ok(p3.model.extractionsReused > 0,
+        "force quoted zero reused transcriptions — it would be claiming to re-buy reads it will not re-buy");
+    });
+
+    const { body: forcedRun } = await capture({ force: true });
+    const run3 = await S.awaitRun(forcedRun.runId);
+
+    await check("and the forced run really does not re-read what it already had", () =>
+      ok(run3.ads.length <= p3.model.freshVisionReadsAtMost + p3.model.extractionsReused,
+        `read ${run3.ads.length} against a quote of ${p3.model.freshVisionReadsAtMost} fresh + ${p3.model.extractionsReused} reused`));
+
+    await check("every advertiser in the quote is accounted for individually", () => {
+      const domains = p3.model.perAdvertiser.map((r) => r.domain).sort();
+      ok(domains.includes("lacapfcu.org"), "the client is captured too and must be quoted");
+      ok(domains.includes("campusfederal.org") && domains.includes("neighborsfcu.org"),
+        `advertisers quoted: ${JSON.stringify(domains)}`);
+    });
+  } finally { S.stop(); }
+}
+{
+  // Nationals are captured on the display half and must be in the quote — the
+  // whole point of this endpoint is that no advertiser it is about to fetch is
+  // missing from the bill.
+  const S = await startServer();
+  try {
+    const withNat = await S.post("/api/cost", {
+      mode: "creative", sources: ["google_display"],
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+      clientDomain: "lacapfcu.org", includeNationals: true, days: { google_display: 30 },
+    });
+    const withoutNat = await S.post("/api/cost", {
+      mode: "creative", sources: ["google_display"],
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+      clientDomain: "lacapfcu.org", includeNationals: false, days: { google_display: 30 },
+    });
+    await check("turning the national tier on raises the quoted model spend", () => {
+      const a = withNat.body.plans[0].model.freshVisionReadsAtMost;
+      const b = withoutNat.body.plans[0].model.freshVisionReadsAtMost;
+      ok(a > b, `nationals added no quoted reads (${a} vs ${b}) — two advertisers would be fetched unquoted`);
+    });
+  } finally { S.stop(); }
+}
+
 summary();
 } finally {
   S.stop();
