@@ -28,6 +28,7 @@ import { capture, hasKey, normDomain, buildDomainLink, MAX_READ_PER_ADVERTISER, 
 import { extractByFormat, readerFor, readerKey } from "./lib/extract.js";
 import { buildBoard } from "./lib/benchmark.js";
 import { readThemes, usableFamilies, MIN_FAMILIES } from "./lib/themes.js";
+import { modelCallPeak, modelConcurrencyLimit } from "./lib/claude.js";
 import { channelShape, cohortShape } from "./lib/channel-shape.js";
 import { readRatePages } from "./lib/rate-page.js";
 import {
@@ -743,6 +744,19 @@ async function executeRun(run) {
     }
   }
 
+  // WHAT THE CEILING ACTUALLY DID. The limit is a setting; the peak is what
+  // happened. Recorded together so the two can be read against each other
+  // instead of the ceiling being trusted on its own.
+  //
+  // The peak is PROCESS-WIDE — two source runs execute at once, and the panel
+  // and rate-page reads share the same pool — so for a single run it is an
+  // upper bound rather than a measurement of that run alone. Saying which it is
+  // costs one line and stops it being read as the other.
+  run.modelConcurrency = {
+    limit: modelConcurrencyLimit(),
+    observedPeakProcessWide: modelCallPeak(),
+  };
+
   // The whole capture is paid for by the time this line runs. If it does not
   // reach disk the user must be told so, not congratulated.
   persist(run);
@@ -835,6 +849,8 @@ app.get("/api/run/:id", (req, res) => {
     // the user must not be told to come back to. Absent means a run from before
     // the flag existed, which is a run that was saved.
     persisted: run.persisted !== false,
+    // The ceiling, and what was actually in flight underneath it (F-008).
+    modelConcurrency: run.modelConcurrency || null,
   };
 
   if (run.status !== "done") return res.json(payload);

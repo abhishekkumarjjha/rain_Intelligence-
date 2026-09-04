@@ -1,0 +1,9 @@
+# F-008 BEFORE — 40 model calls fired at once, against a process with no ceiling.
+
+fired            : 40
+reached the API  : 40
+peak in flight   : 40
+RI_MODEL_CONCURRENCY: (unset — default applies if a limit exists)
+
+# and no run record says anything about a limit:
+

@@ -338,4 +338,66 @@ section("health checks whether anything can actually be stored");
   }
 }
 
+// ------------------------------------------------ the ceiling nobody expressed
+//
+// extractCreatives() caps itself at 6 vision calls PER ADVERTISER, and every
+// target runs in parallel, so the real ceiling was targets × 6 — about 30 in a
+// typical run and 78 with ten competitors — plus analysis calls, which were not
+// counted at all. Every one of those is money in flight at the same instant.
+section("no more model calls in flight than the process allows");
+{
+  const S = await startServer({ RI_MODEL_CONCURRENCY: "2" });
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [
+        { label: "Campus Federal", domain: "campusfederal.org" },
+        { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+        { label: "EFCU Financial", domain: "efcufinancial.org" },
+      ],
+    });
+    const run = await S.awaitRun(started.runId);
+
+    await check("the run records the ceiling it was under", () => {
+      ok(run.modelConcurrency, "nothing on the run says what the limit was");
+      eq(run.modelConcurrency.limit, 2, "limit");
+    });
+
+    await check("and the peak that was actually reached never exceeded it", () => {
+      const peak = run.modelConcurrency.observedPeakProcessWide;
+      ok(typeof peak === "number", "no peak was recorded");
+      ok(peak > 0, "no model call was ever counted — the gate is not on the path");
+      ok(peak <= 2, `${peak} model calls were in flight against a limit of 2`);
+    });
+
+    await check("the capture still completed under the tighter ceiling", () => {
+      eq(run.status, "done", "status");
+      ok(run.ads.length > 0, "throttling starved the run instead of pacing it");
+    });
+  } finally { S.stop(); }
+}
+{
+  // The default, unchanged, must still read the same way — a run under the
+  // shipped ceiling has to record a peak that respects it too.
+  const S = await startServer();
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [
+        { label: "Campus Federal", domain: "campusfederal.org" },
+        { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+        { label: "EFCU Financial", domain: "efcufinancial.org" },
+      ],
+    });
+    const run = await S.awaitRun(started.runId);
+    await check("the default ceiling is 8 and is honoured", () => {
+      eq(run.modelConcurrency.limit, 8, "limit");
+      ok(run.modelConcurrency.observedPeakProcessWide <= 8,
+        `${run.modelConcurrency.observedPeakProcessWide} in flight against a limit of 8`);
+    });
+  } finally { S.stop(); }
+}
+
 summary();

@@ -1,0 +1,19 @@
+# F-008 AFTER
+
+fired            : 40
+reached the API  : 40
+peak in flight   : 8
+RI_MODEL_CONCURRENCY: (unset — default applies if a limit exists)
+
+fired            : 40
+reached the API  : 40
+peak in flight   : 3
+RI_MODEL_CONCURRENCY: 3
+
+── no more model calls in flight than the process allows
+  ok  the run records the ceiling it was under
+  ok  and the peak that was actually reached never exceeded it
+  ok  the capture still completed under the tighter ceiling
+  ok  the default ceiling is 8 and is honoured
+
+55 passed, 0 failed
