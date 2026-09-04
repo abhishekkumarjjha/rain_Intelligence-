@@ -41,9 +41,16 @@ export function eq(actual, expected, what) {
 }
 export function ok(cond, what) { if (!cond) throw new Error(what || "expected truthy"); }
 
-/** Boot the real server with the fake network underneath it. */
-export async function startServer(env = {}) {
-  const dataDir = mkdtempSync(path.join(tmpdir(), "ri-run-"));
+/**
+ * Boot the real server with the fake network underneath it.
+ *
+ * `opts.dataDir` reuses an existing RI_DATA_DIR, which is how a test spells
+ * "restart the process": a second server over the same directory starts with an
+ * empty ACTIVE map and has to read every run back off disk. `opts.keepData`
+ * leaves the directory behind on stop() so the next server can find it.
+ */
+export async function startServer(env = {}, opts = {}) {
+  const dataDir = opts.dataDir || mkdtempSync(path.join(tmpdir(), "ri-run-"));
   const port = 3000 + Math.floor(Math.random() * 20000);
   const child = spawn(process.execPath, ["--import", "./test/mock-net.js", "server.js"], {
     cwd: ROOT,
@@ -94,6 +101,7 @@ export async function startServer(env = {}) {
     },
     stop() {
       child.kill("SIGKILL");
+      if (opts.keepData) return;
       try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
     },
   };

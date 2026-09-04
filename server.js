@@ -57,6 +57,56 @@ app.use(express.static(path.join(__dirname, "public")));
 const ACTIVE = new Map();
 
 // ---------------------------------------------------------------------------
+// ONE WRITER PER RUN.
+//
+// Opening Key insights fires TWO POSTs at once — the general read and the run
+// own product — and the run record is a single JSON file. When the run is not
+// in ACTIVE (evicted, or the process restarted since the capture), each handler
+// loadRun()s its OWN copy of the record, writes its own scope into
+// themesByScope, and saveRun()s the whole object. The second save overwrites the
+// first: one scope is silently lost from disk, and the next time someone opens
+// that panel it is paid for again.
+//
+// Serialising the read-modify-write is the fix, not serialising the model call.
+// The two scopes are genuinely independent reads and should still run at the
+// same time; it is only the merge into the file that has to be one at a time,
+// and it has to re-read the record INSIDE the lock — a copy loaded before the
+// lock was taken is already stale by the time it is granted.
+// ---------------------------------------------------------------------------
+const RUN_WRITE_LOCKS = new Map();
+
+function withRunLock(runId, fn) {
+  const prev = RUN_WRITE_LOCKS.get(runId) || Promise.resolve();
+  // .then(fn, fn): a previous holder that threw must not wedge the queue.
+  const result = prev.then(fn, fn);
+  const tail = result.then(() => {}, () => {});
+  RUN_WRITE_LOCKS.set(runId, tail);
+  tail.then(() => { if (RUN_WRITE_LOCKS.get(runId) === tail) RUN_WRITE_LOCKS.delete(runId); });
+  return result;
+}
+
+/**
+ * Read the run, apply `mutate`, write it back — with nobody else in between.
+ *
+ * Always re-reads through ACTIVE/disk inside the lock, so a scope written by a
+ * request that finished while this one was waiting on the model survives.
+ */
+function updateRun(runId, mutate) {
+  return withRunLock(runId, () => {
+    const current = ACTIVE.get(runId) || loadRun(runId);
+    if (!current) return { ok: false, run: null, persisted: false };
+    mutate(current);
+    ACTIVE.set(runId, current);
+    return { ok: true, run: current, persisted: saveRun(current) };
+  });
+}
+
+// The same panel opening twice — a double-click, or a reopened tab — must not
+// buy the same read twice. Keyed on run AND scope, because two DIFFERENT scopes
+// are two different questions and both are legitimately in flight at once.
+const THEMES_INFLIGHT = new Map();
+
+// ---------------------------------------------------------------------------
 // GET /api/health — what is configured, stated plainly.
 // ---------------------------------------------------------------------------
 app.get("/api/health", (_req, res) => {
@@ -987,6 +1037,28 @@ app.post("/api/run/:id/themes", async (req, res) => {
     return res.json({ ok: true, scope, scopeLabel, themes: run.themesByScope[scope], cached: true });
   }
 
+  // SINGLE-FLIGHT PER RUN AND SCOPE. Two requests for the same scope are one
+  // question and must cost one model call — a double-clicked button, or the
+  // panel reopened in a second tab, otherwise buys the same read twice. Two
+  // requests for DIFFERENT scopes are two questions and still run side by side;
+  // only their merge into the run file is serialised, below.
+  const key = `${run.id}::${scope}`;
+  let job = THEMES_INFLIGHT.get(key);
+  if (!job) {
+    job = readThemesForScope({ run, scope, isAll, scopeLabel })
+      .finally(() => { if (THEMES_INFLIGHT.get(key) === job) THEMES_INFLIGHT.delete(key); });
+    THEMES_INFLIGHT.set(key, job);
+  }
+  const { status, body } = await job;
+  res.status(status).json(body);
+});
+
+/**
+ * Read one scope of the wall. Always RESOLVES — to the status and body the
+ * endpoint should return — so that every caller sharing one in-flight read gets
+ * the same answer, including the same failure.
+ */
+async function readThemesForScope({ run, scope, isAll, scopeLabel }) {
   // The filter chips on the results screen are a VIEW and never reach this
   // endpoint: clicking an advertiser narrows what is drawn, not what is read.
   const showable = (run.ads || []).filter((a) => !a.isClient).filter(isShowable);
@@ -1029,7 +1101,7 @@ app.post("/api/run/:id/themes", async (req, res) => {
   // about what Google listed, and the wall below it is unaffected. Decided
   // before the model call, so it also costs nothing.
   if (designs < MIN_FAMILIES) {
-    return res.json({ ok: true, scope, scopeLabel, themes: null, reason: "too_little_captured", counted, ...counts });
+    return { status: 200, body: { ok: true, scope, scopeLabel, themes: null, reason: "too_little_captured", counted, ...counts } };
   }
 
   try {
@@ -1042,7 +1114,7 @@ app.post("/api/run/:id/themes", async (req, res) => {
     // regardless, and the audit says whether the set was quiet or the answer
     // was refused, which look identical from outside.
     if (!themes) {
-      return res.json({ ok: true, scope, scopeLabel, themes: null, reason: "nothing_recurring", audit, counted, ...counts });
+      return { status: 200, body: { ok: true, scope, scopeLabel, themes: null, reason: "nothing_recurring", audit, counted, ...counts } };
     }
 
     // Carried ON the themes so a re-open — served from the saved copy, never
@@ -1055,13 +1127,21 @@ app.post("/api/run/:id/themes", async (req, res) => {
     themes.cohort = counted.cohort;
     themes.audit = audit;
 
+    // READ-MODIFY-WRITE UNDER THE LOCK, against a record re-read inside it. The
+    // copy captured at the top of the request is stale the moment a sibling
+    // scope finishes first, and writing it back is what silently dropped that
+    // sibling's scope from disk and re-billed it on the next open.
+    const { persisted } = await updateRun(run.id, (current) => {
+      if (!current.themesByScope) current.themesByScope = {};
+      current.themesByScope[scope] = themes;
+      // Back-compat: anything still reading `run.themes` gets the run's own
+      // product, which is what that field always meant.
+      if (scope === current.product || !current.themes) current.themes = themes;
+    });
+    // Keep the caller's in-memory copy in step for the cached-answer check.
     run.themesByScope[scope] = themes;
-    // Back-compat: anything still reading `run.themes` gets the run's own
-    // product, which is what that field always meant.
-    if (scope === run.product || !run.themes) run.themes = themes;
-    ACTIVE.set(run.id, run);
-    saveRun(run);
-    res.json({ ok: true, scope, scopeLabel, themes, counted, ...counts });
+
+    return { status: 200, body: { ok: true, scope, scopeLabel, themes, counted, persisted, ...counts } };
   } catch (e) {
     const reason = e?.code === "NO_API_KEY" ? "anthropic_not_configured"
       : e?.code === "MODEL_UNAVAILABLE" ? "model_unavailable"
@@ -1069,9 +1149,9 @@ app.post("/api/run/:id/themes", async (req, res) => {
     // The status stays 500 — something really did fail server-side — but the
     // counts travel with it so the panel can still name the product it was
     // reading, and say plainly that nothing was spent.
-    res.status(500).json({ ok: false, scope, scopeLabel, reason, counted, ...counts });
+    return { status: 500, body: { ok: false, scope, scopeLabel, reason, counted, ...counts } };
   }
-});
+}
 
 // ---------------------------------------------------------------------------
 // POST /api/run/:id/strategies — the GATE.

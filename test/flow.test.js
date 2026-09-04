@@ -7,6 +7,8 @@
 // =============================================================================
 
 import { startServer, check, section, summary, eq, ok } from "./harness.js";
+import { readFileSync, rmSync } from "node:fs";
+import path from "node:path";
 
 const S = await startServer();
 
@@ -985,6 +987,67 @@ section("no finding cites evidence from another product");
     ok(!/\b(null|undefined)\b/.test(text.replace(/"[a-zA-Z]+":null/g, "")),
       "a missing value reached client-facing text");
   });
+}
+
+// ---------------------------------------------------- two writers, one file
+//
+// Opening Key insights fires two POSTs at once. When the run is not in ACTIVE —
+// which is every run after a restart, and every evicted run — each handler
+// loads its own copy of the record, writes its own scope, and saves the whole
+// object back. The second save used to overwrite the first.
+section("regression — two scopes read at once, both survive on disk");
+{
+  const A = await startServer({}, { keepData: true });
+  let dataDir = A.dataDir;
+  let runId = null;
+  try {
+    const { body: started } = await A.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [
+        { label: "Campus Federal", domain: "campusfederal.org" },
+        { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+      ],
+    });
+    const wall = await A.awaitRun(started.runId);
+    runId = wall.id;
+  } finally {
+    A.stop();   // keepData: the run file stays behind
+  }
+
+  // A FRESH PROCESS over the same directory. ACTIVE is empty, so both handlers
+  // below take the loadRun() path — the one that used to lose a scope.
+  const B = await startServer({}, { dataDir, keepData: true });
+  let onDisk = null;
+  try {
+    const [all, checking] = await Promise.all([
+      B.post(`/api/run/${runId}/themes`, { scope: "all" }),
+      B.post(`/api/run/${runId}/themes`, { scope: "checking" }),
+    ]);
+    await check("both concurrent scope reads succeed", () => {
+      ok(all.body.ok, `all: ${all.body.reason}`);
+      ok(checking.body.ok, `checking: ${checking.body.reason}`);
+    });
+    onDisk = JSON.parse(readFileSync(path.join(dataDir, `${runId}.json`), "utf8"));
+  } finally {
+    B.stop();
+  }
+
+  await check("both scopes are on disk — neither write clobbered the other", () => {
+    const scopes = Object.keys(onDisk.themesByScope || {}).sort();
+    ok(scopes.includes("all"), `"all" was lost from disk; found ${JSON.stringify(scopes)}`);
+    ok(scopes.includes("checking"), `"checking" was lost from disk; found ${JSON.stringify(scopes)}`);
+  });
+
+  await check("a lost scope is a re-billed scope — the saved read is what a reopen serves", () => {
+    // The user-visible cost of the race: whichever scope was clobbered came
+    // back uncached on the next open and paid for another model call.
+    for (const s of ["all", "checking"]) {
+      ok(onDisk.themesByScope[s], `${s} would be re-read, and re-billed, on the next open`);
+    }
+  });
+
+  try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
 }
 
 summary();

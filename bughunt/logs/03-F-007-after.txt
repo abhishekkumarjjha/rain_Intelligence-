@@ -1,0 +1,8 @@
+# F-007 AFTER
+
+── regression — two scopes read at once, both survive on disk
+  ok  both concurrent scope reads succeed
+  ok  both scopes are on disk — neither write clobbered the other
+  ok  a lost scope is a re-billed scope — the saved read is what a reopen serves
+
+108 passed, 0 failed
