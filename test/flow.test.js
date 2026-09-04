@@ -1270,6 +1270,164 @@ section("the cost quote states model spend, and never under-counts it");
   } finally { S.stop(); }
 }
 
+// ===========================================================================
+// CROSS-CUTTING INVARIANT SWEEPS
+//
+// Not per feature. These walk EVERY string in a whole payload, because the
+// failures they catch are the ones that arrive through a panel nobody thought
+// to write a test for — a chip that rendered "undefined advertisers" got
+// through a suite that already checked the board for exactly that.
+// ===========================================================================
+section("sweep — every string in every payload");
+{
+  // Both halves, and a run with a national tier, because the tiering code
+  // paths render their own sentences.
+  const runs = [];
+  for (const [mode, product, includeNationals] of [
+    ["creative", "checking", true],
+    ["benchmark", "checking", false],
+    ["creative", "auto-loan", false],
+  ]) {
+    const { body: started } = await S.post("/api/capture", {
+      mode, product, includeNationals, clientDomain: "lacapfcu.org", clientLabel: "La Capitol", days: 30,
+      competitors: [
+        { label: "Campus Federal", domain: "campusfederal.org" },
+        { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+        { label: "EFCU Financial", domain: "efcufinancial.org" },
+      ],
+    });
+    runs.push(await S.awaitRun(started.runId));
+  }
+
+  /** Every string in the payload, with the path it came from. */
+  const strings = (obj, at = "", out = []) => {
+    if (typeof obj === "string") { out.push([at, obj]); return out; }
+    if (Array.isArray(obj)) { obj.forEach((v, i) => strings(v, `${at}[${i}]`, out)); return out; }
+    if (obj && typeof obj === "object") {
+      for (const [k, v] of Object.entries(obj)) strings(v, at ? `${at}.${k}` : k, out);
+    }
+    return out;
+  };
+
+  // Verbatim ad copy is a transcription of somebody else's artwork: it is
+  // quoted, not written, and it is not this product's sentence to police.
+  const VERBATIM = /(^|\.)(ads|clusters|creative\.clusters|benchmark|board)\b.*\.(headline|headlines|description|subhead|cta|allText|sitelinks|callouts|verbatim|raw|unclassified|tone|displayUrl|advertiser|brand|imageUrl|detailsLink|domainLink)(\[|$|\.)/;
+  const isVerbatim = (p) => VERBATIM.test(p) || /\.(imageUrl|detailsLink|domainLink|url|textSnapshot)$/.test(p);
+
+  await check("no user-facing string contains undefined, NaN or [object Object]", () => {
+    const bad = [];
+    for (const r of runs) {
+      for (const [at, v] of strings(r)) {
+        if (/\bundefined\b|\bNaN\b|\[object [A-Z]/.test(v)) bad.push(`${r.mode}: ${at} = ${JSON.stringify(v.slice(0, 120))}`);
+      }
+    }
+    ok(bad.length === 0, `\n       ${bad.join("\n       ")}`);
+  });
+
+  await check("no user-facing string renders a bare null", () => {
+    const bad = [];
+    for (const r of runs) {
+      for (const [at, v] of strings(r)) {
+        if (isVerbatim(at)) continue;
+        if (/(^|\s)null(\s|$|\.|,)/.test(v)) bad.push(`${r.mode}: ${at} = ${JSON.stringify(v.slice(0, 120))}`);
+      }
+    }
+    ok(bad.length === 0, `\n       ${bad.join("\n       ")}`);
+  });
+
+  await check("NO SENTENCE ASSERTS A PRODUCT FACT, anywhere in any payload", () => {
+    // The rule the whole product rests on. "Not observed in 3 competitors'
+    // captured ads" is true; "they don't offer it" is false, and it is a bank's
+    // agency telling a client something untrue in front of that client's own
+    // competitors. Swept over everything rather than over the board, because
+    // the board is the only place anyone has ever checked.
+    const CLAIM = /\b(do(es)?n'?t (offer|have|do|run)|do(es)? not (offer|have|provide)|no longer (offers?|runs?|has)|has no (bonus|fee|rate|minimum)\b|there is no \w+ (bonus|fee|rate))\b/i;
+    const bad = [];
+    for (const r of runs) {
+      for (const [at, v] of strings(r)) {
+        if (isVerbatim(at)) continue;          // an advertiser's own copy may say anything
+        const m = v.match(CLAIM);
+        if (m) bad.push(`${r.mode}: ${at} — "${m[0]}" in ${JSON.stringify(v.slice(0, 140))}`);
+      }
+    }
+    ok(bad.length === 0, `\n       ${bad.join("\n       ")}`);
+  });
+
+  await check("every evidence id resolves to an ad in the same run", () => {
+    const bad = [];
+    for (const r of runs) {
+      const known = new Set();
+      for (const a of r.ads || []) {
+        known.add(a.creativeId);
+        for (const d of a.duplicateIds || []) known.add(d);
+        for (const v of a.variationIds || []) known.add(v);
+      }
+      for (const [at, v] of strings(r)) {
+        // Evidence lives under keys called `evidence`, `creativeIds`,
+        // `variationIds` and `data-ev` — all arrays of provider ids.
+        if (!/\.(evidence|creativeIds|variationIds)\[\d+\]$/.test(at)) continue;
+        if (!known.has(v)) bad.push(`${r.mode}: ${at} cites ${v}, which is in no ad of this run`);
+      }
+    }
+    ok(bad.length === 0, `\n       ${bad.join("\n       ")}`);
+  });
+
+  await check("every finding names the population it was counted over", () => {
+    const bad = [];
+    for (const r of runs.filter((x) => x.board)) {
+      for (const f of r.board.findings || []) {
+        const text = [f.headline, f.detail, f.population, f.scope].filter(Boolean).join(" ");
+        const named = /\d+ of \d+|captured|competitors|advertisers|in this set|observed/i.test(text);
+        ok(f.unit, `${f.rule} carries no unit`);
+        if (!named) bad.push(`${f.rule}: "${f.headline}"`);
+      }
+    }
+    ok(bad.length === 0, `\n       ${bad.join("\n       ")}`);
+  });
+
+  await check("every counted figure on the board carries a denominator or a unit", () => {
+    const bad = [];
+    for (const r of runs.filter((x) => x.board)) {
+      for (const f of r.board.findings || []) {
+        if (typeof f.count !== "number") continue;
+        // A count with no denominator is "4 competitors advertise a bonus",
+        // which is a number the reader cannot place. The engine carries the
+        // out-of as `denominator`; some cards state it in the sentence instead
+        // (the sole-advertiser card reads "Not observed in 3 competitors'
+        // captured ads"), and either is a population the reader can see.
+        const stated = [f.headline, f.detail, f.reportLine].filter(Boolean).join(" ");
+        if (typeof f.denominator !== "number" && !/\bof \d+\b|\b\d+ competitors?\b/i.test(stated)) {
+          bad.push(`${r.mode}: ${f.rule} counts ${f.count} against nothing — "${f.headline}"`);
+        }
+      }
+    }
+    ok(bad.length === 0, `\n       ${bad.join("\n       ")}`);
+  });
+
+  await check("no finding cites a creative the reader could not place (F-002 holds across the sweep)", () => {
+    const bad = [];
+    for (const r of runs.filter((x) => x.board)) {
+      const unsure = new Set((r.ads || []).filter((a) => a.productConfidence < 0.5).map((a) => a.creativeId));
+      for (const f of r.board.findings || []) {
+        for (const id of f.evidence || []) if (unsure.has(id)) bad.push(`${f.rule} cites ${id}`);
+      }
+    }
+    ok(bad.length === 0, `\n       ${bad.join("\n       ")}`);
+  });
+
+  await check("no finding cites a figure that is not in the ad it cites (F-001 holds across the sweep)", () => {
+    const bad = [];
+    for (const r of runs) {
+      for (const a of r.ads || []) {
+        for (const f of a.facts || []) {
+          if (f.grounded === false && f.rankable) bad.push(`${a.creativeId}: ungrounded ${f.metric} is rankable`);
+        }
+      }
+    }
+    ok(bad.length === 0, `\n       ${bad.join("\n       ")}`);
+  });
+}
+
 summary();
 } finally {
   S.stop();

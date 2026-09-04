@@ -1,0 +1,31 @@
+# F-017 AFTER
+
+{
+  "framing": "Campaign delivery — placement, pacing, CPM — is not visible here. This is the competitive picture in the captured advertising, to be read once execution factors have been examined.",
+  "headline": "Client CU advertised 3.00% APY; APY was not observed in 3 competitors' captured ads, so there is nothing to rank it against.",
+  "differences": "Where competitors differ: cash bonus (3 of 3) and no monthly fee (3 of 3).",
+  "localVsNational": "Locally, Cash bonus is the figure most local advertisers print (3 of 4). In the national reference set, both captured advertisers led on cash bonus alone — shown for context, not as evidence of this local market.",
+  "participation": "3 of 5 selected competitors advertised checking in this window; none printed APY.",
+  "changes": [],
+  "boundary": "Counted across 3 readable local competitors; 2 selected competitors contributed no ads on this product and are in no denominator. This describes what was advertised — the capture carries no click, conversion or spend data, so it cannot show what any of it caused.",
+  "counts": {
+    "comparableOnRate": 0,
+    "readable": 3,
+    "patterns": 2,
+    "tactics": 0
+  }
+}
+
+STAGE 11 — the two population rules, swept over the whole board
+  ok  H4/H5 — no finding's denominator counts an unreadable competitor or a national
+  ok  H4/H5 — no finding's SENTENCE quotes a population bigger than the readable local set
+  ok  H4/H5 — the set shape counts over readable locals only
+  ok  H4/H5 — the primary read counts over readable locals only
+  ok  H4/H5 — a sole-advertiser lead is never written as a ranked win
+  ok  H4/H5 — an unreadable competitor is named as unread, never as a 'no'
+  ok  H5 — the nationals are on the page, in their own block, never in the local one
+  ok  H5 — a national's $900 never becomes the set's strongest local bonus
+  ok  H4 — coverage names how many competitors could not be read
+
+101 passed, 0 failed
+

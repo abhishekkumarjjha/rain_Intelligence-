@@ -1398,5 +1398,189 @@ test("a display creative's offer figure is grounded against its own transcriptio
 });
 
 // ===========================================================================
+console.log("\nSTAGE 11 — the two population rules, swept over the whole board");
+// ===========================================================================
+//
+// H4 and H5 each had exactly one test: one finding type for the unreadable
+// competitor, one for the national. Both rules are about DENOMINATORS, and a
+// board carries denominators in five places — the findings, the set shape, the
+// primary read, the snapshot and the coverage block. A rule enforced in one of
+// five is a rule that holds by luck.
+
+const POP = (() => {
+  const bonusAd = (domain, label, amount) => chk(domain, label, {
+    headlines: [`Earn ${amount}`], description: `Open checking and earn ${amount}. No monthly fee.`,
+    economicFacts: [{ metric: "cash_bonus", raw: amount, qualifiers: {}, sourceField: "headline" }],
+    claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee", sourceField: "description" }],
+    leadEmphasis: "bonus",
+  });
+  return buildBoard({
+    client: { label: "Client CU", domain: "client.org", ads: [chk("client.org", "Client CU", {
+      headlines: ["Client Checking", "3.00% APY"], description: "Earn 3.00% APY on Choice Checking.",
+      economicFacts: [{ metric: "apy", raw: "3.00% APY", qualifiers: {}, sourceField: "headline" }],
+      claims: [], leadEmphasis: "rate",
+    })] },
+    competitors: [
+      { label: "Readable A", domain: "a.org", ads: [bonusAd("a.org", "Readable A", "$500")] },
+      { label: "Readable B", domain: "b.org", ads: [bonusAd("b.org", "Readable B", "$400")] },
+      { label: "Readable C", domain: "c.org", ads: [bonusAd("c.org", "Readable C", "$300")] },
+      // CAPTURED NOTHING. Not a competitor without a bonus — a competitor we
+      // could not read. The difference is the whole finding.
+      { label: "Dark One", domain: "dark1.org", ads: [] },
+      { label: "Dark Two", domain: "dark2.org", ads: [] },
+      // The standing national ceiling. Excluded from every local denominator,
+      // because the Transparency Center cannot say whether these served here.
+      { label: "J.P. Morgan Chase", domain: "chase.com", tier: "national",
+        ads: [bonusAd("chase.com", "J.P. Morgan Chase", "$900")] },
+      { label: "Capital One", domain: "capitalone.com", tier: "national",
+        ads: [bonusAd("capitalone.com", "Capital One", "$800")] },
+    ],
+    product: "checking",
+    progress: {
+      "client.org": { listed: 1, read: 1 },
+      "a.org": { listed: 1, read: 1 }, "b.org": { listed: 1, read: 1 }, "c.org": { listed: 1, read: 1 },
+      "dark1.org": { listed: 0, read: 0 }, "dark2.org": { listed: 0, read: 0 },
+      "chase.com": { listed: 400, read: 1 }, "capitalone.com": { listed: 300, read: 1 },
+    },
+  });
+})();
+
+// Three readable locals, two unreadable locals, two nationals. Every local
+// denominator on this board must therefore be 3, and never 5 and never 7.
+const READABLE_LOCALS = 3;
+
+test("H4/H5 — no finding's denominator counts an unreadable competitor or a national", () => {
+  for (const f of POP.findings) {
+    if (typeof f.denominator !== "number") continue;
+    if (f.scope === "national") continue;               // its own population, named on the card
+    assert.ok(f.denominator <= READABLE_LOCALS + 1,     // +1: findings that include the client
+      `${f.rule} counted over ${f.denominator}; only ${READABLE_LOCALS} competitors were readable and locally scoped`);
+  }
+});
+
+test("H4/H5 — no finding's SENTENCE quotes a population bigger than the readable local set", () => {
+  // The number in the prose and the number in the field are two chances to get
+  // this wrong, and only one of them was ever checked.
+  for (const f of POP.findings) {
+    if (f.scope === "national") continue;
+    const text = [f.headline, f.detail, f.reportLine].filter(Boolean).join(" ");
+    for (const m of text.matchAll(/(\d+)\s+(?:of\s+(\d+)\s+)?competitors?/gi)) {
+      const stated = Number(m[2] ?? m[1]);
+      assert.ok(stated <= READABLE_LOCALS,
+        `${f.rule} says "${m[0]}" — there are only ${READABLE_LOCALS} readable local competitors`);
+    }
+  }
+});
+
+test("H4/H5 — the set shape counts over readable locals only", () => {
+  const shape = POP.setShape;
+  if (!shape) return;                                   // a thin set has no shape, which is correct
+  for (const o of shape.observations || []) {
+    if (typeof o.of === "number") {
+      assert.ok(o.of <= READABLE_LOCALS, `set shape counted over ${o.of}`);
+    }
+    const text = [o.text, o.detail].filter(Boolean).join(" ");
+    for (const m of text.matchAll(/of (\d+)/gi)) {
+      assert.ok(Number(m[1]) <= READABLE_LOCALS + 1, `set shape says "${m[0]}"`);
+    }
+  }
+});
+
+test("H4/H5 — the primary read counts over readable locals only", () => {
+  const pr = POP.primaryRead;
+  if (!pr) return;
+
+  // Every ratio in the read, sentence by sentence, so the exception can be
+  // stated rather than swallowed: PARTICIPATION legitimately counts over the
+  // SELECTED set — "3 of 5 selected competitors advertised checking" is the
+  // sentence that makes the gap between chosen and readable visible, and it
+  // says "selected" in so many words. Every other sentence is about the
+  // readable local set and may not exceed it (+1 where the client is a brand
+  // in the count, which the source text always names).
+  for (const [key, text] of Object.entries(pr)) {
+    if (typeof text !== "string") continue;
+    for (const m of text.matchAll(/(\d+)\s+of\s+(?:about\s+)?(\d+)/g)) {
+      const of = Number(m[2]);
+      if (of <= READABLE_LOCALS + 1) continue;
+      const clause = text.slice(Math.max(0, m.index - 10), m.index + 60);
+      assert.match(clause, /selected|listed/i,
+        `primaryRead.${key} says "${m[0]}" over ${READABLE_LOCALS} readable local competitors, without saying it is counting the selected set: "${clause}"`);
+    }
+  }
+
+  // The specific leak this test was written for: a national finding inside a
+  // sentence about local competitors. The national set here is two brands, so
+  // a "(2 of 2)" anywhere in the local clauses is that leak.
+  assert.doesNotMatch(String(pr.differences || ""), /\(2 of 2\)/,
+    "a national reference count is inside 'Where competitors differ'");
+  assert.doesNotMatch(String(pr.headline || ""), /\b(5|7) (comparable|local|readable)/,
+    "the headline counted the competitors we could not read, or the nationals, or both");
+});
+
+test("H4/H5 — a sole-advertiser lead is never written as a ranked win", () => {
+  // No competitor in this fixture printed an APY. The card says so — "Only
+  // Client CU shows APY in the captured set" — and the primary read, which is
+  // the most quotable line on the page, used to answer it with "holds the
+  // strongest advertised APY of the 4 comparable local competitors captured":
+  // a ranked win over a set that printed nothing, with the client counted among
+  // its own competitors.
+  const h = String(POP.primaryRead?.headline || "");
+  assert.doesNotMatch(h, /strongest advertised/i,
+    `the read claims a ranked win where nothing was ranked: "${h}"`);
+  assert.match(h, /not observed|nothing to rank/i,
+    `the read does not say that no competitor printed one: "${h}"`);
+  assert.equal(POP.primaryRead.counts.comparableOnRate, 0,
+    "the brand count was reported as a count of comparable competitors");
+});
+
+test("H4/H5 — an unreadable competitor is named as unread, never as a 'no'", () => {
+  // "Dark One does not advertise a bonus" is the false sentence. "No ads were
+  // captured for Dark One" is the true one, and it has to be somewhere.
+  const rows = POP.snapshot.rows.filter((r) => /Dark/.test(r.label));
+  assert.equal(rows.length, 2, "the unreadable competitors vanished from the snapshot entirely");
+  for (const r of rows) {
+    assert.equal(r.hasCoverage, false);
+    assert.match(String(r.absentReason), /no ads captured|none about/i,
+      `Dark row reads "${r.absentReason}"`);
+    for (const cell of r.cells) {
+      assert.doesNotMatch(String(cell.value), /^no (bonus|fee|minimum|apy)/i,
+        `an unread competitor's cell asserts a product fact: "${cell.value}"`);
+    }
+  }
+});
+
+test("H5 — the nationals are on the page, in their own block, never in the local one", () => {
+  const localLabels = POP.snapshot.summaries.map((s) => s.label);
+  assert.ok(!localLabels.some((l) => /Chase|Capital One/i.test(l)),
+    `a national is in the local summary: ${JSON.stringify(localLabels)}`);
+  const refLabels = (POP.snapshot.referenceSummaries || []).map((s) => s.label);
+  assert.ok(refLabels.some((l) => /Chase/i.test(l)),
+    "the national ceiling was excluded from the count AND from the page");
+});
+
+test("H5 — a national's $900 never becomes the set's strongest local bonus", () => {
+  const text = JSON.stringify({ f: POP.findings, s: POP.setShape, p: POP.primaryRead });
+  if (/\$900|\$800/.test(text)) {
+    // Allowed only where the sentence says it is national.
+    for (const f of POP.findings) {
+      const t = [f.headline, f.detail].filter(Boolean).join(" ");
+      if (/\$900|\$800/.test(t)) {
+        assert.equal(f.scope, "national", `${f.rule} quotes a national figure without saying so`);
+      }
+    }
+  }
+});
+
+test("H4 — coverage names how many competitors could not be read", () => {
+  // The reader has to be able to see the gap between the set they chose and the
+  // set the board counted, or a denominator of 3 over a set of 5 is invisible.
+  const c = POP.coverage;
+  assert.ok(c, "no coverage block");
+  const json = JSON.stringify(c);
+  assert.match(json, /"?(readable|withAds|usable|covered)"?/i,
+    `coverage does not report how much of the set was readable: ${json.slice(0, 200)}`);
+});
+
+// ===========================================================================
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);
