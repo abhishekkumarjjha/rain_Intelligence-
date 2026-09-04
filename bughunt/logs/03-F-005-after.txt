@@ -1,0 +1,13 @@
+# F-005 AFTER
+
+── a run that could not be written says so
+  ok  the capture itself still completes — persistence is not the run
+  ok  the payload reports the run as not persisted
+  ok  and it really is not on disk — the flag is not decoration
+  ok  a normal run still reports itself as persisted
+
+── a half-written run file is never left on disk
+  ok  the save leaves no .tmp files behind it
+  ok  the run file on disk is complete JSON, not a truncation
+
+47 passed, 0 failed

@@ -808,6 +808,21 @@ function renderResults() {
   $("samplingBar").className = "samplingbar" + (s.complete ? " clean" : "");
   $("samplingBar").textContent = s.note || "";
 
+  // THE RUN FINISHED AND NOTHING WAS WRITTEN.
+  //
+  // Everything on this screen is real — it is in memory, it was captured, it
+  // was paid for. What is not true is that it will still be here tomorrow, and
+  // until F-005 the only trace of that was a line in the server console. Said
+  // in words, not colour: it is a caution, and amber means caution here.
+  const warn = $("persistWarn");
+  if (warn) {
+    const lost = r.persisted === false;
+    warn.classList.toggle("hidden", !lost);
+    warn.textContent = lost
+      ? "This run could not be written to disk, so it will be gone when the server restarts and cannot be compared against next month. Everything below is what was captured; check that the data directory is writable and has space, then run it again."
+      : "";
+  }
+
   // Every target can legitimately come back with nothing — no ads in the window,
   // preview-only creatives, a provider outage. That is a RESULT and it has to be
   // rendered as one, with the per-target reasons still visible, rather than

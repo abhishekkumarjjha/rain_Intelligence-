@@ -72,6 +72,26 @@ const ACTIVE = new Map();
 // and it has to re-read the record INSIDE the lock — a copy loaded before the
 // lock was taken is already stale by the time it is granted.
 // ---------------------------------------------------------------------------
+/**
+ * Save, and REMEMBER WHETHER IT WORKED.
+ *
+ * saveRun() has always returned a boolean and no call site read it, so an
+ * unwritable or full data directory produced one console line and a user who
+ * was told their run completed. It did complete — and it is not on disk, so it
+ * cannot be reopened, cannot be diffed against next month, and every extraction
+ * it would have cached has to be bought again. The flag travels to the UI.
+ *
+ * true is written BEFORE the save so the on-disk copy carries it; false is set
+ * only in memory afterwards, because if the write failed there is no disk copy
+ * to correct.
+ */
+function persist(run) {
+  run.persisted = true;
+  const ok = saveRun(run);
+  if (!ok) run.persisted = false;
+  return ok;
+}
+
 const RUN_WRITE_LOCKS = new Map();
 
 function withRunLock(runId, fn) {
@@ -96,7 +116,7 @@ function updateRun(runId, mutate) {
     if (!current) return { ok: false, run: null, persisted: false };
     mutate(current);
     ACTIVE.set(runId, current);
-    return { ok: true, run: current, persisted: saveRun(current) };
+    return { ok: true, run: current, persisted: persist(current) };
   });
 }
 
@@ -404,7 +424,7 @@ app.post("/api/capture", (req, res) => {
     executeRun(run).catch((e) => {
       run.status = "error";
       run.error = e?.code === "NO_API_KEY" ? "anthropic_not_configured" : String(e?.message || e);
-      saveRun(run);
+      persist(run);
     });
   }
 });
@@ -661,7 +681,9 @@ async function executeRun(run) {
     }
   }
 
-  saveRun(run);
+  // The whole capture is paid for by the time this line runs. If it does not
+  // reach disk the user must be told so, not congratulated.
+  persist(run);
 }
 
 /**
@@ -747,6 +769,10 @@ app.get("/api/run/:id", (req, res) => {
     stats: run.stats || null,
     requests: run.requests || 0,
     createdAt: run.createdAt,
+    // DEGRADED, NOT DONE. A run that finished but never reached disk is a run
+    // the user must not be told to come back to. Absent means a run from before
+    // the flag existed, which is a run that was saved.
+    persisted: run.persisted !== false,
   };
 
   if (run.status !== "done") return res.json(payload);
@@ -943,8 +969,8 @@ app.post("/api/rate-pages", async (req, res) => {
   try {
     run.ratePages = { ...(run.ratePages || {}),
       ...(await readRatePages(targets, { product: run.product, productLabel: run.productLabel })) };
-    saveRun(run);
-    res.json({ ok: true, ratePages: run.ratePages, board: boardFor(run) });
+    const persisted = persist(run);
+    res.json({ ok: true, ratePages: run.ratePages, board: boardFor(run), persisted });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e?.code === "NO_API_KEY" ? "anthropic_not_configured" : "read_failed" });
   }

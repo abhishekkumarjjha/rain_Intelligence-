@@ -1,0 +1,21 @@
+# F-005 BEFORE — the run file cannot be written; the user is told nothing.
+
+── a run that could not be written says so
+  ok  the capture itself still completes — persistence is not the run
+  FAIL the payload reports the run as not persisted
+       persisted: expected false, got undefined
+  ok  and it really is not on disk — the flag is not decoration
+  FAIL a normal run still reports itself as persisted
+       persisted: expected true, got undefined
+
+── a half-written run file is never left on disk
+  ok  the save leaves no .tmp files behind it
+  FAIL the run file on disk is complete JSON, not a truncation
+       the on-disk copy records that it was written: expected true, got undefined
+
+44 passed, 3 failed
+
+Failures:
+  · the payload reports the run as not persisted: persisted: expected false, got undefined
+  · a normal run still reports itself as persisted: persisted: expected true, got undefined
+  · the run file on disk is complete JSON, not a truncation: the on-disk copy records that it was written: expected true, got undefined

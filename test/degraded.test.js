@@ -8,6 +8,8 @@
 
 import { startServer, check, section, summary, eq, ok } from "./harness.js";
 import { checkPublicUrl, readRatePages } from "../lib/rate-page.js";
+import { mkdirSync, existsSync, readdirSync, readFileSync, statSync, rmSync } from "node:fs";
+import path from "node:path";
 
 const COMPETITORS = [
   { label: "Campus Federal", domain: "campusfederal.org" },
@@ -200,6 +202,94 @@ section("rate-page fetch refuses to read this machine");
     eq(r.reason, "private_address", "reason");
     ok(!r.facts, "a refused fetch must produce no figures at all");
   });
+}
+
+// ------------------------------------------------ the run that was never saved
+//
+// saveRun() has always returned a boolean and nothing read it. A full or
+// unwritable data directory therefore produced one line in the server console
+// and a user who was told their run had completed — a run that cannot be
+// reopened, cannot be diffed against next month, and whose every cached
+// extraction has to be bought again.
+section("a run that could not be written says so");
+{
+  const S = await startServer({}, { keepData: true });
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    // Put a DIRECTORY where the run file wants to be, while the capture is in
+    // flight. Every write to that path now fails, on every platform and
+    // regardless of the process's privileges — which a chmod does not manage
+    // when the tests run as root.
+    mkdirSync(path.join(S.dataDir, `${started.runId}.json`), { recursive: true });
+
+    const run = await S.awaitRun(started.runId);
+
+    await check("the capture itself still completes — persistence is not the run", () => {
+      eq(run.status, "done", "status");
+      ok(run.ads.length > 0, "the ads that were captured are still there");
+    });
+
+    await check("the payload reports the run as not persisted", () => {
+      eq(run.persisted, false, "persisted");
+    });
+
+    await check("and it really is not on disk — the flag is not decoration", () => {
+      // The path holds the blocking directory, not a run. loadRun() would
+      // return null for it, which is precisely why the user has to be told now
+      // rather than discovering it when they reopen the run tomorrow.
+      ok(statSync(path.join(S.dataDir, `${started.runId}.json`)).isDirectory(),
+        "the run somehow wrote over the blocking directory");
+      const strays = readdirSync(S.dataDir).filter((f) => f.endsWith(".tmp"));
+      eq(strays.length, 0, `a failed write left temp files behind: ${JSON.stringify(strays)}`);
+    });
+
+    await check("a normal run still reports itself as persisted", async () => {
+      const { body: second } = await S.post("/api/capture", {
+        mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+        product: "checking", days: 30,
+        competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+      });
+      const ok2 = await S.awaitRun(second.runId);
+      eq(ok2.persisted, true, "persisted");
+      ok(existsSync(path.join(S.dataDir, `${second.runId}.json`)), "the run file is missing from disk");
+    });
+  } finally {
+    const dir = S.dataDir;
+    S.stop();
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+// --------------------------------------------------------- an interrupted write
+section("a half-written run file is never left on disk");
+{
+  const S = await startServer({}, { keepData: true });
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    await S.awaitRun(started.runId);
+    await check("the save leaves no .tmp files behind it", () => {
+      const strays = readdirSync(S.dataDir).filter((f) => f.endsWith(".tmp"));
+      eq(strays.length, 0, `stray temp files: ${JSON.stringify(strays)}`);
+    });
+    await check("the run file on disk is complete JSON, not a truncation", () => {
+      const raw = readFileSync(path.join(S.dataDir, `${started.runId}.json`), "utf8");
+      const parsed = JSON.parse(raw);
+      eq(parsed.id, started.runId, "id");
+      eq(parsed.persisted, true, "the on-disk copy records that it was written");
+    });
+  } finally {
+    const dir = S.dataDir;
+    S.stop();
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
 }
 
 summary();
