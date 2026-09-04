@@ -1,0 +1,6 @@
+# F-018 BEFORE — an add-on's price is marked rankable at the fact level.
+
+  FAIL CORPUS_ADDON_PRICE
+         fact[monthly_fee].rankable: got true, expected false
+  ok   CORPUS_ADJECTIVE_AS_FIGURE
+  ok   CORPUS_CHROME_NOT_AN_AD

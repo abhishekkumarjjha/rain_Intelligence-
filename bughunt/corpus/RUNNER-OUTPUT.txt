@@ -1,0 +1,64 @@
+# Phase 1 — the corpus, and what a replay would cost.
+
+## The gate pass (free, in npm test)
+
+  ok   CORPUS_ADDON_PRICE
+  ok   CORPUS_ADJECTIVE_AS_FIGURE
+  ok   CORPUS_CHROME_NOT_AN_AD
+  ok   CORPUS_CLIPPED_FIGURE
+  ok   CORPUS_CROSS_PRODUCT_FIGURE
+  ok   CORPUS_FINANCING_PERCENT
+  ok   CORPUS_GENERIC_AD
+  ok   CORPUS_INSTITUTION_IDENTITY
+  ok   CORPUS_LOAN_AMOUNT
+  ok   CORPUS_MULTI_PRODUCT
+  ok   CORPUS_ONE_MECHANIC_TWO_NAMES
+  ok   CORPUS_RATE_DISCOUNT
+  ok   CORPUS_TWO_OFFERS_ONE_AD
+  ok   CORPUS_UNGROUNDED_FIGURE
+
+  14/14 entries clean · 142/142 fields correct
+  (gate pass — no model was called, nothing was spent)
+
+
+## The read pass (costs money, not run)
+
+
+  CORPUS REPLAY — what a --read pass would cost
+
+    corpus entries                  14
+    with a creative attached        0
+      · search reader (text)        0
+      · banner reader (image)       0
+    entries awaiting evidence       14
+
+    VISION CALLS A FULL REPLAY WOULD MAKE:  0
+    (one Haiku call per creative, one pass, no retries counted)
+
+    Nothing is attached, so a read pass would cost nothing and prove nothing.
+    Run --attach on a machine whose runs/_evidence holds the creatives.
+    Approval is required before --read. See §10 of the bug-hunt work order.
+
+
+## --read refuses without approval
+
+
+  --read SPENDS MONEY: one Haiku vision call per attached creative.
+  It is deliberately not wired to run without an explicit approval flag.
+
+
+  CORPUS REPLAY — what a --read pass would cost
+
+    corpus entries                  14
+    with a creative attached        0
+      · search reader (text)        0
+      · banner reader (image)       0
+    entries awaiting evidence       14
+
+    VISION CALLS A FULL REPLAY WOULD MAKE:  0
+    (one Haiku call per creative, one pass, no retries counted)
+
+    Nothing is attached, so a read pass would cost nothing and prove nothing.
+    Run --attach on a machine whose runs/_evidence holds the creatives.
+    Approval is required before --read. See §10 of the bug-hunt work order.
+

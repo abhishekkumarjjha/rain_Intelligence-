@@ -17,6 +17,7 @@ import { normalizeObservation, rollUpBrand, rankAgainst } from "../lib/observati
 import { productFromUrl } from "../lib/products.js";
 import { comparable, better } from "../lib/metrics.js";
 import { buildBoard } from "../lib/benchmark.js";
+import { buildBenchmark } from "../lib/analyze.js";
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -1580,6 +1581,181 @@ test("H4 — coverage names how many competitors could not be read", () => {
   assert.match(json, /"?(readable|withAds|usable|covered)"?/i,
     `coverage does not report how much of the set was readable: ${json.slice(0, 200)}`);
 });
+
+// ===========================================================================
+console.log("\nSTAGE 12 — adversarial input, and the table agreeing with the board");
+// ===========================================================================
+//
+// H3. The board and the table are two aggregations over the same ads, and this
+// exact class already produced 4.84% APR in a finding and 6.74% in the table
+// beneath it. The table now reads the board's own rollup, which is the right
+// fix — so what is left to prove is that it STAYS true when the input is ugly,
+// because a second rule creeping back in would look like this again.
+
+const LONG = "Open A Free Checking Account Today And Earn A Bonus When You Switch Your Direct Deposit Over To Us This Month Only While Offer Lasts";
+const RTL = "احصل على 500 دولار";
+
+const ADVERSARIAL = [
+  ["zero ads for every competitor", {
+    client: { label: "Client", domain: "client.org", ads: [] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [] },
+      { label: "B", domain: "b.org", ads: [] },
+      { label: "C", domain: "c.org", ads: [] },
+    ],
+  }],
+  ["exactly one ad in the whole set", {
+    client: { label: "Client", domain: "client.org", ads: [] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: ["Earn $500"], description: "Earn $500 when you switch.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "B", domain: "b.org", ads: [] },
+      { label: "C", domain: "c.org", ads: [] },
+    ],
+  }],
+  ["duplicate creative ids across two advertisers", {
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Client Checking"], description: "Open today.", economicFacts: [], claims: [], leadEmphasis: "brand",
+    }, { creativeId: "CR_DUPE" })] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: ["Earn $500"], description: "Earn $500 when you switch.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" }, { creativeId: "CR_DUPE" })] },
+      { label: "B", domain: "b.org", ads: [chk("b.org", "B", {
+        headlines: ["Earn $400"], description: "Earn $400 when you switch.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$400", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" }, { creativeId: "CR_DUPE" })] },
+      { label: "C", domain: "c.org", ads: [chk("c.org", "C", {
+        headlines: ["Earn $300"], description: "Earn $300 when you switch.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" }, { creativeId: "CR_DUPE" })] },
+    ],
+  }],
+  ["no headline at all, and a 130-character one", {
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: [], description: "", economicFacts: [], claims: [], leadEmphasis: "" })] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: [LONG], description: `${LONG} Earn $500.`,
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "B", domain: "b.org", ads: [chk("b.org", "B", {
+        headlines: ["Earn $400"], description: "Earn $400.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$400", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "C", domain: "c.org", ads: [chk("c.org", "C", {
+        headlines: ["Earn $300"], description: "Earn $300.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+    ],
+  }],
+  ["unicode and RTL copy", {
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Chèque «gratuit» — 3,50 % APY"], description: "Chèque «gratuit» — 3,50 % APY・今すぐ開設",
+      economicFacts: [], claims: [], leadEmphasis: "rate" })] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: [RTL], description: `${RTL} — $500`,
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "B", domain: "b.org", ads: [chk("b.org", "B", {
+        headlines: ["Earn $400 💸"], description: "Earn $400 💸 today.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$400", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "C", domain: "c.org", ads: [chk("c.org", "C", {
+        headlines: ["Earn $300"], description: "Earn $300.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+    ],
+  }],
+  ["an absurd figure", {
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Earn 999999% APY"], description: "Earn 999999% APY on checking.",
+      economicFacts: [{ metric: "apy", raw: "999999% APY", qualifiers: {}, sourceField: "headline" }],
+      claims: [], leadEmphasis: "rate" })] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: ["Earn 4.50% APY"], description: "Earn 4.50% APY.",
+        economicFacts: [{ metric: "apy", raw: "4.50% APY", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "rate" })] },
+      { label: "B", domain: "b.org", ads: [chk("b.org", "B", {
+        headlines: ["Earn 4.00% APY"], description: "Earn 4.00% APY.",
+        economicFacts: [{ metric: "apy", raw: "4.00% APY", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "rate" })] },
+      { label: "C", domain: "c.org", ads: [chk("c.org", "C", {
+        headlines: ["Earn 3.50% APY"], description: "Earn 3.50% APY.",
+        economicFacts: [{ metric: "apy", raw: "3.50% APY", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "rate" })] },
+    ],
+  }],
+];
+
+for (const [name, input] of ADVERSARIAL) {
+  const progress = Object.fromEntries(
+    [input.client.domain, ...input.competitors.map((c) => c.domain)]
+      .map((d) => [d, { listed: 1, read: 1 }]));
+
+  let board = null, table = null, threw = null;
+  try {
+    board = buildBoard({ ...input, product: "checking", progress });
+    table = buildBenchmark({
+      client: input.client, competitors: input.competitors,
+      product: "checking", runs: [], brands: board.brands,
+    });
+  } catch (e) { threw = e; }
+
+  test(`${name} — the board is built rather than thrown`, () => {
+    assert.equal(threw, null, `buildBoard threw: ${threw?.message}\n${threw?.stack || ""}`);
+    assert.ok(board, "no board");
+  });
+
+  test(`${name} — nothing renders undefined, NaN or [object Object]`, () => {
+    const json = JSON.stringify({ board, table });
+    const m = json.match(/"[^"]*\b(undefined|NaN)\b[^"]*"|\[object [A-Z]/);
+    assert.equal(m, null, `rendered: ${m?.[0]}`);
+  });
+
+  test(`${name} — no sentence asserts a product fact`, () => {
+    const CLAIM = /\b(do(es)?n'?t (offer|have)|do(es)? not (offer|have|provide)|no longer (offers?|runs?))\b/i;
+    for (const f of board?.findings || []) {
+      const t = [f.headline, f.detail, f.reportLine].filter(Boolean).join(" ");
+      assert.doesNotMatch(t, CLAIM, `${f.rule}: "${t}"`);
+    }
+  });
+
+  test(`${name} — H3: every table figure equals the board's figure for that brand and metric`, () => {
+    if (!table?.rows?.length) return;                    // nothing to disagree about
+    const byKey = new Map((board.brands || []).map((b) => [b.isClient ? "client" : b.domain, b]));
+    for (const row of table.rows) {
+      if (row.kind === "count" || !row.metric) continue;
+      for (const cell of row.cells) {
+        const pos = byKey.get(cell.column)?.positions?.[row.metric];
+        if (cell.absent) {
+          assert.ok(!pos, `${row.metric}/${cell.column}: the table says absent, the board holds ${pos?.raw}`);
+          continue;
+        }
+        assert.ok(pos, `${row.metric}/${cell.column}: the table prints ${cell.value}, the board holds nothing`);
+        assert.equal(cell.value, pos.raw,
+          `${row.metric}/${cell.column}: table says ${cell.value}, board says ${pos.raw}`);
+      }
+    }
+  });
+
+  test(`${name} — every finding's evidence resolves to an ad in this set`, () => {
+    const known = new Set([
+      ...(input.client.ads || []),
+      ...input.competitors.flatMap((c) => c.ads || []),
+    ].map((a) => a.creativeId));
+    for (const f of board?.findings || []) {
+      for (const id of f.evidence || []) {
+        assert.ok(known.has(id), `${f.rule} cites ${id}, which is in no ad of this set`);
+      }
+    }
+  });
+}
 
 // ===========================================================================
 console.log(`\n${passed} passed, ${failed} failed\n`);

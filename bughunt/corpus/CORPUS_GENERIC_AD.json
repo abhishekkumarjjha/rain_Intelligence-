@@ -1,0 +1,48 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_GENERIC_AD",
+  "advertiser": "example.org",
+  "adText": {
+    "headlines": [
+      "Bank With Us"
+    ],
+    "description": "Bank with us. Open an account today.",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "example.org",
+    "displayUrl": "",
+    "headlines": [
+      "Bank With Us"
+    ],
+    "description": "Bank with us. Open an account today.",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [],
+    "claims": [],
+    "unclassified": [],
+    "leadEmphasis": "brand",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "other",
+    "productConfidence": 0.2,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "other",
+    "productConfidenceAtLeast": 0,
+    "productConfidenceAtMost": 0.5,
+    "facts": [],
+    "claims": [],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "'BANK WITH US' IS OTHER, AT LOW CONFIDENCE, AND THAT IS THE CORRECT ANSWER. Under F-002 a creative below the 0.5 floor is captured, shown and never counted. A confident wrong label is worse than an unsure right one."
+}

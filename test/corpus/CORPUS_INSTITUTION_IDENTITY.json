@@ -1,0 +1,53 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_INSTITUTION_IDENTITY",
+  "advertiser": "campusfederal.org",
+  "adText": {
+    "headlines": [
+      "Campus Federal Credit Union"
+    ],
+    "description": "Federal Credit Union. Open a checking account today.",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "campusfederal.org",
+    "displayUrl": "",
+    "headlines": [
+      "Campus Federal Credit Union"
+    ],
+    "description": "Federal Credit Union. Open a checking account today.",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [],
+    "claims": [
+      {
+        "claim": "member_owned",
+        "verbatim": "Federal Credit Union",
+        "sourceField": "description"
+      }
+    ],
+    "unclassified": [],
+    "leadEmphasis": "brand",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "checking",
+    "productConfidence": 0.9,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "checking",
+    "productConfidenceAtLeast": 0.7,
+    "facts": [],
+    "claims": [],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "AN INSTITUTION'S TYPE IS NOT A STRATEGY. 'Federal Credit Union' appears in the verified-advertiser line of essentially every credit-union ad; counting it as member-owned positioning produces a message gap against a competitor who never chose to say anything. It lands in `unclassified`, not in claims."
+}

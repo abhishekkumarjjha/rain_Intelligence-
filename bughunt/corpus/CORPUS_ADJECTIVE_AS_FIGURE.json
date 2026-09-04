@@ -1,0 +1,67 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_ADJECTIVE_AS_FIGURE",
+  "advertiser": "example.org",
+  "adText": {
+    "headlines": [
+      "Low APR Credit Cards"
+    ],
+    "description": "Great rates on every card. Low APR. Apply in minutes.",
+    "sitelinks": [],
+    "callouts": [
+      "Great Rates"
+    ]
+  },
+  "modelAnswer": {
+    "advertiser": "example.org",
+    "displayUrl": "",
+    "headlines": [
+      "Low APR Credit Cards"
+    ],
+    "description": "Great rates on every card. Low APR. Apply in minutes.",
+    "sitelinks": [],
+    "callouts": [
+      "Great Rates"
+    ],
+    "economicFacts": [
+      {
+        "metric": "apr",
+        "raw": "Low APR",
+        "qualifiers": {},
+        "sourceField": "headline"
+      }
+    ],
+    "claims": [],
+    "unclassified": [],
+    "leadEmphasis": "rate",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "credit-card",
+    "productConfidence": 0.9,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "credit-card",
+    "productConfidenceAtLeast": 0.7,
+    "facts": [
+      {
+        "metric": "apr",
+        "raw": "Low APR",
+        "value": null,
+        "complete": false,
+        "rankable": false,
+        "grounded": true
+      }
+    ],
+    "claims": [],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "ADJECTIVES ARE NOT FIGURES. La Capitol's credit-card board reported 'ads print apr of Low APR. No competitor's captured ads printed one' — a rate position built out of an adjective."
+}

@@ -1,0 +1,63 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_CLIPPED_FIGURE",
+  "advertiser": "brtelco.org",
+  "adText": {
+    "headlines": [
+      "BR Telco Checking"
+    ],
+    "description": "…Open A Checking Account With BR Telco & Earn Up To 5.5…",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "brtelco.org",
+    "displayUrl": "",
+    "headlines": [
+      "BR Telco Checking"
+    ],
+    "description": "…Open A Checking Account With BR Telco & Earn Up To 5.5…",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [
+      {
+        "metric": "cash_bonus",
+        "raw": "Up To 5.5…",
+        "qualifiers": {},
+        "sourceField": "description"
+      }
+    ],
+    "claims": [],
+    "unclassified": [],
+    "leadEmphasis": "bonus",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "checking",
+    "productConfidence": 0.85,
+    "truncated": true,
+    "legible": true
+  },
+  "expect": {
+    "product": "checking",
+    "productConfidenceAtLeast": 0.7,
+    "facts": [
+      {
+        "metric": "cash_bonus",
+        "raw": "Up To 5.5…",
+        "value": null,
+        "complete": false,
+        "rankable": false,
+        "grounded": true
+      }
+    ],
+    "claims": [],
+    "truncated": true,
+    "legible": true
+  },
+  "notes": "The uncut ad reads 'Earn Up To 5.55% APY*'. So this is neither a bonus nor 5.5 of anything, and it produced '2 of 3 competitors advertise cash bonus' about a competitor advertising no bonus. GROUNDED (it was on screen) and INCOMPLETE (the digits are not). The parsed value is null, not 5.5: num() will not read a percent without a % or a dollar figure without a $, which is the same refusal isCompleteFigure() makes and the right one. The corpus said 5.5 and the corpus was wrong."
+}

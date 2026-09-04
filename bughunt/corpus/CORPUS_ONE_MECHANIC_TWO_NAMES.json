@@ -1,0 +1,60 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_ONE_MECHANIC_TWO_NAMES",
+  "advertiser": "example.org",
+  "adText": {
+    "headlines": [
+      "No Payments For 60 Days"
+    ],
+    "description": "No Payments For 60 Days on any new auto loan.",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "example.org",
+    "displayUrl": "",
+    "headlines": [
+      "No Payments For 60 Days"
+    ],
+    "description": "No Payments For 60 Days on any new auto loan.",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [],
+    "claims": [
+      {
+        "claim": "payment_deferral",
+        "verbatim": "No Payments For 60 Days",
+        "sourceField": "headline"
+      },
+      {
+        "claim": "no_payment_days",
+        "verbatim": "No Payments For 60 Days",
+        "sourceField": "headline"
+      }
+    ],
+    "unclassified": [],
+    "leadEmphasis": "other",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "auto-loan",
+    "productConfidence": 0.9,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "auto-loan",
+    "productConfidenceAtLeast": 0.7,
+    "facts": [],
+    "claims": [
+      "payment_deferral"
+    ],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "ONE MECHANIC, ONE CLAIM. Both ids were returned from one sentence and the board rendered two MESSAGE ADVANTAGE cards quoting the same words — two labels for one thing, presented as two advantages."
+}

@@ -1,0 +1,78 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_ADDON_PRICE",
+  "advertiser": "lacapfcu.org",
+  "adText": {
+    "headlines": [
+      "La Cap Checking"
+    ],
+    "description": "Enjoy mobile protection, roadside help, ID theft aid & more for $5.99/month with BaZing.",
+    "sitelinks": [
+      "No Monthly Fee Checking"
+    ],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "lacapfcu.org",
+    "displayUrl": "",
+    "headlines": [
+      "La Cap Checking"
+    ],
+    "description": "Enjoy mobile protection, roadside help, ID theft aid & more for $5.99/month with BaZing.",
+    "sitelinks": [
+      "No Monthly Fee Checking"
+    ],
+    "callouts": [],
+    "economicFacts": [
+      {
+        "metric": "monthly_fee",
+        "raw": "$5.99/month",
+        "qualifiers": {
+          "applies_to": "BaZing"
+        },
+        "sourceField": "description"
+      }
+    ],
+    "claims": [
+      {
+        "claim": "no_monthly_fee",
+        "verbatim": "No Monthly Fee Checking",
+        "sourceField": "sitelink"
+      }
+    ],
+    "unclassified": [],
+    "leadEmphasis": "feature",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "checking",
+    "productConfidence": 0.92,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "checking",
+    "productConfidenceAtLeast": 0.8,
+    "facts": [
+      {
+        "metric": "monthly_fee",
+        "raw": "$5.99/month",
+        "value": 5.99,
+        "complete": true,
+        "rankable": false,
+        "grounded": true,
+        "scopedToAddOn": true
+      }
+    ],
+    "claims": [
+      "no_monthly_fee"
+    ],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "AN ADD-ON'S PRICE IS NOT THE ACCOUNT'S PRICE. Ranked as a monthly fee it says the client charges for an account their competitors give away — in the same ad that says 'No Monthly Fee'."
+}

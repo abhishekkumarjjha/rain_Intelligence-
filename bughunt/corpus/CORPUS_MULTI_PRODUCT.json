@@ -1,0 +1,61 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_MULTI_PRODUCT",
+  "advertiser": "example.org",
+  "adText": {
+    "headlines": [
+      "Checking, Savings And Auto Loans"
+    ],
+    "description": "Open checking, earn 4.00% APY on savings, and finance your car at 5.49% APR.",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "example.org",
+    "displayUrl": "",
+    "headlines": [
+      "Checking, Savings And Auto Loans"
+    ],
+    "description": "Open checking, earn 4.00% APY on savings, and finance your car at 5.49% APR.",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [
+      {
+        "metric": "apy",
+        "raw": "4.00% APY",
+        "qualifiers": {},
+        "sourceField": "description"
+      },
+      {
+        "metric": "apr",
+        "raw": "5.49% APR",
+        "qualifiers": {},
+        "sourceField": "description"
+      }
+    ],
+    "claims": [],
+    "unclassified": [],
+    "leadEmphasis": "brand",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "other",
+    "productConfidence": 0.35,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "other",
+    "productConfidenceAtLeast": 0,
+    "productConfidenceAtMost": 0.5,
+    "facts": [],
+    "claims": [],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "A MULTI-PRODUCT AD MUST NOT SILENTLY ENTER ONE PRODUCT'S FINDINGS. Classified 'other' at low confidence it is captured, shown, and counted nowhere — which is the only honest place for it."
+}
