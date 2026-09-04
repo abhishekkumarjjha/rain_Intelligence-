@@ -56,6 +56,59 @@ app.use(express.static(path.join(__dirname, "public")));
 const ACTIVE = new Map();
 
 // ---------------------------------------------------------------------------
+// ...AND COMPLETED RUNS LEAVE IT.
+//
+// Three .set calls, no .delete. Every run ever captured stayed in memory for the
+// life of the process, holding its full ad records — transcriptions, offers,
+// evidence ids, board — for runs nobody will open again. A demo laptop survives
+// that; a long-lived process does not, and it fails as an OOM with no
+// explanation rather than as anything a user could act on.
+//
+// Eviction is LRU with a cap, and it is SAFE ONLY BECAUSE OF THE DISK COPY, so
+// two runs are never evicted: one that has not finished (it exists nowhere else)
+// and one that failed to persist (F-005 — there is nothing to load it back
+// from). Everything else drops to the loadRun() fallback that every read path
+// already has.
+// ---------------------------------------------------------------------------
+const ACTIVE_LIMIT = Math.max(4, Number(process.env.RI_ACTIVE_RUNS) || 24);
+
+/** Put a run at the tail of the LRU order. Map keeps insertion order, so the
+ *  delete-then-set is what makes a re-read count as recent use. */
+function remember(run) {
+  if (!run?.id) return run;
+  ACTIVE.delete(run.id);
+  ACTIVE.set(run.id, run);
+  evictActive();
+  return run;
+}
+
+function evictActive() {
+  if (ACTIVE.size <= ACTIVE_LIMIT) return;
+  for (const [id, run] of ACTIVE) {
+    if (ACTIVE.size <= ACTIVE_LIMIT) break;
+    // In flight: memory is the only copy there is.
+    if (run.status !== "done" && run.status !== "error") continue;
+    // Finished but never written (F-005). Evicting it would delete it.
+    if (run.persisted === false) continue;
+    ACTIVE.delete(id);
+  }
+}
+
+/**
+ * The one way to reach a run. In memory if it is there — refreshed in the LRU
+ * order so an actively used run is not the next one evicted — otherwise off
+ * disk, which is the fallback path an evicted run is meant to land on.
+ *
+ * A disk read is deliberately NOT re-admitted to ACTIVE: doing that would let
+ * any sequence of reads refill the map that eviction just drained.
+ */
+function getRun(id) {
+  const live = ACTIVE.get(id);
+  if (live) { ACTIVE.delete(id); ACTIVE.set(id, live); return live; }
+  return loadRun(id);
+}
+
+// ---------------------------------------------------------------------------
 // ONE WRITER PER RUN.
 //
 // Opening Key insights fires TWO POSTs at once — the general read and the run
@@ -112,10 +165,10 @@ function withRunLock(runId, fn) {
  */
 function updateRun(runId, mutate) {
   return withRunLock(runId, () => {
-    const current = ACTIVE.get(runId) || loadRun(runId);
+    const current = getRun(runId);
     if (!current) return { ok: false, run: null, persisted: false };
     mutate(current);
-    ACTIVE.set(runId, current);
+    remember(current);
     return { ok: true, run: current, persisted: persist(current) };
   });
 }
@@ -134,6 +187,9 @@ app.get("/api/health", (_req, res) => {
     serpapi: hasKey(),
     anthropic: hasAnthropicKey(),
     directorySize: DIRECTORY_SIZE,
+    // How many finished runs are still held in memory. Diagnostic, not a
+    // promise: the number a growing process would have shown climbing forever.
+    runsInMemory: ACTIVE.size,
     maxReadPerAdvertiser: MAX_READ_PER_ADVERTISER,
     defaultLookbackDays: DEFAULT_LOOKBACK_DAYS,
     // Availability is PER SOURCE.
@@ -400,7 +456,7 @@ app.post("/api/capture", (req, res) => {
       requests: 0,
     };
     for (const t of run.targets) run.progress[t.domain] = { status: "queued", label: t.label };
-    ACTIVE.set(run.id, run);
+    remember(run);
     return run;
   });
 
@@ -754,7 +810,7 @@ function boardFor(run) {
 // GET /api/run/:id — poll a run, or read a finished one.
 // ---------------------------------------------------------------------------
 app.get("/api/run/:id", (req, res) => {
-  const run = ACTIVE.get(req.params.id) || loadRun(req.params.id);
+  const run = getRun(req.params.id);
   if (!run) return res.status(404).json({ ok: false, reason: "not_found" });
 
   const payload = {
@@ -956,7 +1012,7 @@ app.get("/api/evidence/:creativeId", (req, res) => {
 // figures are display-only and never enter a denominator. See rate-page.js.
 // ---------------------------------------------------------------------------
 app.post("/api/rate-pages", async (req, res) => {
-  const run = ACTIVE.get(req.body?.runId) || loadRun(req.body?.runId);
+  const run = getRun(req.body?.runId);
   if (!run) return res.status(404).json({ ok: false, reason: "not_found" });
   if (run.mode !== "benchmark") return res.status(400).json({ ok: false, reason: "wrong_mode" });
 
@@ -1038,7 +1094,7 @@ app.get("/api/img", async (req, res) => {
 // reader to trust them equally.
 // ---------------------------------------------------------------------------
 app.post("/api/run/:id/themes", async (req, res) => {
-  const run = ACTIVE.get(req.params.id) || loadRun(req.params.id);
+  const run = getRun(req.params.id);
   if (!run) return res.status(404).json({ ok: false, reason: "not_found" });
   if (run.status !== "done") return res.status(409).json({ ok: false, reason: "run_not_finished" });
   if (run.mode !== "creative") return res.status(400).json({ ok: false, reason: "wrong_mode" });

@@ -1,0 +1,9 @@
+# F-006 AFTER
+
+── regression — an evicted run reads back off disk unchanged
+  ok  the oldest runs are still reachable after the cap is exceeded
+  ok  an evicted run's payload is byte-identical to the one it had in memory
+  ok  the most recent run is still the one held in memory
+  ok  health reports how many runs are being held
+
+115 passed, 0 failed

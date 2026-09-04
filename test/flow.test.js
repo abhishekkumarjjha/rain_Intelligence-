@@ -1097,6 +1097,57 @@ section("regression — two scopes read at once, both survive on disk");
   try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
 }
 
+// ------------------------------------------------- completed runs leave memory
+//
+// The ACTIVE map had three .set calls and no .delete, so every run ever captured
+// stayed in memory for the life of the process, holding its full ad records.
+// Eviction is only safe because of the disk copy, so the thing to prove is that
+// an evicted run comes back through loadRun() IDENTICAL, not merely present.
+section("regression — an evicted run reads back off disk unchanged");
+{
+  const S = await startServer({ RI_ACTIVE_RUNS: "4" });
+  try {
+    const ids = [];
+    const before = new Map();
+    for (let i = 0; i < 6; i++) {
+      const { body: started } = await S.post("/api/capture", {
+        mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+        product: "checking", days: 30,
+        competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+      });
+      const run = await S.awaitRun(started.runId);
+      ids.push(started.runId);
+      before.set(started.runId, JSON.stringify(run));
+    }
+
+    await check("the oldest runs are still reachable after the cap is exceeded", async () => {
+      for (const id of ids.slice(0, 2)) {
+        const { status, body } = await S.get(`/api/run/${id}`);
+        eq(status, 200, `status for ${id}`);
+        eq(body.status, "done", `status field for ${id}`);
+      }
+    });
+
+    await check("an evicted run's payload is byte-identical to the one it had in memory", async () => {
+      for (const id of ids.slice(0, 2)) {
+        const { body } = await S.get(`/api/run/${id}`);
+        eq(JSON.stringify(body), before.get(id), `payload for ${id} changed after eviction`);
+      }
+    });
+
+    await check("the most recent run is still the one held in memory", async () => {
+      const { body } = await S.get(`/api/run/${ids[ids.length - 1]}`);
+      eq(JSON.stringify(body), before.get(ids[ids.length - 1]), "the newest run changed");
+    });
+
+    await check("health reports how many runs are being held", async () => {
+      const { body } = await S.get("/api/health");
+      ok(typeof body.runsInMemory === "number", "runsInMemory is not reported");
+      ok(body.runsInMemory <= 4, `${body.runsInMemory} runs held against a cap of 4 — nothing is being evicted`);
+    });
+  } finally { S.stop(); }
+}
+
 summary();
 } finally {
   S.stop();
