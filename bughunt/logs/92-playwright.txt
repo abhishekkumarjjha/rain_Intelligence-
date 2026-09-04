@@ -1,22 +1,22 @@
-# Phase 2 — the browser suite, running for the first time.
+# Phase 2 — the browser suite, running for the first time in this repository's life.
 
-## The state it was in (git show 7010b4e -- npm run test:ui behaviour):
+## What it did on the base commit (7010b4e)
 
-$ npm run test:ui   # on the base commit, with no playwright installed
-  (playwright not installed — skipping UI tests)
-  exit 0            <- a suite that ran nothing, reporting success
+  $ npm run test:ui        # no playwright installed
+    (playwright not installed — skipping UI tests)
+    exit 0                 <- a suite that ran nothing, reporting success
 
-## After: the suite cannot pass by not running
+## What it does now, when it cannot run
 
-$ node test/ui.test.js   # with node_modules/playwright removed
-  BROWSER TESTS DID NOT RUN: playwright is not installed.
-  Install with: npm install   (playwright is a devDependency)
-  To skip deliberately on a machine with no browser: RI_SKIP_UI=1 npm run test:ui
-  exit 1
+  $ node test/ui.test.js   # with node_modules/playwright removed
+    BROWSER TESTS DID NOT RUN: playwright is not installed.
+    Install with: npm install   (playwright is a devDependency)
+    To skip deliberately on a machine with no browser: RI_SKIP_UI=1 npm run test:ui
+    exit 1
 
-$ RI_SKIP_UI=1 npm run test:ui
-  (RI_SKIP_UI=1 — browser tests deliberately skipped; nothing here was verified)
-  exit 0
+  $ RI_SKIP_UI=1 npm run test:ui
+    (RI_SKIP_UI=1 — browser tests deliberately skipped; nothing here was verified)
+    exit 0
 
 ## The full run
 
@@ -144,3 +144,4 @@ $ RI_SKIP_UI=1 npm run test:ui
   ok  nothing logged an application error to the console
 
 88 passed, 0 failed
+EXIT_CODE=0

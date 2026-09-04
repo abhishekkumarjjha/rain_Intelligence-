@@ -1,0 +1,557 @@
+
+> rain-intelligence@0.1.0 test
+> node test/smoke.test.js && node test/client-search.test.js && node test/pipeline.test.js && node test/flow.test.js && node test/degraded.test.js && node test/nationals.test.js && node test/benchmark.test.js && node test/corpus-runner.js
+
+  ok  image capture omits platform (there is no DISPLAY value)
+  ok  text capture pins platform=SEARCH
+  ok  epoch converts
+  ok  selection prefers fresh, breaks ties on longevity
+  ok  same headline+offer collapses into one idea
+  ok  benchmark shows the client column first and marks it
+  ok  bonus row exists with an absent client cell
+  ok  missing terms downgrade comparability, and say so
+  ok  the table carries no findings of its own
+  ok  longevity phrasing is days-shown, never 'continuously'
+  ok  incomplete capture forbids market claims
+  ok  product from URL path
+  ok  the read cap spreads across campaigns instead of draining the longest-running one
+  ok  a single-campaign advertiser is unaffected by the spread
+  ok  the cap still bites when there is more than it admits
+  ok  the Transparency Center's own chrome never reaches the wall
+  ok  a creative with nothing readable in it is not shown
+  ok  real copy is never dropped, and an offer alone is enough
+  ok  an all-national set is stated as one, with its denominator
+  ok  the cohort line never claims a competitor is absent from the market
+  ok  a mixed set reports the split and names its window
+  ok  a set carried by one advertiser says so
+  ok  a set with no families has no cohort observation
+
+23 passed
+
+STAGE 1 — the shortenings people actually type
+  ok  a name shortened across its spaces resolves
+  ok  suggestions start at the first character, not after three
+  ok  an empty field offers names rather than nothing
+  ok  initials find the institution
+  ok  a single letter is not treated as an initialism
+
+STAGE 2 — ranking, not just filtering
+  ok  a word that starts with the query beats one that merely contains it
+  ok  a mid-word match still resolves when it is the only one
+  ok  the domain finds a client whose name nobody spells out
+  ok  a multi-word query matches across the space
+
+STAGE 3 — one slip, corrected and labelled
+  ok  a single-character typo still finds the client
+  ok  an exact match is never labelled as a correction
+  ok  two errors are a different word, not a typo
+  ok  short queries are never spell-corrected
+  ok  a partial initialism resolves
+  ok  a query matching nothing reports nothing
+
+STAGE 4 — the edit-distance primitive
+  ok  withinOneEdit counts insertion, deletion and substitution
+  ok  every client in the directory is reachable by its own name
+  ok  every client is reachable by its own domain root
+
+18 passed, 0 failed
+
+  ok  capture returned 1 downloadable creatives
+      run: {"providerTotal":21,"returned":21,"renderable":20,"previewOnly":1,"selected":1,"exactDupes":19,"complete":true}
+  ok  fletch-preview creative counted separately (21 found -> 20 renderable)
+  ok  byte-identical creatives collapsed 19 dupes -> 1 vision call
+
+4 passed
+
+── health + directory
+  ok  health reports both providers configured
+  ok  health exposes the product taxonomy for the scope selector
+  ok  health reports the directory size
+  ok  client list is populated and every row has a domain
+
+── resolve
+  ok  product page resolves to its product
+  ok  product page is not flagged as a homepage
+  ok  known client matches the directory
+  ok  competitors come back scoped and ranked
+  ok  bare domain is flagged as a homepage, not silently scoped
+  ok  a branded product name is read when the pattern cannot
+  ok  a page that names no product still goes to the user
+  ok  garbage input is rejected with a reason
+  ok  unknown client reports a directory miss instead of inventing competitors
+
+── capture validation
+  ok  a capture with no competitors is refused
+  ok  a capture with no client domain is refused
+
+── creative mode — the inspiration wall
+  ok  creative mode captures the client as its own population
+  ok  the standing nationals are appended without being selected
+  ok  creative run completes
+  ok  every competitor was read
+  ok  the client's own creative comes back as its own block
+  ok  no client creative is counted anywhere on the wall
+  ok  the payload carries a creative block the wall can render
+  ok  THE WALL IS NOT EMPTY when creatives were captured
+  ok  near-identical executions collapse into one idea
+  ok  EVERY captured creative is reachable from the wall, not just the scoped ones
+  ok  product chips count everything captured, not just the current slice
+  ok  the wall opens on the scoped product when it has something in it
+  ok  the capture funnel reconciles listed -> read -> on-product
+  ok  the sampling note never claims retrieval means reading
+  ok  off-product creatives are reachable, not silently discarded
+  ok  every card has the evidence it needs to be clicked
+  ok  competitor filter counts match the ads actually returned
+  ok  longevity is phrased as days shown, never as a continuous run
+  ok  sampling note is present and scoped to what was captured
+
+── persistence
+  ok  a finished run re-reads identically from disk
+  ok  finished runs appear in the run list
+
+── benchmark mode — ads vs ads
+  ok  benchmark captures the client plus the national reference tier
+  ok  benchmark run completes
+  ok  the table has a client column first, marked as the client
+  ok  THE CLIENT COLUMN IS POPULATED — its own ads were captured
+  ok  competitor columns are populated
+  ok  the bonus row exists and the client cell is absent
+  ok  the table agrees with the board, cell for cell
+  ok  the strongest advertised bonus is shown, with its evidence
+  ok  the table carries no findings of its own
+  ok  nationals never enter a benchmark denominator
+  ok  findings are split into lead / pressure / context
+  ok  comparability travels with the row
+  ok  every cell's evidence ids resolve to real ads
+  ok  no row emits a bare number without a denominator or a unit
+
+── a creative the reader could not place is captured, shown, and not counted
+  ok  it was captured, and it is still in the run
+  ok  the product chips still count it — it WAS captured
+  ok  no finding on the board is built on it
+  ok  no snapshot cell quotes its figure
+  ok  the audit table agrees with the board rather than counting it separately
+  ok  the funnel still reconciles, and says where it went in its own words
+
+── the strategy gate is gone, not merely hidden
+  ok  POSTing the old strategy route is not routed at all
+  ok  a finished benchmark payload carries no generated strategies
+
+── partial failure — one bad competitor must not sink the run
+  ok  the run still completes
+  ok  the competitor with ads still produced them
+  ok  a competitor with no ads is reported empty, not failed
+  ok  a preview-only competitor says so, and its count reconciles
+  ok  the wall still renders the competitor that worked
+
+── duplicate and self-referential targets
+  ok  a duplicated competitor domain does not double-count its ads
+  ok  the client cannot be entered as their own competitor
+
+── captures are samples — consecutive runs are diffed
+  ok  a second comparable capture is diffed against the first
+  ok  an identical re-capture reports no new creatives
+  ok  a run with no comparable predecessor carries no diff
+
+── institution is not the advertiser
+  ok  the entered domain stays the institution
+  ok  the verified advertiser is kept as a separate field
+
+── the read cap buys distinct creatives, not repeats
+  ok  every campaign is read, not just the longest-running one
+  ok  no vision slot was spent on artwork already in hand
+  ok  the offer-bearing campaigns survive to the wall
+  ok  the funnel still reconciles and names the duplicates
+
+── regression — the extraction cache is scoped to its reader
+  ok  benchmark ads carry the SEARCH shape, not a replayed banner record
+  ok  the fact in the description survived into the board
+
+── regression — a run is never its own previous snapshot
+  ok  a changed competitor set is disclosed as drift
+  ok  drift survives re-reading the finished run
+  ok  the drift note states how many brands the comparison covers
+
+── the Wall is display only — search is never bought twice
+  ok  a Wall run never captures Google search
+  ok  the Wall still captures display
+  ok  the display wall still fills
+
+── key insights — themes describe, they never advise
+  ok  themes generate for a finished Wall run
+  ok  a theme that advises is DROPPED, not softened
+  ok  a theme claiming performance is dropped
+  ok  a theme citing no real creative is dropped
+  ok  every surviving theme points at creatives from this run
+  ok  the framing states the register in the user's own reading
+  ok  a number written in WORDS is dropped like a digit
+  ok  a theme that infers intent is dropped
+  ok  a contrast whose two sides are the same cohort is not a contrast
+  ok  support is derived from the evidence, not asked for
+  ok  one design cut into many sizes is one piece of evidence
+  ok  a thin product widens to a general read, and says so
+  ok  a wall with nothing to say is an empty answer, never an error
+  ok  the counted observations come back whatever the model does
+  ok  citations are short labels, never the provider's raw ids
+  ok  a scope can be asked for by name, and says which it answered
+  ok  each scope is cached separately, so a re-open is never re-read
+  ok  an unknown scope falls back to the run's product, never to everything
+  ok  themes are refused for Competitive Intelligence
+  ok  themes on an unknown run 404 rather than throwing
+
+── an invalid scope produces no analysis at all
+  ok  Competitive Intelligence refuses to start without a product
+  ok  ...and refuses an absent product the same way
+  ok  the Wall still accepts a scope of Other
+
+── no finding cites evidence from another product
+  ok  every finding's evidence is on the scoped product
+  ok  the funnel's on-product count is a real subset, not everything read
+  ok  no client-facing line contains a null or undefined
+
+── regression — two scopes read at once, both survive on disk
+  ok  both concurrent scope reads succeed
+  ok  both scopes are on disk — neither write clobbered the other
+  ok  a lost scope is a re-billed scope — the saved read is what a reopen serves
+
+── regression — an evicted run reads back off disk unchanged
+  ok  the oldest runs are still reachable after the cap is exceeded
+  ok  an evicted run's payload is byte-identical to the one it had in memory
+  ok  the most recent run is still the one held in memory
+  ok  health reports how many runs are being held
+
+── the cost quote states model spend, and never under-counts it
+  ok  the quote states the model half at all
+  ok  it names which reader version the figure is about
+  ok  it says exactly which cache force bypasses
+  ok  Key insights is named as a separate call, not folded in or omitted
+  ok  the first run reads no more creatives than the quote allowed
+  ok  with every advertiser cached the quote spends nothing
+  ok  forcing re-buys the listing but not the transcriptions
+  ok  and the forced run really does not re-read what it already had
+  ok  every advertiser in the quote is accounted for individually
+  ok  turning the national tier on raises the quoted model spend
+
+── sweep — every string in every payload
+  ok  no user-facing string contains undefined, NaN or [object Object]
+  ok  no user-facing string renders a bare null
+  ok  NO SENTENCE ASSERTS A PRODUCT FACT, anywhere in any payload
+  ok  every evidence id resolves to an ad in the same run
+  ok  every finding names the population it was counted over
+  ok  every counted figure on the board carries a denominator or a unit
+  ok  no finding cites a creative the reader could not place (F-002 holds across the sweep)
+  ok  no finding cites a figure that is not in the ad it cites (F-001 holds across the sweep)
+
+── key insights — the framing counts competitors, and says the client was read too
+  ok  the framing's design count is the panel's own competitor count
+  ok  and it says so — the number is named as a competitor figure
+  ok  creativesRead is the competitor count, not the total handed to the model
+  ok  the client's designs are reported separately, never folded in
+  ok  no count on this panel names a network the capture cannot establish
+
+138 passed, 0 failed
+
+── provider quota exhausted
+(node:23943) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+  ok  the run still completes rather than hanging
+  ok  every target reports the quota reason, not a generic failure
+  ok  no ads are invented to fill the gap
+
+── provider key rejected
+  ok  an auth failure is reported as auth, not as 'no ads'
+
+── one target times out, the other works
+  ok  the working target still produces ads
+  ok  the timed-out target says timeout
+  ok  the wall renders what did come back
+
+── the vision model returns prose instead of JSON
+  ok  the run completes
+  ok  creatives found but none read is reported as empty, not as done
+  ok  no half-built ad records leak into the payload
+
+── the image CDN refuses server-side download
+  ok  the run completes rather than throwing
+  ok  creatives found is still reported even though none downloaded
+
+── image proxy
+  ok  a real creative URL proxies through
+  ok  the proxy refuses an arbitrary external host
+  ok  the proxy refuses a loopback address
+  ok  the proxy refuses cloud metadata
+  ok  the proxy refuses a file URL
+  ok  the proxy refuses plain http on an allowed host
+  ok  the proxy refuses a missing url
+
+── unknown identifiers
+  ok  an unknown run id 404s with a reason
+  ok  a traversal-shaped run id does not read the filesystem
+
+── rate-page fetch refuses to read this machine
+  ok  the rate-page fetch refuses a loopback address
+  ok  the rate-page fetch refuses loopback by name
+  ok  the rate-page fetch refuses IPv6 loopback
+  ok  the rate-page fetch refuses cloud metadata by address
+  ok  the rate-page fetch refuses cloud metadata by name
+  ok  the rate-page fetch refuses an RFC1918 address
+  ok  the rate-page fetch refuses another RFC1918 range
+  ok  the rate-page fetch refuses a home-network address
+  ok  the rate-page fetch refuses an IPv6 unique-local address
+  ok  the rate-page fetch refuses an IPv6 link-local address
+  ok  the rate-page fetch refuses an IPv4-mapped loopback
+  ok  the rate-page fetch refuses plain http
+  ok  the rate-page fetch refuses a file URL
+  ok  the rate-page fetch refuses a .internal hostname
+  ok  the rate-page fetch refuses nothing at all
+  ok  a public https page is permitted
+  ok  a hostname that resolves into a private range is refused
+  ok  one private answer among public ones is enough to refuse
+  ok  a name that will not resolve is refused, not attempted
+  ok  a blocked page comes back as a reason beside its domain, never as rates
+
+── a run that could not be written says so
+  ok  the capture itself still completes — persistence is not the run
+  ok  the payload reports the run as not persisted
+  ok  and it really is not on disk — the flag is not decoration
+  ok  a normal run still reports itself as persisted
+
+── a half-written run file is never left on disk
+  ok  the save leaves no .tmp files behind it
+  ok  the run file on disk is complete JSON, not a truncation
+
+── health checks whether anything can actually be stored
+  ok  a working install reports its storage, writable, with free space
+  ok  an unwritable data directory is reported, not painted green
+  ok  and health itself stops claiming to be ok
+  ok  the keys are still reported truthfully alongside it
+
+── no more model calls in flight than the process allows
+  ok  the run records the ceiling it was under
+  ok  and the peak that was actually reached never exceeded it
+  ok  the capture still completed under the tighter ceiling
+  ok  the default ceiling is 8 and is honoured
+
+── one creative can be re-read without retiring the whole cache
+  ok  the capture cached a transcription for every creative it read
+  ok  re-reading one creative forgets exactly that creative
+  ok  and every other transcription is untouched
+  ok  the evidence bundle is NOT rewritten — that archive answers disputes
+  ok  asking twice is not an error — it is the state that was requested
+  ok  a creative id shaped like a path is refused, not walked
+
+61 passed, 0 failed
+
+── pure logic — the tier
+  ok  the two standing nationals are appended without being chosen
+  ok  a national picked by hand is tiered, not duplicated
+  ok  nationals read deeper and cache far longer
+  ok  clustering is advertiser-scoped, so a national cannot absorb a local card
+
+── live server — the wall fills, the local signal survives
+  ok  one chosen competitor becomes four captured advertisers
+  ok  every ad carries its tier, and the client's is its own
+  ok  the payload groups the two tiers separately
+  ok  the nationals are what fill the wall
+  ok  but no local card was absorbed by a national one
+  ok  competitor chips carry the tier so the UI can group them
+
+── live server — nationals are shared, not re-bought
+  ok  a second client reuses the same national capture
+  ok  so only the local competitor and the client cost a request
+  ok  the cost line quotes the nationals it is about to capture
+
+── live server — scope
+  ok  Benchmark captures nationals as a reference tier
+  ok  Benchmark honours the nationals opt-out
+  ok  nationals alone are not a capture
+  ok  a caller can opt out of the tier
+  ok  the cost quote honours the opt-out
+
+── regression — a cached advertiser carries no client framing into its next role
+  ok  run one captured the client on the client tier
+  ok  the second run really did replay the cached capture
+  ok  NO CLIENT FRAMING SURVIVED the replay
+  ok  and it is counted as a competitor, not shown on the client's wall
+  ok  the new client is the one this run was started for
+
+23 passed, 0 failed
+
+STAGE 1 — the bug that started this: one ad, three facts
+  ok  the APY in the description survives extraction
+  ok  the bonus in the headline survives alongside it
+  ok  one ad holds BOTH figures — the singular-offer bug is gone
+  ok  a claim read from a sitelink survives
+  ok  verbatim strings are never normalized away
+  ok  a fact outside the product profile is kept as evidence, not counted
+  ok  a claim outside the vocabulary lands in unclassified, not the nearest match
+
+STAGE 2 — direction and comparability
+  ok  direction comes from the metric, not the product
+  ok  a credit card has metrics pointing opposite ways at once
+  ok  same qualifiers -> comparable
+  ok  different CD terms -> refused, with a stated reason
+  ok  the balance-cap trap is refused, not ranked
+  ok  neither side printing a qualifier still compares
+
+STAGE 3 — Han's worked example, end to end
+  ok  the CEO's example produces the CEO's sentence
+  ok  the report line is scoped, neutral in voice, and names its denominator
+  ok  every finding declares its unit of analysis
+
+STAGE 4 — the five findings that define done
+  ok  1. bonus gap — 4 of 5 competitors advertise a bonus, the client does not
+  ok  2. rate position — the client leads on APY
+  ok  3. offer combination — competitors stack rate and bonus, the client does not
+  ok  4. message gap — a majority mention no monthly fee, the client does not
+  ok  5. message advantage — only the client mentions early direct deposit
+  ok  every finding can point at the ads that created it
+  ok  the board never pads to a target count
+  ok  the offer snapshot carries only this product's metrics
+
+STAGE 5 — the guards
+  ok  zero client ads suppresses every client-gap finding
+  ok  an unreadable competitor is excluded from the denominator, not counted as a 'no'
+  ok  below three readable competitors, ratio language is replaced by names
+  ok  a newly added competitor cannot manufacture a 'newly observed' card
+  ok  a real change against a stable competitor IS reported
+  ok  unclassified selling points are surfaced so profiles can be improved
+
+STAGE 6 — the scoreboard, the reference tier, the BaZing case
+  ok  every shown finding lands in exactly one of the three boards
+  ok  the client's wins and losses are both present
+  ok  a national never enters a denominator
+  ok  a national never appears inside a finding headline
+  ok  the national is still visible, in its own labelled block
+  ok  a BaZing add-on price is never ranked against an account fee
+  ok  the $5.99 / 'No Fee' pair is raised as a question, never as a contradiction
+  ok  no headline says 'all 1 comparable competitor'
+  ok  named gap findings agree with their verb
+  ok  evidence counts creatives, not facts
+
+STAGE 6 — figures the tool must refuse to read
+  ok  a clipped figure never becomes a brand's advertised position
+  ok  a clipped figure is not counted in a gap denominator
+  ok  the clipped reading survives as evidence, flagged as cut off
+  ok  an unclipped figure carrying its unit is unaffected
+  ok  an add-on price is never the brand's monthly fee
+  ok  no card asserts a cost the client's own ads contradict
+  ok  a national never enters the competitor set version
+  ok  an extractor improvement is not reported as a market change
+
+STAGE 8 — what the set is competing on
+  ok  the set read names the contested axis with its denominator
+  ok  no observation claims performance, only advertising
+  ok  every observation points at the ads that produced it
+  ok  a national never enters the counted population
+  ok  below three readable brands the set has no shape
+
+STAGE 9 — weight, and the one sentence at the top
+  ok  a lone COMPETITOR's tactic is not weighted like a shared pattern
+  ok  the client being the only one doing something is never demoted
+  ok  no finding in the lead column is ever filed as a single advertiser's tactic
+  ok  the client's stance on the headline rate is always primary
+  ok  the client's own inconsistency is internal, never a competitor win
+  ok  the primary read states where the client stands, with its denominator
+  ok  the read separates a shared pattern from a single advertiser's tactic
+  ok  the read never recommends anything
+  ok  the read never claims a difference caused performance
+  ok  the read never calls the product weak — only the advertising
+  ok  the read states what the capture cannot establish
+  ok  the framing says this is read after delivery, not instead of it
+  ok  a discount off a rate is never read as the rate
+  ok  a product page URL is detected, plural or singular
+  ok  an advertiser's own name is never a message strategy
+  ok  one offer mechanic produces one claim, not two
+  ok  an amount you can borrow is never a cash bonus
+  ok  financing availability is its own mechanic, not a down payment
+  ok  no two offer mechanics are ever ranked against each other
+  ok  participation is stated before any ratio is read
+  ok  an advertiser with nothing on this product is named once, not tabled
+  ok  local and national conclusions never merge into one claim
+  ok  every finding carries a stable id its evidence can be cited by
+  ok  month-over-month change is surfaced in the read when it exists
+  ok  below three readable competitors there is no read at all
+
+STAGE 7 — the board reads at a glance
+  ok  every finding declares the population it was counted over
+  ok  a regional denominator never grows past the local set
+  ok  a national finding names its population and carries its caveat
+  ok  every advertiser in the summary is clickable, figures or not
+  ok  every finding carries a short subject chip
+  ok  a metric finding's chip matches its snapshot column header
+  ok  an absent cell states an observation, never a product fact
+
+STAGE 10 — grounding: a figure only counts if the ad printed it
+  ok  a figure the ad text contains is grounded and counts
+  ok  a figure that is nowhere in the ad text is kept, marked, and never counted
+  ok  a figure grounded only in a DIFFERENT ad of the same brand does not count
+  ok  a claim whose quote is not in the ad is never counted against the brand
+  ok  a clipped figure is still recognised as present, and refused for being clipped
+  ok  spacing, curly quotes and unicode never cost a real figure its grounding
+  ok  a display creative's offer figure is grounded against its own transcription
+
+STAGE 11 — the two population rules, swept over the whole board
+  ok  H4/H5 — no finding's denominator counts an unreadable competitor or a national
+  ok  H4/H5 — no finding's SENTENCE quotes a population bigger than the readable local set
+  ok  H4/H5 — the set shape counts over readable locals only
+  ok  H4/H5 — the primary read counts over readable locals only
+  ok  H4/H5 — a sole-advertiser lead is never written as a ranked win
+  ok  H4/H5 — an unreadable competitor is named as unread, never as a 'no'
+  ok  H5 — the nationals are on the page, in their own block, never in the local one
+  ok  H5 — a national's $900 never becomes the set's strongest local bonus
+  ok  H4 — coverage names how many competitors could not be read
+
+STAGE 12 — adversarial input, and the table agreeing with the board
+  ok  zero ads for every competitor — the board is built rather than thrown
+  ok  zero ads for every competitor — nothing renders undefined, NaN or [object Object]
+  ok  zero ads for every competitor — no sentence asserts a product fact
+  ok  zero ads for every competitor — H3: every table figure equals the board's figure for that brand and metric
+  ok  zero ads for every competitor — every finding's evidence resolves to an ad in this set
+  ok  exactly one ad in the whole set — the board is built rather than thrown
+  ok  exactly one ad in the whole set — nothing renders undefined, NaN or [object Object]
+  ok  exactly one ad in the whole set — no sentence asserts a product fact
+  ok  exactly one ad in the whole set — H3: every table figure equals the board's figure for that brand and metric
+  ok  exactly one ad in the whole set — every finding's evidence resolves to an ad in this set
+  ok  duplicate creative ids across two advertisers — the board is built rather than thrown
+  ok  duplicate creative ids across two advertisers — nothing renders undefined, NaN or [object Object]
+  ok  duplicate creative ids across two advertisers — no sentence asserts a product fact
+  ok  duplicate creative ids across two advertisers — H3: every table figure equals the board's figure for that brand and metric
+  ok  duplicate creative ids across two advertisers — every finding's evidence resolves to an ad in this set
+  ok  no headline at all, and a 130-character one — the board is built rather than thrown
+  ok  no headline at all, and a 130-character one — nothing renders undefined, NaN or [object Object]
+  ok  no headline at all, and a 130-character one — no sentence asserts a product fact
+  ok  no headline at all, and a 130-character one — H3: every table figure equals the board's figure for that brand and metric
+  ok  no headline at all, and a 130-character one — every finding's evidence resolves to an ad in this set
+  ok  unicode and RTL copy — the board is built rather than thrown
+  ok  unicode and RTL copy — nothing renders undefined, NaN or [object Object]
+  ok  unicode and RTL copy — no sentence asserts a product fact
+  ok  unicode and RTL copy — H3: every table figure equals the board's figure for that brand and metric
+  ok  unicode and RTL copy — every finding's evidence resolves to an ad in this set
+  ok  an absurd figure — the board is built rather than thrown
+  ok  an absurd figure — nothing renders undefined, NaN or [object Object]
+  ok  an absurd figure — no sentence asserts a product fact
+  ok  an absurd figure — H3: every table figure equals the board's figure for that brand and metric
+  ok  an absurd figure — every finding's evidence resolves to an ad in this set
+
+131 passed, 0 failed
+
+  ok   CORPUS_ADDON_PRICE
+  ok   CORPUS_ADJECTIVE_AS_FIGURE
+  ok   CORPUS_CHROME_NOT_AN_AD
+  ok   CORPUS_CLIPPED_FIGURE
+  ok   CORPUS_CROSS_PRODUCT_FIGURE
+  ok   CORPUS_FINANCING_PERCENT
+  ok   CORPUS_GENERIC_AD
+  ok   CORPUS_INSTITUTION_IDENTITY
+  ok   CORPUS_LOAN_AMOUNT
+  ok   CORPUS_MULTI_PRODUCT
+  ok   CORPUS_ONE_MECHANIC_TWO_NAMES
+  ok   CORPUS_RATE_DISCOUNT
+  ok   CORPUS_TWO_OFFERS_ONE_AD
+  ok   CORPUS_UNGROUNDED_FIGURE
+
+  14/14 entries clean · 142/142 fields correct
+  (gate pass — no model was called, nothing was spent)
+
+EXIT_CODE=0

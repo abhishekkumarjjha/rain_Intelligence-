@@ -1,0 +1,35 @@
+# F-014 BEFORE — the wording, and the evidence against it.
+
+$ grep -rn "display" public/index.html public/app.js lib/sources.js | head
+public/index.html:93   <div class="mc-source">Google Display</div>
+public/index.html:96   <p>Real display creatives from competitors, grouped by idea...
+public/index.html:123  Wall is Google display, Competitive Intelligence is Google search
+public/index.html:128  <option value="google_display">Google display</option>
+public/index.html:153  A fixed national ceiling added to every display capture...
+public/app.js:667      const SRC_LABEL = { google_display: "Google display", ... }
+public/app.js:1036     ...most display banners carry no product signal at all...
+public/app.js:1111     ...local institutions often run very little display.
+public/app.js:1801     <b>No display creative was captured for ...
+lib/sources.js:22      google_display: "Google display",
+lib/channel-shape.js:102  ...an advertiser with few display creatives may still be running each widely.
+lib/channel-shape.js:179  ...neither national advertiser had a ${product} display creative listed...
+README.md:28           Captures **Google display** (`creative_format=image`).
+
+# THE EVIDENCE. SerpApi's Ads Transparency Center API documents creative_format
+# as a filter on the TYPE OF CREATIVE: "Available options: text - Text,
+# image - Image, video - Video", described as "Ads that primarily contain text",
+# "Ads using visuals", "Video ads". Nothing about a delivery network.
+#
+# And this repo already knew the other half — lib/atc-provider.js:9-13:
+#
+#   //   2. `platform` is OMITTED for image/video. There is no DISPLAY value in the
+#   //      provider's platform enum (only PLAY/MAPS/SEARCH/SHOPPING/YOUTUBE), so
+#   //      pinning platform=SEARCH while asking for image creatives asks for
+#   //      something that barely exists.
+#
+# Google's Transparency Center carries image creatives that ran on Discover, in
+# Gmail, as YouTube companions and on the Display Network, and the response does
+# not distinguish them. "Display ads" was therefore a claim about a delivery
+# network built out of a filter on artwork type.
+#
+# See bughunt/logs/03-F-014-after.txt for what changed.
