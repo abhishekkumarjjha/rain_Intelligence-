@@ -10,6 +10,7 @@
 // =============================================================================
 
 import { check, section, summary, eq, ok, startServer } from "./harness.js";
+import { rmSync } from "node:fs";
 import { withNationals, isNational, captureOptionsFor, NATIONAL_TTL_DAYS, NATIONAL_READ_CAP } from "../lib/national-tier.js";
 import { clusterAds } from "../lib/analyze.js";
 
@@ -243,6 +244,73 @@ try {
   }
 } finally {
   await S.stop();
+}
+
+// ---------------------------------------------------------------------------
+// H16 — ONE DOMAIN, TWO ROLES, ONE CACHE ENTRY.
+//
+// The capture cache is keyed on source + domain + days and deliberately NOT on
+// the client, which is the whole saving: one La Capitol capture serves every
+// run that mentions La Capitol. That also means the same entry is replayed once
+// as THE CLIENT and once as A COMPETITOR, and if any client framing were stored
+// in it, the second run would inherit it — a competitor rendered on the client's
+// own tier, inside the client wall, and out of every competitor denominator.
+// ---------------------------------------------------------------------------
+section("regression — a cached advertiser carries no client framing into its next role");
+{
+  const S = await startServer({}, { keepData: true });
+  let dataDir = S.dataDir;
+  try {
+    // RUN ONE: lacapfcu.org is the CLIENT.
+    const { body: first } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    const runA = await S.awaitRun(first.runId);
+    await check("run one captured the client on the client tier", () => {
+      const own = runA.ads.filter((a) => a.institution === "lacapfcu.org");
+      ok(own.length > 0, "no client ads captured");
+      ok(own.every((a) => a.isClient === true), "the client is not flagged as the client");
+      ok(own.every((a) => a.tier === "client"), "the client is not on the client tier");
+    });
+
+    // RUN TWO: the SAME domain, now a COMPETITOR of somebody else. Served from
+    // the capture cache the first run wrote.
+    const { body: second } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "efcufinancial.org", clientLabel: "EFCU Financial",
+      product: "checking", days: 30,
+      competitors: [{ label: "La Capitol", domain: "lacapfcu.org" }],
+    });
+    const runB = await S.awaitRun(second.runId);
+
+    await check("the second run really did replay the cached capture", () =>
+      ok(runB.progress["lacapfcu.org"]?.fromCaptureCache,
+        "not a cache hit, so this proves nothing — check the cache key"));
+
+    await check("NO CLIENT FRAMING SURVIVED the replay", () => {
+      const asCompetitor = runB.ads.filter((a) => a.institution === "lacapfcu.org");
+      ok(asCompetitor.length > 0, "the cached advertiser produced no ads in the second run");
+      ok(asCompetitor.every((a) => a.isClient === false),
+        "an advertiser cached as the client came back flagged as the client of a different run");
+      ok(asCompetitor.every((a) => a.tier !== "client"),
+        "an advertiser cached as the client came back on the client tier");
+    });
+
+    await check("and it is counted as a competitor, not shown on the client's wall", () => {
+      const wallDomains = new Set((runB.creative?.clusters || []).map((c) => c.institution));
+      ok(wallDomains.has("lacapfcu.org"), "the cached competitor is missing from the wall");
+      const clientOwn = (runB.ads || []).filter((a) => a.isClient).map((a) => a.institution);
+      ok(clientOwn.every((d) => d === "efcufinancial.org"),
+        `the client population of run two contains ${JSON.stringify([...new Set(clientOwn)])}`);
+    });
+
+    await check("the new client is the one this run was started for", () =>
+      eq(runB.client.domain, "efcufinancial.org", "client domain"));
+  } finally {
+    S.stop();
+    try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
 }
 
 summary();
