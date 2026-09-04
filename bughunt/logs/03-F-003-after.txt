@@ -1,0 +1,33 @@
+# F-003 AFTER
+
+target            : http://127.0.0.1:33781/rates
+loopback hits     : 0
+result.ok         : false
+result.reason     : not_https
+text was read     : no
+(node:4212) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+── rate-page fetch refuses to read this machine
+  ok  the rate-page fetch refuses a loopback address
+  ok  the rate-page fetch refuses loopback by name
+  ok  the rate-page fetch refuses IPv6 loopback
+  ok  the rate-page fetch refuses cloud metadata by address
+  ok  the rate-page fetch refuses cloud metadata by name
+  ok  the rate-page fetch refuses an RFC1918 address
+  ok  the rate-page fetch refuses another RFC1918 range
+  ok  the rate-page fetch refuses a home-network address
+  ok  the rate-page fetch refuses an IPv6 unique-local address
+  ok  the rate-page fetch refuses an IPv6 link-local address
+  ok  the rate-page fetch refuses an IPv4-mapped loopback
+  ok  the rate-page fetch refuses plain http
+  ok  the rate-page fetch refuses a file URL
+  ok  the rate-page fetch refuses a .internal hostname
+  ok  the rate-page fetch refuses nothing at all
+  ok  a public https page is permitted
+  ok  a hostname that resolves into a private range is refused
+  ok  one private answer among public ones is enough to refuse
+  ok  a name that will not resolve is refused, not attempted
+  ok  a blocked page comes back as a reason beside its domain, never as rates
+
+41 passed, 0 failed
