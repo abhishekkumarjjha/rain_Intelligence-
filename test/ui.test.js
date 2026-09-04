@@ -175,6 +175,23 @@ try {
       ok(/landing page|product page/i.test(await page.locator("#urlHint").innerText()), "no landing-page guidance");
     });
 
+    // ONE WAY IN AT A TIME. Both paths open at once meant two live Analyze
+    // buttons and two product scopes — Checking picked above, /auto-loan pasted
+    // below — with nothing on screen saying which one the capture would use.
+    await check("opening the URL path closes the client picker", async () => {
+      eq(await page.locator("#pickBar").isVisible(), false, "the client picker stayed open beside the URL bar");
+      eq(await page.locator("#goBtn").isVisible(), false, "a second live Analyze button is still reachable");
+      ok(await page.locator("#pickerToggle").isVisible(), "the URL path has no way back");
+    });
+
+    await check("the way back restores the picker and drops the URL", async () => {
+      await page.fill("#urlInput", "https://www.lacapfcu.org/auto-loan");
+      await page.click("#pickerToggle");
+      ok(await page.locator("#clientInput").isVisible(), "the picker did not come back");
+      eq(await page.locator("#urlInput").isVisible(), false, "the URL bar stayed open behind the picker");
+      eq(await page.inputValue("#urlInput"), "", "a second product scope survived the switch");
+    });
+
     await check("the landing screen carries nothing it was not asked", async () => {
       eq(await page.locator("#quickClients").count(), 0, "client shortcut chips still present");
       // The directory size and the read cap were facts about the tool, not

@@ -115,16 +115,22 @@ try {
       ],
     });
     ok(started.ok, "capture should start");
-    await check("creative mode does NOT capture the client", () => {
+    // THE WALL CAPTURES THE CLIENT TOO, and this reverses an earlier rule.
+    // The Wall was "what competitors made", so the client was left out — but
+    // "competitors lead with a bonus" is not a finding until you know whether
+    // the client does, and nothing on that screen could answer it.
+    await check("creative mode captures the client as its own population", () => {
       const domains = started.targets.map((t) => t.domain);
-      ok(!domains.includes("lacapfcu.org"), "the client is not a capture target in creative mode");
-      ok(started.targets.every((t) => !t.isClient), "no target is flagged as the client");
+      ok(domains.includes("lacapfcu.org"), "the client must be a capture target on the Wall");
+      const self = started.targets.filter((t) => t.isClient);
+      eq(self.length, 1, "exactly one target is the client");
+      eq(self[0].domain, "lacapfcu.org", "and it is the client's domain");
     });
     await check("the standing nationals are appended without being selected", () => {
       const domains = started.targets.map((t) => t.domain);
       ok(domains.includes("chase.com"), "Chase is always present");
       ok(domains.includes("capitalone.com"), "Capital One is always present");
-      eq(started.targets.length, 4, "2 chosen + 2 standing nationals");
+      eq(started.targets.length, 5, "the client + 2 chosen + 2 standing nationals");
     });
 
     creativeRun = await S.awaitRun(started.runId);
@@ -136,6 +142,30 @@ try {
       eq(p["neighborsfcu.org"].status, "done", "neighborsfcu status");
       eq(p["campusfederal.org"].read, 4, "campusfederal ads read");
       eq(p["neighborsfcu.org"].read, 3, "neighborsfcu ads read");
+    });
+
+    // THE CLIENT IS A SEPARATE POPULATION. It is captured so the wall can be
+    // read against something, and it is kept out of every figure the wall
+    // prints — the funnel, the sampling note, the tiers, the chips. Merging it
+    // in would inflate the local set with the client's own creative and turn
+    // "no local creatives were read" into a false negative.
+    await check("the client's own creative comes back as its own block", () => {
+      ok(creativeRun.client, "payload.client missing");
+      ok(Number.isFinite(creativeRun.client.captured), "captured count missing");
+      ok(Array.isArray(creativeRun.client.ads), "the client's ads must be reachable");
+      for (const a of creativeRun.client.ads) ok(a.isClient, "a competitor ad leaked into the client block");
+    });
+
+    await check("no client creative is counted anywhere on the wall", () => {
+      const c = creativeRun.creative;
+      ok(!c.clusters.some((x) => x.institution === "lacapfcu.org"), "a client card reached the wall");
+      ok(!c.byCompetitor.some((x) => x.domain === "lacapfcu.org"), "the client became a competitor chip");
+      ok(!c.tiers.local.domains.includes("lacapfcu.org"), "the client entered the local tier");
+      ok(!c.tiers.national.domains.includes("lacapfcu.org"), "the client entered the national tier");
+      // The funnel reconciles against the wall, so the client's listings must
+      // not appear in "listed by Google" while its ads are absent from "read".
+      const read = c.funnel.steps.find((x) => x.key === "read");
+      eq(read.value, c.capturedCount + (c.unreadable || 0), "the funnel must count the wall, not the client");
     });
 
     await check("the payload carries a creative block the wall can render", () => {
@@ -744,6 +774,11 @@ section("key insights — themes describe, they never advise");
       eq(x.supportType === "within_advertiser", x.advertiserCount === 1,
         `${x.name}: support type disagrees with its own advertiser count`);
       ok(["regional", "national", "mixed", "unknown"].includes(x.scope), `${x.name} has no scope`);
+      // The client is a THIRD population, never a cohort of the market: a theme
+      // carried by the client and one national must not read as "mixed", which
+      // on this panel means regional-and-national.
+      eq(typeof x.clientToo, "boolean", `${x.name} does not say whether the client advertises it too`);
+      ok(!x.clientOnly || x.scope === "unknown", `${x.name}: a client-only theme cannot carry a market scope`);
     }
   });
 
@@ -755,6 +790,114 @@ section("key insights — themes describe, they never advise");
       ok(x.familyCount <= x.creativeIds.length,
         `${x.name}: more designs than creatives, which cannot happen`);
     }
+  });
+
+  // THE PANEL IS NEVER AN ERROR, and it always says which scope it got.
+  //
+  // A product too thin to generalise over is an ordinary outcome of reading a
+  // small wall — it used to arrive as ok:false and render as a red bar across
+  // the results, the same treatment as a failed capture. It now widens to a
+  // general read of the wall and LABELS ITSELF as one; the label is the whole
+  // safety property, because a mixed-product read under a product heading is a
+  // false claim about that product.
+  await check("a thin product widens to a general read, and says so", async () => {
+    const { body: thin } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "heloc", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    const thinRun = await S.awaitRun(thin.runId);
+    const { body } = await S.post(`/api/run/${thinRun.id}/themes`);
+
+    eq(body.ok, true, "a thin product must not be reported as a failure");
+    if (body.themes) {
+      eq(body.readScope, "all_products", "readScope");
+      eq(body.themes.readScope, "all_products", "the scope must travel ON the saved themes");
+      ok(body.productDesigns < body.needed, `fell back with ${body.productDesigns} on-product designs`);
+      // The framing must not name a product the read did not confine itself to.
+      ok(!new RegExp(thinRun.productLabel, "i").test(body.themes.framing),
+        `general read framed as a product read: ${body.themes.framing}`);
+    } else {
+      // Too little on every product is also not an error — just nothing to show.
+      eq(body.reason, "too_little_captured", "reason");
+      ok(typeof body.allDesigns === "number", "the empty state must carry the count it was decided on");
+    }
+  });
+
+  await check("a wall with nothing to say is an empty answer, never an error", async () => {
+    const { body: empty } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30, includeNationals: false,
+      competitors: [{ label: "Silent Bank", domain: "silent-bank.test" }],
+    });
+    const emptyRun = await S.awaitRun(empty.runId);
+    const { status, body } = await S.post(`/api/run/${emptyRun.id}/themes`);
+    eq(status, 200, "status");
+    eq(body.ok, true, "an unreadable wall is a result, not a failure");
+    eq(body.themes, null, "themes");
+    eq(body.reason, "too_little_captured", "reason");
+  });
+
+  // THE COUNTED OBSERVATIONS OUTLIVE THE MODEL. A themes pass that finds
+  // nothing must not take the arithmetic down with it — "every design captured
+  // on this product is from a national advertiser" needs no model at all, and
+  // throwing it away is how a wall with a real reading in it rendered as
+  // "No insights available".
+  await check("the counted observations come back whatever the model does", async () => {
+    const { body } = await S.post(`/api/run/${wall.id}/themes`, { force: true });
+    ok(body.ok, `themes failed: ${body.reason}`);
+    ok("counted" in body, "the counted block must be present in every answer");
+    // And they are carried ON the themes, so a re-open renders them too.
+    if (body.themes) {
+      ok("cohort" in body.themes && "channel" in body.themes,
+        "the counted lines must be saved with the themes, not recomputed on open");
+    }
+  });
+
+  await check("citations are short labels, never the provider's raw ids", async () => {
+    // A model asked to echo "CR01145745112471437313" back as evidence will
+    // eventually mistype one, and a mistyped citation is dropped as invented —
+    // silently, and if it happens across the answer the whole panel goes empty.
+    // Every surviving finding here resolves to a real creative, which is only
+    // possible if the label mapping is done in code.
+    const { body } = await S.post(`/api/run/${wall.id}/themes`, { force: true });
+    const ids = new Set((wall.ads || []).map((a) => a.creativeId));
+    for (const x of [...body.themes.messageThemes, ...(body.themes.executionPatterns || [])]) {
+      for (const id of x.creativeIds) ok(ids.has(id), `${x.name} cited ${id}, which is not in this run`);
+    }
+  });
+
+  // TWO SCOPES, ASKED FOR BY NAME. The panel shows the general read of the wall
+  // and the read for the product chosen on the landing page, side by side —
+  // which is only possible if a scope can be requested rather than inferred.
+  await check("a scope can be asked for by name, and says which it answered", async () => {
+    const { body: all } = await S.post(`/api/run/${wall.id}/themes`, { scope: "all" });
+    eq(all.ok, true, "ok");
+    eq(all.scope, "all", "scope");
+    eq(all.scopeLabel, "Every product captured", "scopeLabel");
+    if (all.themes) {
+      eq(all.themes.readScope, "all_products", "readScope");
+      // A general read must never be framed as a product read.
+      ok(!/checking/i.test(all.themes.framing), `general read framed as a product: ${all.themes.framing}`);
+    }
+
+    const { body: one } = await S.post(`/api/run/${wall.id}/themes`, { scope: "checking" });
+    eq(one.scope, "checking", "scope");
+    eq(one.scopeLabel, "Checking", "scopeLabel");
+    if (one.themes) ok(/checking/i.test(one.themes.framing), "a product read must name its product");
+  });
+
+  await check("each scope is cached separately, so a re-open is never re-read", async () => {
+    const { body } = await S.post(`/api/run/${wall.id}/themes`, { scope: "all" });
+    eq(body.cached, true, "the second ask for a scope must come from the run");
+    const { body: fresh } = await S.post(`/api/run/${wall.id}/themes`, { scope: "credit-card" });
+    ok(!fresh.cached, "a scope never read is not cached");
+    eq(fresh.scope, "credit-card", "scope");
+  });
+
+  await check("an unknown scope falls back to the run's product, never to everything", async () => {
+    const { body } = await S.post(`/api/run/${wall.id}/themes`, { scope: "not-a-product" });
+    eq(body.scope, "checking", "an unrecognised scope must not silently widen the read");
   });
 
   await check("themes are refused for Competitive Intelligence", async () => {

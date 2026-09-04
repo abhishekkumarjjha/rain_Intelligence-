@@ -27,8 +27,8 @@ import { fileURLToPath } from "node:url";
 import { capture, hasKey, normDomain, buildDomainLink, MAX_READ_PER_ADVERTISER, DEFAULT_LOOKBACK_DAYS } from "./lib/atc-provider.js";
 import { extractByFormat, readerFor, readerKey } from "./lib/extract.js";
 import { buildBoard } from "./lib/benchmark.js";
-import { readThemes } from "./lib/themes.js";
-import { channelShape } from "./lib/channel-shape.js";
+import { readThemes, usableFamilies, MIN_FAMILIES } from "./lib/themes.js";
+import { channelShape, cohortShape } from "./lib/channel-shape.js";
 import { readRatePages } from "./lib/rate-page.js";
 import {
   putEvidence, getEvidence, putSnapshot, previousSnapshot,
@@ -105,7 +105,10 @@ app.post("/api/cost", (req, res) => {
     const withTier = (mode === "creative" && source === SOURCES.GOOGLE_DISPLAY && body.includeNationals !== false)
       ? withNationals(picked).map((c) => ({ ...c, ttlDays: isNational(c.domain) ? NATIONAL_TTL_DAYS : undefined }))
       : picked.map((c) => ({ ...c, tier: "local" }));
-    if (mode === "benchmark" && normDomain(body.clientDomain)) {
+    // BOTH halves capture the client now, so both quote it. A cost line that
+    // omits an advertiser the capture is about to fetch is exactly the surprise
+    // this endpoint exists to prevent.
+    if (normDomain(body.clientDomain)) {
       return [{ domain: normDomain(body.clientDomain), label: body.clientLabel || body.clientDomain, tier: "local" }, ...withTier];
     }
     return withTier;
@@ -303,13 +306,24 @@ app.post("/api/capture", (req, res) => {
       status: "running",
       client: { label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain },
       competitors,
-      // BENCHMARK captures the client's own ads through the identical path. That
-      // is what makes it ads vs ads rather than ads vs a live rate page — the
-      // comparison a consumer actually makes when they choose which link to click.
-      targets: mode === "benchmark"
-        ? [{ label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain, isClient: true },
-           ...competitors.map((c) => ({ ...c, isClient: false }))]
-        : competitors.map((c) => ({ ...c, isClient: false })),
+      // BOTH HALVES capture the client's own ads through the identical path.
+      //
+      // Benchmark always did: it is what makes it ads vs ads rather than ads vs
+      // a live rate page, the comparison a consumer actually makes when they
+      // choose which link to click. The Wall did not, on the grounds that it
+      // showed what competitors MADE — and that reading does not survive
+      // contact with the job. You cannot say "competitors lead with a bonus"
+      // and mean anything by it without knowing whether the client does too,
+      // and a strategist looking at a wall of competitor creative has no way to
+      // answer that from the screen.
+      //
+      // The client is captured, tiered as `client`, and kept OUT of every
+      // competitor count, chip, denominator and funnel step. It is a third
+      // population beside regional and national, never a member of either.
+      targets: [
+        { label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain, isClient: true, tier: "client" },
+        ...competitors.map((c) => ({ ...c, isClient: false })),
+      ],
       progress: {},
       ads: [],
       messages: [],
@@ -538,7 +552,13 @@ async function executeRun(run) {
     targetsOk: Object.values(run.progress).filter((p) => p.status === "done").length,
     targetsTotal: run.targets.length,
   };
-  run.sampling = samplingNote(run.runs);
+  // THE WALL'S NUMBERS DESCRIBE THE COMPETITOR SET. The client is captured
+  // beside it, not inside it, so its listing counts never enter the sampling
+  // note or the funnel — "98 of about 696 listed" has to reconcile against the
+  // creatives actually on the wall.
+  run.sampling = samplingNote(run.mode === "creative"
+    ? run.runs.filter((r) => r.domain !== run.client?.domain)
+    : run.runs);
 
   // ---- what changed since the last comparable capture ----------------------
   // The provider returns a rotating SAMPLE, not an inventory: the same query
@@ -708,6 +728,28 @@ app.get("/api/run/:id", (req, res) => {
     const unreadable = competitorAds.length - showable.length;
     const scopedShowable = scoped.filter(isShowable);
 
+    // THE CLIENT'S OWN WALL, kept as its own block rather than merged in.
+    // Merging would corrupt every count on the screen — the tier totals, the
+    // advertiser chips, the "no local creatives were read" note — and it would
+    // also be the wrong reading: the question is what the client runs AGAINST
+    // this set, which is a comparison between two populations, not one bigger
+    // population.
+    const clientAds = run.ads.filter((a) => a.isClient).filter(isShowable);
+    const clientScoped = filterByProduct(clientAds, run.product);
+
+    payload.client = {
+      ...run.client,
+      captured: clientAds.length,
+      onProduct: clientScoped.length,
+      // Scoped when there is anything in scope, everything otherwise — the same
+      // rule the wall uses, for the same reason: an empty panel behind a button
+      // that says there are ads is worse than a wider one.
+      ads: clientScoped.length ? clientScoped : clientAds,
+      productScoped: clientScoped.length > 0,
+      designs: clusterAds(clientScoped.length ? clientScoped : clientAds).length,
+      status: run.progress?.[run.client.domain] || null,
+    };
+
     payload.creative = {
       productScope: run.product,
       unreadable,
@@ -748,8 +790,15 @@ app.get("/api/run/:id", (req, res) => {
         },
       },
       // Where every creative went, listed -> on-product. See captureFunnel().
-      funnel: captureFunnel(run.runs, competitorAds, scoped.length),
+      funnel: captureFunnel(run.runs.filter((r) => r.domain !== run.client?.domain), competitorAds, scoped.length),
     };
+
+    // Key insights, if this run has already paid for them. They were saved on
+    // the run and then never handed back, so every reopened run read as a run
+    // that had never been analysed: the client refetched, the model was billed
+    // again for an answer already on disk, and the reader waited out a model
+    // call to see a page that was sitting in the file all along.
+    payload.themes = run.themes || null;
   } else {
     // THE BOARD IS THE ANSWER. The table is the audit trail.
     payload.board = boardFor(run);
@@ -909,34 +958,118 @@ app.post("/api/run/:id/themes", async (req, res) => {
   if (run.status !== "done") return res.status(409).json({ ok: false, reason: "run_not_finished" });
   if (run.mode !== "creative") return res.status(400).json({ ok: false, reason: "wrong_mode" });
 
-  try {
-    // Read over what is ON THE WALL — the product-scoped slice the user is
-    // actually looking at — rather than everything captured. Themes named over
-    // ads the reader cannot see would be unverifiable by design.
-    const scoped = filterByProduct(run.ads || [], run.product);
-    const pool = (scoped.length >= 4 ? scoped : (run.ads || [])).filter(isShowable);
+  // ONE SCOPE PER REQUEST, and the scope is named by the caller.
+  //
+  //   "all"        every product captured — the general read of the wall
+  //   "<product>"  that product alone
+  //
+  // The panel asks for the general read AND the run's own product, always, and
+  // for any further product only when someone picks one. There is no silent
+  // widening any more: a thin product says it is thin, and the general read is
+  // already on the same screen to fall back to. A fallback you can see is a
+  // section; one you cannot is a false heading.
+  const requested = String(req.body?.scope || run.product || "all");
+  const scope = requested === "all" || PRODUCT_LABELS[requested] ? requested : run.product;
+  const isAll = scope === "all";
+  const scopeLabel = isAll ? "Every product captured" : PRODUCT_LABELS[scope];
 
-    // CLUSTERED FIRST, and this is the fix rather than a tidy-up. Handed raw
-    // ads, the model saw one design cut into five banner sizes as five
-    // independent confirmations of a theme, so the most heavily resized
-    // creative always looked like the strongest pattern in the set.
-    const themes = await readThemes(clusterAds(pool), run.productLabel);
-    if (!themes) return res.json({ ok: false, reason: "not_enough_creative" });
+  // MIGRATION. Runs read before this endpoint took a scope hold a single
+  // `themes`; it was always the run's own product unless it said otherwise.
+  if (!run.themesByScope) {
+    run.themesByScope = run.themes
+      ? { [run.themes.readScope === "all_products" ? "all" : run.product]: run.themes }
+      : {};
+  }
 
-    // The set-level line is COUNTED, never written. It compares capture records
-    // across channels, which is a fact no display creative contains — so a
-    // model asked for a takeaway here could only have invented one.
-    themes.channel = channelShape({
-      advertisers: (run.competitors || []).map((c) => ({ domain: c.domain, label: c.label, tier: c.tier || "local" })),
-      days: run.days,
+  // Already read, and reading is the one billable act on that screen. The wall
+  // cannot change under a finished run, so the saved answer IS the answer.
+  if (run.themesByScope[scope] && !req.body?.force) {
+    return res.json({ ok: true, scope, scopeLabel, themes: run.themesByScope[scope], cached: true });
+  }
+
+  // The filter chips on the results screen are a VIEW and never reach this
+  // endpoint: clicking an advertiser narrows what is drawn, not what is read.
+  const showable = (run.ads || []).filter((a) => !a.isClient).filter(isShowable);
+  const pool = isAll ? showable : filterByProduct(showable, scope);
+
+  // CLUSTERED FIRST, and this is evidence, not tidying. Handed raw ads, the
+  // model saw one design cut into five banner sizes as five independent
+  // confirmations of a theme, so the most heavily resized creative always
+  // looked like the strongest pattern in the set.
+  const families = clusterAds(pool);
+  const designs = usableFamilies(families).length;
+
+  const counts = {
+    product: scopeLabel, productKey: scope,
+    designs, allDesigns: usableFamilies(clusterAds(showable)).length, needed: MIN_FAMILIES,
+  };
+
+  // THE COUNTED OBSERVATIONS DO NOT DEPEND ON THE MODEL, so they are computed
+  // before it is called and returned whatever it does. A panel that threw these
+  // away because the themes pass came back empty was discarding the most
+  // defensible thing on it.
+  const advertisers = (run.competitors || []).map((c) => ({
+    domain: c.domain, label: c.label, tier: c.tier || "local",
+  }));
+  const clientShowable = (run.ads || []).filter((a) => a.isClient).filter(isShowable);
+  const clientFamilies = clusterAds(isAll ? clientShowable : filterByProduct(clientShowable, scope));
+  const counted = {
+    channel: channelShape({
+      advertisers, days: run.days,
       peek: (q) => captureCache.peek({ ...q, ttlDays: Number.MAX_SAFE_INTEGER }),
-    });
-    run.themes = themes;
+    }),
+    cohort: cohortShape({
+      families: usableFamilies(families), advertisers, days: run.days,
+      productLabel: isAll ? "" : scopeLabel,
+      client: { label: run.client?.label, designs: usableFamilies(clientFamilies).length },
+    }),
+  };
+
+  // NOT AN ERROR, AND NOT RED. A product too thin to generalise over is a fact
+  // about what Google listed, and the wall below it is unaffected. Decided
+  // before the model call, so it also costs nothing.
+  if (designs < MIN_FAMILIES) {
+    return res.json({ ok: true, scope, scopeLabel, themes: null, reason: "too_little_captured", counted, ...counts });
+  }
+
+  try {
+    // The framing line names the product only when a product is what was read.
+    const { themes, audit } = await readThemes(
+      [...families, ...clientFamilies], isAll ? "" : scopeLabel);
+
+    // Reached, answered, and nothing it proposed held up. Not an error — and
+    // not the end of the panel either: the counted observations go back
+    // regardless, and the audit says whether the set was quiet or the answer
+    // was refused, which look identical from outside.
+    if (!themes) {
+      return res.json({ ok: true, scope, scopeLabel, themes: null, reason: "nothing_recurring", audit, counted, ...counts });
+    }
+
+    // Carried ON the themes so a re-open — served from the saved copy, never
+    // re-read — labels itself exactly as the first open did.
+    themes.readScope = isAll ? "all_products" : "product";
+    themes.scopeKey = scope;
+    themes.scopeLabel = scopeLabel;
+    themes.readOver = counts;
+    themes.channel = counted.channel;
+    themes.cohort = counted.cohort;
+    themes.audit = audit;
+
+    run.themesByScope[scope] = themes;
+    // Back-compat: anything still reading `run.themes` gets the run's own
+    // product, which is what that field always meant.
+    if (scope === run.product || !run.themes) run.themes = themes;
     ACTIVE.set(run.id, run);
     saveRun(run);
-    res.json({ ok: true, themes });
+    res.json({ ok: true, scope, scopeLabel, themes, counted, ...counts });
   } catch (e) {
-    res.status(500).json({ ok: false, reason: e?.code === "NO_API_KEY" ? "anthropic_not_configured" : "generation_failed" });
+    const reason = e?.code === "NO_API_KEY" ? "anthropic_not_configured"
+      : e?.code === "MODEL_UNAVAILABLE" ? "model_unavailable"
+        : "generation_failed";
+    // The status stays 500 — something really did fail server-side — but the
+    // counts travel with it so the panel can still name the product it was
+    // reading, and say plainly that nothing was spent.
+    res.status(500).json({ ok: false, scope, scopeLabel, reason, counted, ...counts });
   }
 });
 

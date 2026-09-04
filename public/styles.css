@@ -211,6 +211,14 @@ body {
    or it inherits the page's dark one and renders white-on-white. */
 .pickbar select, .pickbar select option { color-scheme: light; }
 .pickbar select:invalid { color: #93A2BF; font-weight: 400; }
+/* ...and the OPTIONS need their own colour, because the native popup inherits
+   the select's. With nothing chosen the control is :invalid and therefore grey,
+   so every product in the open list rendered grey too — the whole list read as
+   disabled until you picked something and normal ever after, which is exactly
+   the inconsistency it looked like. Only the placeholder row is meant to be
+   grey, and it says so here rather than by inheritance. */
+.pickbar select option { color: #0A1226; font-weight: 500; }
+.pickbar select option[value=""] { color: #93A2BF; font-weight: 400; }
 .pickbar .btn.primary:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
 
 /* Suggestions hang off the pill, dark like the rest of the app so the eye
@@ -330,6 +338,10 @@ body {
 .btn.ghost { background: var(--panel); color: var(--ink-2); border-color: var(--line-2); }
 .btn.ghost:hover { color: var(--ink); border-color: var(--blue); }
 .btn.sm { padding: 7px 14px; font-size: 12.5px; }
+/* Held back on purpose, not broken: the button stays clickable so the click can
+   say why nothing happened. */
+.btn.greyed { opacity: .42; cursor: not-allowed; }
+.btn.greyed:hover, .btn.ghost.greyed:hover { color: var(--ink-2); border-color: var(--line-2); }
 
 /* Key insights is the wall's only reading of itself, and it sat in a row of
    three navigation buttons looking exactly like them. Accent + a glow, so the
@@ -648,6 +660,12 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
   position: fixed; inset: 0; background: rgba(0,0,0,.74); backdrop-filter: blur(3px);
   opacity: 0; pointer-events: none; transition: .22s; z-index: 60;
 }
+/* The evidence drawer sits ABOVE the sheet, because that is the order they are
+   opened in: "View 8 ads" is clicked from inside Key insights. Both used to sit
+   at 61, so the sheet — later in the document — painted over the drawer, and
+   the ads the reader asked for opened behind the thing they asked from. */
+#drawerBg { z-index: 70; }
+#drawer { z-index: 71; }
 .drawer-bg.on { opacity: 1; pointer-events: auto; }
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 94vw);
@@ -972,6 +990,11 @@ table.bench td.clientcol { background: rgba(74,222,148,.07); }
 .flabel .natsig { color: var(--accent); border-color: rgba(124,92,224,.45); }
 .flabel .regsig { opacity: .55; }
 .fcard.natscope { border-left-style: dashed; }
+/* The client's own creative appearing inside a finding. Green, because it is
+   the one chip that says something about the client rather than the market —
+   and green is already this page's colour for "this is the client". Never
+   amber: the client also advertising an idea is information, not a caution. */
+.thmeta .clientsig, .flabel .clientsig { color: var(--green); border-color: rgba(45,212,163,.42); }
 .flabel .fsig {
   font-weight: 600; font-size: 9.5px; letter-spacing: .08em;
   padding: 2px 7px; border-radius: 4px; white-space: nowrap;
@@ -1211,6 +1234,46 @@ table.snap .rl .sm { display: block; font-size: 11px; opacity: .45; font-weight:
 .thkeyh { font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.45; }
 .thkeyd { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; margin-top: 7px; }
 .thkeyt { font-size: 11px; color: var(--ink-3); margin-top: 9px; letter-spacing: .02em; }
+
+/* The scope band. Periwinkle, not amber: this is the panel stating what it
+   read, which is emphasis — a general read is not a caution, and a metric label
+   in amber reads as a problem. It sits above the first line because a
+   screenshot of the body alone must not be mistakable for a product summary. */
+.thscope {
+  border: 1px solid var(--line-2); border-left: 3px solid var(--accent);
+  border-radius: var(--r-sm); padding: 12px 15px; margin-bottom: 16px;
+  background: var(--panel-2); font-size: 12.5px; color: var(--ink-2); line-height: 1.6;
+}
+.thscope b { color: var(--ink); font-weight: 700; display: block; margin-bottom: 4px; font-size: 13.5px; }
+
+/* ONE PANEL, SEVERAL SCOPES. Each read gets its own heading because the whole
+   point is that they are different populations — a general read of the wall and
+   a product read are not interchangeable, and the version of this panel that
+   swapped one for the other silently is what made that necessary to state. */
+.thblock { padding-top: 6px; margin-bottom: 26px; }
+.thblock + .thblock { border-top: 1px solid var(--line); padding-top: 22px; }
+.scopehead {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+.scopehead h4 {
+  margin: 0; font-size: 17px; font-weight: 700; color: var(--ink); letter-spacing: -.01em;
+}
+.scopenote { font-size: 11.5px; color: var(--ink-3); }
+
+/* The switcher sits at the FOOT of the panel, after everything already read.
+   At the top it would read as a filter over what is on screen; at the bottom it
+   reads as what it is — a request for one more read. */
+.scopepick {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border-top: 1px solid var(--line); padding-top: 18px; margin-top: 8px;
+}
+.scopepick label { font-size: 12.5px; color: var(--ink-2); font-weight: 600; }
+.scopepick select {
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line-2);
+  border-radius: var(--r-sm); padding: 7px 10px; font-family: var(--font); font-size: 12.5px;
+}
+.scopepick .scopenote { flex: 1 1 220px; }
 
 .thsec { margin-top: 20px; }
 .thsech {

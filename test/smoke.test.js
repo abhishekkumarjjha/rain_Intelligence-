@@ -4,6 +4,7 @@ import { buildListingParams, selectForReading, epochToDate } from "../lib/atc-pr
 import { clusterAds, buildBenchmark, samplingNote, isShowable } from "../lib/analyze.js";
 import { productFromUrl, normalizeProduct } from "../lib/products.js";
 import { buildBoard } from "../lib/benchmark.js";
+import { cohortShape } from "../lib/channel-shape.js";
 
 let n = 0; const t = (name, fn) => { fn(); n++; console.log("  ok  " + name); };
 
@@ -184,5 +185,52 @@ t("real copy is never dropped, and an offer alone is enough", () => {
   assert.equal(isShowable({ headline: "Adventure starts here" }), true);
 });
 
+
+// --- the counted cohort line ----------------------------------------------
+//
+// This exists because a panel said "No insights available" over a wall whose
+// honest reading was in plain sight: every design captured on the product came
+// from a national advertiser and not one regional competitor had one. That is
+// arithmetic, it does not need a model, and it must survive a themes pass that
+// finds nothing.
+const nat = (k) => Array.from({ length: k }, (_, i) => ({ tier: "national", institution: i % 2 ? "chase.com" : "capitalone.com" }));
+const reg = (k) => Array.from({ length: k }, (_, i) => ({ tier: "local", institution: `local${i}.org` }));
+const ADV = [
+  { domain: "brtelco.org", label: "Baton Rouge Telco", tier: "local" },
+  { domain: "neighborsfcu.org", label: "Neighbors", tier: "local" },
+  { domain: "chase.com", label: "J.P. Morgan Chase", tier: "national" },
+];
+
+t("an all-national set is stated as one, with its denominator", () => {
+  const c = cohortShape({ families: nat(14), advertisers: ADV, productLabel: "Checking", days: 30 });
+  assert.ok(c, "no observation was produced for the case that motivated it");
+  assert.match(c.headline, /national/i);
+  assert.match(c.detail, /14 distinct checking display designs/);
+  assert.match(c.detail, /2 regional advertisers/);
+});
+
+t("the cohort line never claims a competitor is absent from the market", () => {
+  const c = cohortShape({ families: nat(9), advertisers: ADV, productLabel: "Credit Card", days: 30 });
+  // "captured", never "runs none" — the Transparency Center is an index, not
+  // the market, and creative runs never capture the client at all.
+  assert.ok(!/does not run|doesn't run|no regional bank runs/i.test(c.detail), c.detail);
+  assert.match(c.detail, /did not list or this capture did not sample/);
+});
+
+t("a mixed set reports the split and names its window", () => {
+  const c = cohortShape({ families: [...nat(7), ...reg(2)], advertisers: ADV, productLabel: "Checking", days: 30 });
+  assert.equal(c.headline, "2 of the 9 checking designs captured are regional, 7 national.");
+  assert.match(c.detail, /30-day window/);
+});
+
+t("a set carried by one advertiser says so", () => {
+  const one = Array.from({ length: 8 }, () => ({ tier: "national", institution: "chase.com" }));
+  const c = cohortShape({ families: [...one, ...reg(2)], advertisers: ADV, productLabel: "Checking", days: 30 });
+  assert.match(c.detail, /8 of the 10 come from a single advertiser/);
+});
+
+t("a set with no families has no cohort observation", () => {
+  assert.equal(cohortShape({ families: [], advertisers: ADV, productLabel: "Checking" }), null);
+});
 
 console.log(`\n${n} passed`);

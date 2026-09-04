@@ -68,6 +68,12 @@
       </div>
       <div class="hint" id="urlHint" hidden>Use the product page, not the homepage &mdash; it tells us which product to scope to.</div>
 
+      <!-- The way back. The two paths are mutually exclusive on screen, so
+           choosing the URL one has to be reversible or it is a dead end. -->
+      <div class="altpath" id="pickerBackWrap" hidden>
+        <button class="btn ghost lg" id="pickerToggle">&larr; Back to the client list</button>
+      </div>
+
       <div class="statusline" id="healthLine"></div>
     </div>
   </section>
@@ -197,8 +203,18 @@
         <!-- Descriptive themes across the captured display creatives. Gated
              behind a click because it is the one model call on this screen. -->
         <button class="btn ghost sm hidden" id="insightsBtn">Key insights</button>
+        <!-- The client's own creative, captured beside the wall and kept out of
+             every count on it. "Competitors lead with a bonus" means nothing
+             until you can see whether the client does too. -->
+        <button class="btn ghost sm hidden" id="clientAdsBtn"></button>
         <button class="btn ghost sm hidden" id="crossBtn"></button>
-        <button class="btn ghost sm" id="reanalyzeBtn" title="Ignore the cache and capture again">↻ Re-analyze</button>
+        <!-- Adding a competitor is a capture, so it returns to the screen that
+             confirms one. The selection, product and window survive the trip;
+             the cost line there says what the new advertiser costs and what
+             comes back from cache before anything is spent. -->
+        <button class="btn ghost sm" id="addCompBtn"
+                title="Back to the competitor list with this selection intact — everything already captured comes from cache, so only the new advertiser is a request">+ Add a competitor</button>
+        <button class="btn ghost sm greyed" id="reanalyzeBtn" title="Greyed out by dev for the time being">↻ Re-analyze</button>
         </div>
         <div class="resstats" id="resStats"></div>
       </div>

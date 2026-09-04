@@ -64,16 +64,26 @@ try {
       clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
       competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
     });
-    await check("one chosen competitor becomes three captured advertisers", () => {
-      eq(body.targets.length, 3, "1 local + 2 standing nationals");
+    await check("one chosen competitor becomes four captured advertisers", () => {
+      // The client is captured on the Wall too now — as its own population,
+      // counted in none of the wall's figures. See flow.test.js.
+      eq(body.targets.length, 4, "the client + 1 local + 2 standing nationals");
     });
     run = await S.awaitRun(body.runs[0].runId);
   }
 
-  await check("every ad carries its tier", () => {
-    ok(run.ads.every((a) => a.tier === "local" || a.tier === "national"), "tier present on all");
+  await check("every ad carries its tier, and the client's is its own", () => {
+    ok(run.ads.every((a) => ["local", "national", "client"].includes(a.tier)), "tier present on all");
     ok(run.ads.some((a) => a.tier === "national"), "nationals captured");
     ok(run.ads.some((a) => a.tier === "local"), "locals captured");
+    // THE CLIENT IS NEVER IN A COMPETITOR TIER. Every count on the wall is
+    // computed over the two market tiers, so a client ad landing in "local"
+    // would inflate the local set with the client's own creative.
+    ok(run.ads.filter((a) => a.isClient).every((a) => a.tier === "client"),
+      "a client ad must never be tiered as a competitor");
+    ok(!run.creative.tiers.local.domains.includes("lacapfcu.org"), "the client is not in the local tier");
+    ok(!run.creative.byCompetitor.some((c) => c.domain === "lacapfcu.org"),
+      "the client must not appear as a competitor chip");
   });
 
   await check("the payload groups the two tiers separately", () => {
@@ -123,8 +133,11 @@ try {
       ok(second.progress["capitalone.com"].fromCaptureCache, "Capital One from cache");
       ok(!second.progress["pelicanstatecu.com"].fromCaptureCache, "the local competitor is fetched fresh");
     });
-    await check("so only the local competitor cost a request", () => {
-      eq(second.requests, 1, "one request for three advertisers");
+    await check("so only the local competitor and the client cost a request", () => {
+      // Two now, and the second one is the point of the change: the client's
+      // own creative is what "competitors lead with a bonus" is measured
+      // against. The nationals are still free.
+      eq(second.requests, 2, "the chosen local and the client; both nationals cached");
     });
   }
 
@@ -137,9 +150,9 @@ try {
     });
     await check("the cost line quotes the nationals it is about to capture", () => {
       const plan = body.plans[0];
-      eq(plan.total, 3, "1 chosen + 2 nationals");
+      eq(plan.total, 4, "the client + 1 chosen + 2 nationals");
       eq(plan.fromCache, 2, "both nationals already held");
-      eq(plan.willFetch, 1, "only the unseen local costs a request");
+      eq(plan.willFetch, 2, "the unseen local and the client");
       eq(plan.nationalWillFetch, 0, "no national spend");
     });
   }
@@ -202,7 +215,8 @@ try {
       competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
     });
     await check("a caller can opt out of the tier", () => {
-      eq(body.targets.length, 1, "only what was chosen");
+      eq(body.targets.length, 2, "what was chosen, plus the client");
+      ok(!body.targets.some((t) => t.domain === "chase.com"), "no national was appended");
     });
   }
 
@@ -221,8 +235,10 @@ try {
       competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
     });
     await check("the cost quote honours the opt-out", () => {
-      eq(on.body.plans[0].total, 3, "quoted with the tier on");
-      eq(off.body.plans[0].total, 1, "quoted with the tier off");
+      // The client is quoted either way — it is captured either way. The
+      // opt-out is about the national tier and nothing else.
+      eq(on.body.plans[0].total, 4, "the client + 1 chosen + 2 nationals");
+      eq(off.body.plans[0].total, 2, "the client + 1 chosen, tier off");
     });
   }
 } finally {

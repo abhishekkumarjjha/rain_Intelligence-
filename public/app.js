@@ -115,8 +115,11 @@ let acIdx = -1;         // highlighted suggestion, -1 = none
   } catch { /* the URL path still works without the directory */ }
   fillLandingProducts();
   if (!CLIENTS.length) {
-    $("pickHint").innerHTML = `<span class="warn">Could not load the client directory.</span> Use a landing page URL below.`;
-    openUrlPath();
+    // The warning moves to the hint of the path the user is being sent down.
+    // It used to be written into the picker's hint, which this call then hid.
+    openUrlPath({ directoryDown: true });
+    $("urlHint").innerHTML = `<span class="warn">Could not load the client directory.</span> `
+      + `Enter the client's product page instead — use the product page, not the homepage.`;
   }
 })();
 
@@ -239,12 +242,38 @@ $("landProductSel").onkeydown = (e) => {
 };
 $("goBtn").onclick = goClient;
 
-function openUrlPath() {
-  $("urlBlock").hidden = false; $("urlHint").hidden = false;
+/* ONE WAY IN AT A TIME.
+   Both paths used to sit open together, each with its own live Analyze button
+   and its own idea of the product: Checking chosen in the picker, an
+   /auto-loan page pasted underneath, and the scope of the whole analysis
+   decided by which button happened to be pressed. Nothing on the screen said
+   which one was going to win. They are now mutually exclusive, and choosing the
+   URL path is reversible — a path with no way back is its own trap. */
+function openUrlPath({ directoryDown = false } = {}) {
+  closeMenu();
+  $("pickBar").hidden = true;
+  $("pickHint").hidden = true;
   $("urlToggle").hidden = true;
+  $("urlBlock").hidden = false; $("urlHint").hidden = false;
+  // With no directory there is nothing to go back TO, so the way back is not
+  // offered — it would return the user to a picker that cannot answer.
+  $("pickerBackWrap").hidden = directoryDown;
   $("urlInput").focus();
 }
-$("urlToggle").onclick = openUrlPath;
+
+function openPickerPath() {
+  // The URL is cleared on the way out. Leaving it behind a hidden panel keeps a
+  // second product scope alive in the page with nothing on screen naming it.
+  $("urlInput").value = "";
+  $("urlBlock").hidden = true; $("urlHint").hidden = true;
+  $("pickerBackWrap").hidden = true;
+  $("pickBar").hidden = false; $("pickHint").hidden = false;
+  $("urlToggle").hidden = false;
+  $("clientInput").focus();
+}
+
+$("urlToggle").onclick = () => openUrlPath();
+$("pickerToggle").onclick = openPickerPath;
 
 /* ---------------- resolve ---------------- */
 $("analyzeBtn").onclick = resolve;
@@ -759,6 +788,21 @@ function renderResults() {
   $("insightsBtn").disabled = false;
 
   $("crossBtn").classList.add("hidden");
+
+  // THE OTHER HALF OF EVERY SENTENCE ON THIS SCREEN. The wall says what
+  // competitors are running; this says what the client is running against it.
+  // Shown whenever the client was captured — including when nothing came back,
+  // because "nothing was captured for them in this window" is an answer and a
+  // silently missing button is not.
+  const cl = r.client;
+  const clientBtn = $("clientAdsBtn");
+  clientBtn.classList.toggle("hidden", !(r.mode === "creative" && cl));
+  if (r.mode === "creative" && cl) {
+    clientBtn.textContent = cl.captured
+      ? `Client's own ads · ${cl.captured}`
+      : "Client's own ads · none captured";
+    clientBtn.onclick = () => openClientWall(r);
+  }
 
   const s = r.sampling || {};
   $("samplingBar").className = "samplingbar" + (s.complete ? " clean" : "");
@@ -1497,18 +1541,41 @@ $("drawerBg").onclick = closeDrawer;
    THE WIDE SHEET — the search wall, and the themes popup.
    Both render from data already in S.run: no fetch, no capture, no cost.
    --------------------------------------------------------------------------- */
+let sheetOpenedAt = 0;
+
 function openSheet(title, sub, html) {
   $("sheetTitle").textContent = title;
   $("sheetSub").textContent = sub || "";
   $("sheetBody").innerHTML = html;
   wireImages($("sheetBody"));
   wireEvidence($("sheetBody"));
+  sheetOpenedAt = performance.now();
   $("sheet").classList.add("on"); $("sheetBg").classList.add("on");
 }
 const closeSheet = () => { $("sheet").classList.remove("on"); $("sheetBg").classList.remove("on"); };
 $("sheetClose").onclick = closeSheet;
-$("sheetBg").onclick = closeSheet;
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeSheet(); closeDrawer(); } });
+
+/* KEY INSIGHTS CLOSING ITSELF THE FIRST TIME IT WAS OPENED.
+   The first open is the only one that waits: the model has to read the wall,
+   which takes tens of seconds, and people click again while nothing appears to
+   be happening. Those clicks are dispatched at the page — and the backdrop
+   appears underneath the pointer at the exact moment the sheet opens, so the
+   last of them closed the sheet a frame after it arrived. Every later open is
+   instant and never had the problem, which is why it only ever happened once.
+   A click made BEFORE the sheet existed cannot have been aimed at dismissing
+   it, and neither can one landing while it is still sliding in. */
+$("sheetBg").onclick = (e) => {
+  if (e.timeStamp < sheetOpenedAt || performance.now() - sheetOpenedAt < 600) return;
+  closeSheet();
+};
+/* Topmost first. Evidence now opens ON TOP of Key insights rather than behind
+   it, so one Escape closing both would throw away the sheet the reader was
+   still working through to dismiss the ads they opened from it. */
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if ($("drawer").classList.contains("on")) return closeDrawer();
+  closeSheet();
+});
 
 /* ---------------------------------------------------------------------------
    THE WALL OF SEARCH ADS — its own screen.
@@ -1623,6 +1690,17 @@ function themesHtml(t) {
      it, and which cohort — because "four designs, one advertiser" and "four
      designs, four advertisers" are completely different findings and used to
      render identically. */
+  /* How many advertisers are behind an entry still matters — "four designs, one
+     advertiser" and "four designs, four advertisers" are different findings —
+     but as its own chip it read as part of the cohort label beside it
+     ("National One advertiser"), and cohort contrasts, which span both cohorts
+     and carry no single count, rendered "undefined advertisers". It is now
+     carried by the design count it qualifies. */
+  const designsTitle = (x) => "Distinct designs, not sizes — one design cut into five banner slots counts once"
+    + (x.supportType === "within_advertiser"
+      ? " · all of them from a single advertiser, so this is one advertiser repeating itself rather than a pattern across the set"
+      : x.advertiserCount ? ` · carried by ${x.advertiserCount} advertisers` : "");
+
   const item = (x, chip, tone) => `
     <div class="shapeitem">
       <div class="shapechip"><span class="fchip ${tone}">${esc(chip)}</span></div>
@@ -1635,10 +1713,12 @@ function themesHtml(t) {
             : x.scope === "national"
               ? `<span class="fsig natsig" title="National advertising, shown as context — we cannot tell whether it served in this market">National</span>`
               : x.scope === "regional" ? `<span class="fsig regsig">Regional</span>` : ""}
-          ${x.supportType === "within_advertiser"
-            ? `<span class="fsig" title="Every design behind this comes from a single advertiser — that advertiser repeating itself, not a pattern across the set">One advertiser</span>`
-            : `<span class="fsig" title="Carried by designs from more than one advertiser">${x.advertiserCount} advertisers</span>`}
-          ${x.familyCount ? `<span class="fsig" title="Distinct designs, not sizes — one design cut into five banner slots counts once">${x.familyCount} designs</span>` : ""}
+          ${x.familyCount ? `<span class="fsig" title="${esc(designsTitle(x))}">${x.familyCount} designs</span>` : ""}
+          ${x.clientOnly
+            ? `<span class="fsig clientsig" title="Every design behind this is the client's own — a description of their creative, not of the market">Client's own creative only</span>`
+            : x.clientToo
+              ? `<span class="fsig clientsig" title="The client's own captured designs are among the evidence for this — they advertise this idea as well">Client advertises this too</span>`
+              : ""}
         </div>
         ${x.creativeIds?.length
           ? `<span class="ev sm" data-ev="${esc(x.creativeIds.join(","))}">View ${x.creativeIds.length} ad${x.creativeIds.length > 1 ? "s" : ""}</span>`
@@ -1654,44 +1734,284 @@ function themesHtml(t) {
   // The counted line first, and visibly not of a piece with what follows. It is
   // arithmetic over capture records; everything below it is a model reading
   // creatives, and the reader is entitled to know which is which.
-  const channel = t.channel ? `
-    <div class="thkey">
-      <div class="thkeyh">${esc(t.channel.headline)}</div>
-      <div class="thkeyd">${esc(t.channel.detail)}</div>
-      <div class="thkeyt">Counted from the capture records, not written by a model.</div>
-    </div>` : "";
-
   return `
-    ${channel}
     <div class="shapeframe" style="margin-bottom:16px">${esc(t.framing)}</div>
     ${section("What the ads say", t.messageThemes || t.themes, "Message", "t-violet")}
     ${section("How they say it", t.executionPatterns, "Execution", "t-cyan")}
     ${section("Regional against national", t.cohortContrasts, "Contrast", "t-slate")}`;
 }
 
-$("insightsBtn").onclick = async () => {
-  const btn = $("insightsBtn");
-  if (S.run?.themes) return openSheet("Key insights", "", themesHtml(S.run.themes));
+/* THE CLIENT'S OWN WALL — the same cards, a separate population.
+   It is behind a button rather than merged into the wall because merging would
+   corrupt every count on that screen (the tier totals, the advertiser chips,
+   the "no local creatives were read" note) and because it is the wrong reading:
+   the question is what the client runs AGAINST this set, which is a comparison
+   between two populations rather than one larger one. */
+function openClientWall(r) {
+  const cl = r.client || {};
+  const ads = cl.ads || [];
+  const scope = cl.productScoped
+    ? `${r.productLabel} creatives only`
+    : `every product captured — nothing was captured on ${String(r.productLabel || "").toLowerCase()}`;
 
-  btn.disabled = true; btn.textContent = "Reading…";
+  const body = ads.length
+    ? `<div class="wall">${ads.map(adCard).join("")}</div>`
+    : `<div class="empty">
+         <b>No display creative was captured for ${esc(cl.label || "the client")} in this window.</b><br />
+         ${cl.status?.reason ? `The capture reported: ${esc(cl.status.reason)}. ` : ""}
+         That is what the Transparency Center listed over these ${r.days} days — it is not evidence that they are
+         running none. A 90-day window, or a check that display is actually part of the current plan, would
+         settle it.
+       </div>`;
+
+  openSheet(
+    `${cl.label || "The client"} · own display creative`,
+    ads.length
+      ? `${cl.captured} captured, ${cl.designs} distinct design${cl.designs === 1 ? "" : "s"} · ${scope}. `
+        + `Captured beside the wall and counted in none of its figures.`
+      : "",
+    body,
+  );
+  $("sheetBody").querySelectorAll(".shot").forEach((n) =>
+    n.onclick = () => openEvidence((n.dataset.ids || "").split(",").filter(Boolean), "Creative"));
+}
+
+/* THE COUNTED LINES, AND THEY ARE NOT PART OF WHAT THE MODEL SAID.
+   Both are arithmetic over capture records — one comparing channels, one
+   comparing cohorts — and they are the most defensible thing on the panel
+   precisely because nobody wrote them. They render whether or not the themes
+   pass found anything, which is the fix: a wall where every captured design on
+   the product came from a national advertiser HAS an insight in it, and it was
+   being thrown away because a model failed to find a recurring idea in the
+   artwork. */
+function countedHtml(counted) {
+  const block = (x) => (x ? `
+    <div class="thkey">
+      <div class="thkeyh">${esc(x.headline)}</div>
+      <div class="thkeyd">${esc(x.detail)}</div>
+      <div class="thkeyt">Counted from the capture records, not written by a model.</div>
+    </div>` : "");
+  return block(counted?.cohort) + block(counted?.channel);
+}
+
+/* NOTHING ABOUT THIS PANEL IS AN ERROR.
+   "No recurring idea in this set" is an ordinary outcome of reading a small
+   wall, and it used to arrive as a red bar across the top of the results — the
+   same treatment as a failed capture. A red bar says something went wrong.
+   Nothing went wrong: the wall below it is intact and every creative on it is
+   still there to browse. So the panel always opens, and says what it has.
+
+   TWO READS, BOTH VISIBLE, AND A WAY TO ASK FOR A THIRD.
+   The general read across every product captured, and the read for the product
+   chosen on the landing page. They answer different questions — "what is this
+   whole set doing" and "what is happening on the product we are pitching" — and
+   the panel used to be able to show only one, silently swapping to the general
+   one whenever the product was thin. Both are now sections with their own
+   headings, and any other captured product can be read on demand.
+
+   Every read is one model call, which is why the third one is a button rather
+   than something the panel does on its own. Each is cached on the run, so a
+   product already read re-opens for nothing. */
+const IN = { loading: new Set(), problems: {}, pick: "" };
+
+const scopeLabelOf = (r, key) =>
+  (key === "all" ? "Every product captured" : (productLabel(key) || key));
+
+/* Which products are worth offering. Only ones with creatives actually
+   captured — a switcher listing twelve products where nine are empty is a menu
+   of dead ends, and each dead end costs a model call to discover. */
+function readableProducts(r) {
+  return (r.creative?.byProduct || [])
+    .filter((p) => p.code && p.code !== "all" && p.count > 0 && p.code !== r.product);
+}
+
+function scopeBlock(r, key) {
+  const t = (S.run.themesByScope || {})[key];
+  const label = scopeLabelOf(r, key);
+  const head = (extra = "") => `
+    <div class="scopehead"><h4>${esc(label)}</h4>${extra}</div>`;
+
+  if (IN.loading.has(key)) {
+    return `<div class="thblock">${head('<span class="scopenote">Reading…</span>')}
+      <div class="empty" style="padding:26px">Reading the creatives in this scope.</div></div>`;
+  }
+  if (t) {
+    return `<div class="thblock">${head(`<span class="scopenote">${t.creativesRead} distinct design${t.creativesRead === 1 ? "" : "s"}</span>`)}
+      ${themesHtml(t)}</div>`;
+  }
+  const problem = IN.problems[key];
+  return problem ? `<div class="thblock">${head()}${insightsNone(problem, true)}</div>` : "";
+}
+
+/* The switcher. A select of what was actually captured and a button that says
+   what pressing it does, because pressing it spends a model call. */
+function scopeSwitcher(r) {
+  const rows = readableProducts(r);
+  if (!rows.length) return "";
+  const store = S.run.themesByScope || {};
+  const unread = rows.filter((p) => !store[p.code]);
+
+  return `
+    <div class="scopepick">
+      <label for="scopeSel">See another product</label>
+      <select id="scopeSel">${rows.map((p) =>
+        `<option value="${esc(p.code)}"${p.code === IN.pick ? " selected" : ""}>${esc(p.label)} · ${p.count} captured${store[p.code] ? " · read" : ""}</option>`).join("")}</select>
+      <button class="btn ghost sm" id="scopeGo">Read this product</button>
+      <span class="scopenote">${unread.length
+        ? "One model call per product, then it is cached on this run."
+        : "Every captured product on this wall has been read."}</span>
+    </div>`;
+}
+
+function insightsPanel(r) {
+  const store = S.run.themesByScope || {};
+  // The counted lines are about the capture, not about a scope, so they are
+  // rendered once at the top rather than repeated under every heading.
+  const counted = Object.values(store).find((t) => t?.channel || t?.cohort)
+    || Object.values(IN.problems).find((p) => p?.counted)?.counted;
+
+  // Order is deliberate: the counted facts, the general read, the product this
+  // analysis was scoped to, then anything asked for since.
+  const extra = [...new Set([...Object.keys(store), ...Object.keys(IN.problems), ...IN.loading])]
+    .filter((k) => k !== "all" && k !== r.product);
+
+  return [
+    `Key insights · ${r.productLabel}`,
+    `The general read of this wall and the ${String(r.productLabel || "").toLowerCase()} read, side by side. `
+      + `Filtering by advertiser or product on the results screen changes neither.`,
+    countedHtml(counted)
+      + scopeBlock(r, "all")
+      + scopeBlock(r, r.product)
+      + extra.map((k) => scopeBlock(r, k)).join("")
+      + scopeSwitcher(r),
+  ];
+}
+
+/* The empty state for ONE scope. One sentence saying there is nothing, one
+   saying why, and — only where trying again could change the answer — a way to
+   try again. No colour, no warning styling: this is a report, not a fault. */
+function insightsNone(info, counted = false) {
+  const retry = `<div style="margin-top:14px"><button class="btn ghost sm" data-retry="${esc(info.scope || "")}">Try again</button></div>`;
+  const widen = "Adding a competitor or widening the window to 90 days would give it more to read.";
+  const head = counted
+    ? "No recurring idea held up across the creatives in this scope."
+    : "No insights available.";
+
+  switch (info.reason) {
+    case "too_little_captured":
+      return `<div class="empty">
+        <b>${head}</b><br />
+        This scope holds ${info.designs ?? 0} distinct design${info.designs === 1 ? "" : "s"},
+        and ${info.needed ?? 4} is the fewest a recurring idea can be named over.
+        Every creative captured is still on the wall below. ${widen}
+      </div>`;
+    case "nothing_recurring":
+      return `<div class="empty">
+        <b>${head}</b><br />
+        ${info.audit?.proposed
+          ? `${info.audit.proposed} idea${info.audit.proposed === 1 ? " was" : "s were"} proposed over
+             ${info.audit.families ?? "the"} designs and none survived the rules — each cited creatives that are not
+             on this wall, or crossed from describing into advising. Those are dropped rather than repaired.`
+          : "The creatives were read, but nothing recurring held up across them."} ${widen}${retry}
+      </div>`;
+    case "model_unavailable":
+    case "unreachable":
+      return `<div class="empty">
+        <b>The creative reader could not be reached.</b><br />
+        Nothing was captured and nothing was spent, and the wall below is unaffected.${retry}
+      </div>`;
+    case "anthropic_not_configured":
+      return `<div class="empty">
+        <b>No insights available.</b><br />
+        ANTHROPIC_API_KEY is not set on this server, so the creatives cannot be read. The wall below does not
+        need it and is unaffected.
+      </div>`;
+    default:
+      return `<div class="empty">
+        <b>${head}</b><br />
+        The read did not complete${info.reason ? ` (${esc(String(info.reason))})` : ""}. The wall below is
+        unaffected.${retry}
+      </div>`;
+  }
+}
+
+/* Re-rendered in place after every scope lands, so a second read appends to an
+   open panel rather than replacing it. */
+function renderInsights() {
+  const keep = $("sheetBody")?.scrollTop || 0;
+  openSheet(...insightsPanel(S.run));
+  $("sheetBody").scrollTop = keep;
+
+  const sel = $("scopeSel");
+  if (sel) sel.onchange = () => { IN.pick = sel.value; };
+  const go = $("scopeGo");
+  if (go) go.onclick = () => loadScope(sel ? sel.value : IN.pick, {});
+  $("sheetBody").querySelectorAll("[data-retry]").forEach((b) =>
+    b.onclick = () => loadScope(b.dataset.retry, { force: true }));
+}
+
+async function loadScope(scope, { force = false } = {}) {
+  if (!scope || IN.loading.has(scope)) return;
+  S.run.themesByScope = S.run.themesByScope || {};
+  if (S.run.themesByScope[scope] && !force) return renderInsights();
+
+  IN.loading.add(scope);
+  delete IN.problems[scope];
+  renderInsights();
+
   let r;
   try {
-    r = await (await fetch(`/api/run/${S.run.id}/themes`, { method: "POST" })).json();
+    r = await (await fetch(`/api/run/${S.run.id}/themes`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ scope, force }),
+    })).json();
   } catch {
-    btn.disabled = false; btn.textContent = "✨ Key insights";
-    return showError("Could not reach the server to read the creatives.");
+    r = { ok: false, reason: "unreachable" };
   }
-  btn.disabled = false; btn.textContent = "✨ Key insights";
+  IN.loading.delete(scope);
 
-  if (!r.ok) {
-    return showError(r.reason === "anthropic_not_configured"
-      ? "ANTHROPIC_API_KEY is not set on the server, so themes cannot be read."
-      : r.reason === "not_enough_creative"
-        ? "Too few legible creatives on this wall to name a recurring idea. Widen the window or add a competitor."
-        : `Could not read themes: ${r.reason}`);
-  }
-  S.run.themes = r.themes;
-  openSheet("Key insights", "", themesHtml(r.themes));
+  if (r.ok && r.themes) S.run.themesByScope[scope] = r.themes;
+  else IN.problems[scope] = { ...r, scope };
+  renderInsights();
+}
+
+async function openInsights() {
+  clearError();
+  const btn = $("insightsBtn");
+  S.run.themesByScope = S.run.themesByScope || {};
+
+  // Both defaults every time the panel opens. Whichever is already cached costs
+  // nothing and lands instantly.
+  const wanted = [...new Set(["all", S.run.product].filter(Boolean))];
+  const missing = wanted.filter((k) => !S.run.themesByScope[k]);
+
+  renderInsights();
+  if (!missing.length) return;
+
+  btn.disabled = true; btn.textContent = "Reading…";
+  await Promise.all(missing.map((k) => loadScope(k, {})));
+  btn.disabled = false; btn.textContent = "✨ Key insights";
+}
+
+$("insightsBtn").onclick = () => openInsights();
+
+/* ADDING A COMPETITOR IS A CAPTURE, so it goes back to the screen where a
+   capture is confirmed rather than happening under a button on the results.
+   That screen already holds this client, this product, this window and every
+   competitor still selected, and its cost line reads the capture cache before
+   anything is spent — so the ones already captured come back free and only the
+   new advertiser is a request. Appending in place would have to state that cost
+   somewhere, and there is already a screen whose whole job is stating it. */
+$("addCompBtn").onclick = () => {
+  clearError();
+  syncNationalsRow();
+  renderCompetitors();
+  show("s-comp");
+  setTimeout(() => {
+    const f = $("addName");
+    f.scrollIntoView({ behavior: "smooth", block: "center" });
+    f.focus();
+  }, 420);
 };
 
 function monthYear(iso) {
@@ -1715,7 +2035,18 @@ function syncNationalsRow() {
     ? "Chase and Capital One as a reference ceiling. They are shown in their own block and are excluded from every finding and every denominator — we cannot tell whether their ads served in this market."
     : "A fixed national ceiling added to every display capture, shown in their own section below the local results — not as local competitors.";
 }
-$("reanalyzeBtn").onclick = () => startCapture({ force: true });
+/* HELD BACK BY REQUEST, not removed. A button that does nothing and says
+   nothing is indistinguishable from one that is broken, so it keeps its click
+   and spends it explaining itself. Restore by putting startCapture({ force:
+   true }) back on the handler and dropping the greyed class in index.html. */
+$("reanalyzeBtn").onclick = () => {
+  const b = $("reanalyzeBtn");
+  if (b.dataset.saying) return;
+  b.dataset.saying = "1";
+  const was = b.textContent;
+  b.textContent = "Greyed out by dev for the time being";
+  setTimeout(() => { b.textContent = was; delete b.dataset.saying; }, 2600);
+};
 
 /* The cost line reads the per-advertiser cache before anything is spent, so
    "3 from cache, 1 request" is visible at the moment of choosing rather than
