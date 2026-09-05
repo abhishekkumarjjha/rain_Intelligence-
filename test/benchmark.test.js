@@ -18,6 +18,7 @@ import { productFromUrl } from "../lib/products.js";
 import { comparable, better } from "../lib/metrics.js";
 import { buildBoard } from "../lib/benchmark.js";
 import { buildBenchmark, clusterAds } from "../lib/analyze.js";
+import { comparableWindow } from "../lib/store.js";
 import { competitorSetVersion, setDrift } from "../lib/snapshot.js";
 
 let passed = 0, failed = 0;
@@ -1989,15 +1990,31 @@ test("H7 — a set version ignores order, so re-ordering is not a change", () =>
 });
 
 test("H7 — a different WINDOW is not comparable to a different window", () => {
-  // findPreviousRun() gates on client, mode, source and product. The window is
-  // not in that gate, so this is the exposure being recorded: a 30-day run and
-  // a 90-day run of the same client ARE offered to each other as previous.
-  // Asserting the shape of the guard that does exist rather than a fix.
+  // The window IS in findPreviousRun()'s gate now — it was the sibling defect
+  // F-020 fixed in previousSnapshot() and left standing in the path that feeds
+  // the run-diff strip. Covered directly by the test below; this one keeps its
+  // original job, which is the shape of the drift record.
   const drift = setDrift(competitorSetVersion(["a.org"]), {
     label: "July", competitorSet: competitorSetVersion(["a.org", "b.org"]),
   });
   assert.ok(drift, "a shrunken set produced no drift record");
   assert.deepEqual(drift.stable, ["a.org"], "the intersection is what deltas may run over");
+});
+
+test("a run over a different window is never offered as the previous run", () => {
+  // The run-diff strip says "Since 2026-09-02, 67 seen in both captures". Fed a
+  // 30-day run as the previous of a 90-day one, everything the wider window
+  // reveals reads as new — the market did not change, the question did.
+  const base = {
+    id: "run_now", mode: "benchmark", source: "google_search", product: "checking",
+    client: { domain: "lacapfcu.org" }, createdAt: "2026-09-05T00:00:00.000Z",
+  };
+  const cmp = (a, b) => comparableWindow(a, b);
+  assert.equal(cmp({ ...base, days: 30 }, { ...base, days: 30 }), true, "same window compares");
+  assert.equal(cmp({ ...base, days: 31 }, { ...base, days: 30 }), true, "a DST day of slack is absorbed");
+  assert.equal(cmp({ ...base, days: 30 }, { ...base, days: 90 }), false, "30 must never meet 90");
+  assert.equal(cmp({ ...base, days: undefined }, { ...base, days: 30 }), false,
+    "a run whose window cannot be established is refused, not guessed at");
 });
 
 // ===========================================================================

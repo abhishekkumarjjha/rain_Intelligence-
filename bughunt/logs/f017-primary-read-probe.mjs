@@ -1,7 +1,11 @@
-process.chdir("/home/user/rain_Intelligence-");
-const { shapeSearch } = await import("/home/user/rain_Intelligence-/lib/extract-search.js");
-const { normalizeObservation } = await import("/home/user/rain_Intelligence-/lib/observations.js");
-const { buildBoard } = await import("/home/user/rain_Intelligence-/lib/benchmark.js");
+// Paths are resolved from this file, not from the container that wrote it.
+// The handover offers these as runnable evidence; hardcoded absolute paths
+// made them runnable in exactly one place, which is the opposite of evidence.
+const ROOT = new URL("../../", import.meta.url).href;
+const load = (m) => import(ROOT + "lib/" + m);
+const { shapeSearch } = await load("extract-search.js");
+const { normalizeObservation } = await load("observations.js");
+const { buildBoard } = await load("benchmark.js");
 let n = 0;
 const chk = (domain, label, json) => normalizeObservation(shapeSearch({
   advertiser: label, displayUrl: `${domain}/`, callouts: [], unclassified: [],

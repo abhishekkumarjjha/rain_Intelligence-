@@ -1,3 +1,8 @@
+// Paths are resolved from this file, not from the container that wrote it.
+// The handover offers these as runnable evidence; hardcoded absolute paths
+// made them runnable in exactly one place, which is the opposite of evidence.
+const ROOT = new URL("../../", import.meta.url).href;
+const load = (m) => import(ROOT + "lib/" + m);
 // How many model calls does this process allow in flight at once?
 // A local server counts concurrent requests and answers slowly enough that
 // overlap is unmissable.
@@ -16,7 +21,7 @@ const srv = http.createServer((req, res) => {
 await new Promise((r) => srv.listen(0, "127.0.0.1", r));
 process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${srv.address().port}`;
 
-const { createWithRetry } = await import("/home/user/rain_Intelligence-/lib/claude.js");
+const { createWithRetry } = await load("claude.js");
 
 // 40 calls fired at once — roughly what ten competitors × the per-advertiser
 // cap of 6 produces, plus the analysis calls nothing was counting.

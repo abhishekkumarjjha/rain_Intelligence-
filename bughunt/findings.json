@@ -369,7 +369,7 @@
       "title": "S.productFilter / S.filter are set only when null",
       "file": "public/app.js",
       "line": 1001,
-      "status": "fixed",
+      "status": "cross-reference",
       "clientFacing": true,
       "repro": "see F-016",
       "evidence": "Confirmed for the display wall. The SEARCH wall half of H1 is ALREADY CORRECT: SW.product and SW.brand are reset unconditionally on every openSearchWall(), lib/../public/app.js:1623-1624.",
@@ -377,7 +377,8 @@
       "fix": "see F-016",
       "riskOfFix": "see F-016",
       "testAdded": "test/ui.test.js :: 'journey — a second capture does not inherit the first one's filters'",
-      "commit": "8e338cf"
+      "commit": "8e338cf",
+      "fixedUnder": "F-016"
     },
     {
       "id": "H2",
@@ -439,7 +440,7 @@
       "title": "Nationals must never enter a local denominator",
       "file": "lib/primary-read.js",
       "line": 92,
-      "status": "fixed",
+      "status": "cross-reference",
       "clientFacing": true,
       "repro": "node test/benchmark.test.js :: STAGE 11",
       "evidence": "Holds in the findings, the set shape, the snapshot and coverage. FAILED in the primary read's `differences` sentence — see F-017.",
@@ -447,7 +448,8 @@
       "fix": "see F-017",
       "riskOfFix": "see F-017",
       "testAdded": "test/benchmark.test.js :: STAGE 11",
-      "commit": "6fd3ad7"
+      "commit": "6fd3ad7",
+      "fixedUnder": "F-017"
     },
     {
       "id": "H8",
@@ -741,5 +743,13 @@
       "line": 199,
       "why": "listingFor() returned every row whatever start_date was asked for, so a 30-day and a 90-day capture came back identical and every window-shaped bug was untestable — which is why F-020 survived. It filters now, and PEL3 sits between the two windows, but ONE row is thin: a second, on a different advertiser and a different product, would let the window interact with product scope and with the national tier."
     }
-  ]
+  ],
+  "tally": {
+    "fixed": 22,
+    "alreadyCorrect": 13,
+    "crossReference": 2,
+    "notAttempted": 3,
+    "newSuspicions": 8,
+    "entries": 37
+  }
 }
