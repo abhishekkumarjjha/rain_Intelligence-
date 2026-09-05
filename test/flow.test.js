@@ -10,6 +10,13 @@ import { startServer, check, section, summary, eq, ok } from "./harness.js";
 import { readFileSync, writeFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import path from "node:path";
 
+/** The rule the whole product rests on, as a reusable assertion. */
+function assertNoProductClaim(text) {
+  const m = String(text || "").match(
+    /\b(do(es)?n.t (offer|have|do|run)|do(es)? not (offer|have|provide)|no longer (offers?|runs?|has))\b/i);
+  ok(!m, `a sentence asserts a product fact ("${m?.[0]}"): ${JSON.stringify(String(text).slice(0, 160))}`);
+}
+
 const S = await startServer();
 
 try {
@@ -1631,6 +1638,312 @@ section("regression — an old run's saved themes migrate to the slot they belon
     } finally {
       try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// H10 — THE FUNNEL RECONCILES WITH THE CLIENT EXCLUDED, on a client that has ads.
+//
+// The wall's funnel is built over COMPETITOR runs only, and the client is a
+// third population beside it. Every previous test of this ran on a client with
+// nothing captured, where "excluded" and "absent" are indistinguishable.
+// lacapfcu.org has two creatives in the fixture market, so this one can tell
+// the difference.
+// ---------------------------------------------------------------------------
+section("H10 — the wall's funnel counts competitors, with a client that has ads");
+{
+  const { body: started } = await S.post("/api/capture", {
+    mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+    product: "checking", days: 30, includeNationals: false,
+    competitors: [
+      { label: "Campus Federal", domain: "campusfederal.org" },
+      { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+    ],
+  });
+  const run = await S.awaitRun(started.runId);
+  const clientAds = run.ads.filter((a) => a.isClient);
+  const competitorAds = run.ads.filter((a) => !a.isClient);
+  const f = run.creative.funnel;
+
+  await check("the premise holds — the client really does have captured ads", () => {
+    ok(clientAds.length > 0, "the client captured nothing, so this proves nothing");
+    ok(run.client.captured > 0, "the client panel reports nothing captured");
+  });
+
+  await check("the funnel's 'read' is the competitor count, not everything captured", () => {
+    eq(f.read, competitorAds.length, "funnel.read");
+    ok(f.read < run.ads.length, "the client's ads were counted into the competitor funnel");
+  });
+
+  await check("every funnel step is a real subset of the one above it", () => {
+    const chain = ["listed", "retrieved", "renderable", "selected", "read"];
+    for (let i = 1; i < chain.length; i++) {
+      ok(f[chain[i]] <= f[chain[i - 1]],
+        `${chain[i]} (${f[chain[i]]}) exceeds ${chain[i - 1]} (${f[chain[i - 1]]})`);
+    }
+  });
+
+  await check("each step's declared loss equals the drop it describes", () => {
+    for (let i = 1; i < f.steps.length; i++) {
+      const prev = f.steps[i - 1], step = f.steps[i];
+      eq(step.value, prev.value - (step.lost || 0),
+        `${step.key}: ${prev.value} - ${step.lost} != ${step.value}`);
+    }
+  });
+
+  await check("the client's own numbers reconcile separately and are never merged", () => {
+    eq(run.client.captured, clientAds.filter((a) => a.headline || a.subhead || a.offer?.value).length,
+      "client.captured");
+    ok(run.client.onProduct <= run.client.captured, "onProduct exceeds captured");
+    // and the wall's own totals exclude them entirely
+    const wallDomains = new Set(run.creative.clusters.map((c) => c.institution));
+    ok(!wallDomains.has("lacapfcu.org"),
+      "the client's designs are on the competitor wall");
+  });
+
+  await check("the competitor breakdown and the wall total agree", () => {
+    const chipTotal = run.creative.byProduct.reduce((n, x) => n + x.count, 0);
+    eq(chipTotal, run.creative.capturedCount,
+      "the product chips count a different population from the wall they filter");
+  });
+
+  await check("unreadable creatives are counted, not quietly dropped", () => {
+    eq(run.creative.unreadable, competitorAds.length - run.creative.capturedCount,
+      "the unreadable count does not close the gap between read and shown");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// H11 — preview-only, download-failed and extraction-failed, ALL AT ONCE.
+//
+// Each is covered separately elsewhere. The combination is what a bad day
+// actually looks like, and the question is whether the arithmetic on screen
+// still closes when all three happen to the same run.
+// ---------------------------------------------------------------------------
+section("H11 — three different losses in one run still leave the counts consistent");
+{
+  const S2 = await startServer({ RI_MOCK_IMG_403: "1" });   // every download fails
+  try {
+    const { body: started } = await S2.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30, includeNationals: false,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    const run = await S2.awaitRun(started.runId);
+
+    await check("the run completes rather than throwing", () => eq(run.status, "done", "status"));
+
+    await check("preview-only creatives are counted where they were lost", () => {
+      const f = run.creative?.funnel || run.funnel;
+      ok(f, "no funnel at all on a degraded run");
+      const step = f.steps.find((s) => s.key === "renderable");
+      if (f.previewOnly > 0) {
+        ok(step, "preview-only creatives were lost with no step to say so");
+        eq(step.lost, f.previewOnly, "the renderable step's loss is not the preview-only count");
+        ok(/preview-only/i.test(step.why), `the reason does not name it: "${step.why}"`);
+      }
+    });
+
+    await check("a download failure reads as a download failure, not as 'no ads'", () => {
+      const p = run.progress["campusfederal.org"];
+      ok(p.found > 0, "the listing found nothing, so this proves nothing");
+      eq(p.status, "empty", "status");
+      ok(p.read === 0 || p.read == null, `read count ${p.read}`);
+    });
+
+    await check("nothing invented anything to fill the gaps", () => {
+      eq(run.ads.filter((a) => !a.isClient).length, 0, "competitor ads appeared from nowhere");
+    });
+
+    await check("the screen says which kind of nothing this is", () => {
+      const p = run.progress["campusfederal.org"];
+      ok(p.reason, "an empty target with no reason is indistinguishable from a quiet competitor");
+      // AND IT NAMES OUR FAILURE, NOT THEIR BEHAVIOUR. "no_ads" here would be a
+      // claim about the advertiser built out of a CDN refusing us their artwork.
+      eq(p.reason, "download_failed", "reason");
+    });
+  } finally { S2.stop(); }
+}
+{
+  const S3 = await startServer({ RI_MOCK_VISION_FAIL: "1" });   // every read fails
+  try {
+    const { body: started } = await S3.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30, includeNationals: false,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    const run = await S3.awaitRun(started.runId);
+
+    await check("an extraction failure is counted against the read step", () => {
+      const f = run.creative?.funnel || run.funnel;
+      const step = f.steps.find((s) => s.key === "read");
+      const p = run.progress["campusfederal.org"];
+      eq(p.extractionFailed, 4, "extractionFailed");
+      if (step) {
+        eq(step.value, 0, "the read step claims creatives that were never transcribed");
+        ok(/could not transcribe|download failed/i.test(step.why),
+          `the reason does not name the loss: "${step.why}"`);
+      }
+    });
+
+    await check("a run that read nothing does not report a wall", () => {
+      eq(run.creative.capturedCount, 0, "capturedCount");
+      eq(run.creative.clusters.length, 0, "clusters");
+    });
+
+    await check("and the funnel still adds up at zero", () => {
+      const f = run.creative?.funnel || run.funnel;
+      for (let i = 1; i < f.steps.length; i++) {
+        const prev = f.steps[i - 1], step = f.steps[i];
+        eq(step.value, prev.value - (step.lost || 0),
+          `${step.key}: ${prev.value} - ${step.lost} != ${step.value}`);
+      }
+    });
+  } finally { S3.stop(); }
+}
+
+// ---------------------------------------------------------------------------
+// H19 — A NATIONAL'S CACHE OUTLIVES THE CLIENT'S WINDOW.
+//
+// Nationals are cached for 90 days because that is how often their creative
+// turns over, and a local competitor for 7. So a board read over a 30-day window
+// can carry reference rows captured two months outside it, and a reader who is
+// not told assumes every row on the page describes the same stretch of time.
+//
+// The note exists. What is untested is whether it appears EXACTLY when it
+// should: present when the capture is older than the window, absent when it is
+// not. A caveat that always fires is wallpaper; one that never fires is a lie.
+// ---------------------------------------------------------------------------
+section("H19 — the national age caveat appears exactly when it should");
+{
+  const backdate = (dataDir, days) => {
+    // The capture cache stamps capturedAt at write time. Ageing an entry by
+    // rewriting that stamp is the only way to reach this branch without waiting
+    // two months, and it changes nothing else about the entry.
+    const dir = path.join(dataDir, "_captures");
+    let aged = 0;
+    for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
+      const p = path.join(dir, f);
+      const entry = JSON.parse(readFileSync(p, "utf8"));
+      if (!/chase|capitalone/i.test(entry.domain || "")) continue;
+      entry.capturedAt = new Date(Date.now() - days * 864e5).toISOString();
+      writeFileSync(p, JSON.stringify(entry));
+      aged++;
+    }
+    return aged;
+  };
+
+  const bench = (S, days) => S.post("/api/capture", {
+    mode: "benchmark", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+    product: "checking", days, includeNationals: true,
+    competitors: [
+      { label: "Campus Federal", domain: "campusfederal.org" },
+      { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+      { label: "EFCU Financial", domain: "efcufinancial.org" },
+    ],
+  });
+
+  // ---- FRESH: captured today, read over 30 days. No caveat is due. ----------
+  {
+    const S1 = await startServer({}, { keepData: true });
+    const dataDir = S1.dataDir;
+    let run;
+    try {
+      const { body } = await bench(S1, 30);
+      run = await S1.awaitRun(body.runId);
+    } finally { S1.stop(); }
+
+    await check("the premise holds — the nationals are in the run as reference", () => {
+      ok(run.board?.snapshot?.referenceNote, "no reference note at all, so this proves nothing");
+      const nat = run.ads.filter((a) => a.tier === "national");
+      ok(nat.length > 0, "no national ads were captured");
+    });
+
+    await check("a national captured today carries NO age caveat", () => {
+      ok(!/captured \d+ days ago/i.test(run.board.snapshot.referenceNote),
+        `a caveat fired on a same-day capture: "${run.board.snapshot.referenceNote}"`);
+    });
+
+    try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+
+  // ---- AGED 60 DAYS, read over 30. Inside the national TTL, outside the -----
+  // ---- window. This is the exact gap the caveat exists for. ----------------
+  {
+    const S1 = await startServer({}, { keepData: true });
+    const dataDir = S1.dataDir;
+    try {
+      const { body } = await bench(S1, 30);
+      await S1.awaitRun(body.runId);
+    } finally { S1.stop(); }
+
+    const aged = backdate(dataDir, 60);
+    await check("the national capture entries were found and aged", () =>
+      ok(aged >= 1, "no national cache entry to age, so this proves nothing"));
+
+    const S2 = await startServer({}, { dataDir, keepData: true });
+    let run2;
+    try {
+      const { body } = await bench(S2, 30);
+      run2 = await S2.awaitRun(body.runId);
+    } finally { S2.stop(); }
+
+    await check("the aged national is still served from cache, not silently refetched", () => {
+      const p = run2.progress["chase.com"] || run2.progress["capitalone.com"];
+      ok(p?.fromCaptureCache, "the aged entry was refetched, so the caveat branch is unreachable");
+      ok(p.captureAgeDays >= 59, `age reported as ${p.captureAgeDays}`);
+    });
+
+    await check("the caveat fires, names the age AND names the window", () => {
+      const note = run2.board.snapshot.referenceNote;
+      ok(/captured 60 days ago/i.test(note), `the note does not state the age: "${note}"`);
+      ok(/30-day window/i.test(note), `the note does not state the window it falls outside: "${note}"`);
+    });
+
+    await check("the caveat is about the CAPTURE, never about the advertiser", () => {
+      const note = run2.board.snapshot.referenceNote;
+      assertNoProductClaim(note);
+      ok(/may fall outside/i.test(note),
+        `the note asserts more than it can: "${note}"`);
+    });
+
+    await check("ageing a national never moves a local count", () => {
+      const localFindings = (run2.board.findings || []).filter((f) => f.scope !== "national");
+      for (const f of localFindings) {
+        if (typeof f.denominator !== "number") continue;
+        ok(f.denominator <= 4, `a local denominator of ${f.denominator} over 3 local competitors`);
+      }
+    });
+
+    try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+
+  // ---- AGED 60 DAYS, read over 90. The capture is INSIDE the window now, ----
+  // ---- so the caveat must go quiet. ---------------------------------------
+  {
+    const S1 = await startServer({}, { keepData: true });
+    const dataDir = S1.dataDir;
+    try {
+      const { body } = await bench(S1, 90);
+      await S1.awaitRun(body.runId);
+    } finally { S1.stop(); }
+
+    backdate(dataDir, 60);
+
+    const S2 = await startServer({}, { dataDir, keepData: true });
+    let run3;
+    try {
+      const { body } = await bench(S2, 90);
+      run3 = await S2.awaitRun(body.runId);
+    } finally { S2.stop(); }
+
+    await check("a 60-day-old capture read over a 90-day window raises no caveat", () => {
+      const note = run3.board.snapshot.referenceNote;
+      ok(!/captured \d+ days ago/i.test(note),
+        `a caveat fired for a capture inside the window: "${note}"`);
+    });
+
+    try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
 

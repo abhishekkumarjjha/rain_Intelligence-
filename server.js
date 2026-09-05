@@ -865,22 +865,11 @@ function benchmarkFor(run, brands = null) {
     runs: run.runs,
   });
 
-  // A NATIONAL CAPTURE CAN BE OLDER THAN THE WINDOW IT SITS BESIDE.
-  //
-  // Nationals are cached for a quarter because that is how often their creative
-  // turns over, and that is the right trade — but it means the ads in the
-  // reference rows may have been captured over a window months away from the
-  // one the client is being read over. The note already explains why nationals
-  // are in no local count; it has to say this too, or the reader reasonably
-  // assumes every row on the page describes the same stretch of time.
-  const ages = (run.competitors || [])
-    .filter((c) => c.tier === "national")
-    .map((c) => run.progress?.[c.domain]?.captureAgeDays)
-    .filter((n) => Number.isFinite(n));
-  const oldest = ages.length ? Math.max(...ages) : 0;
-  if (bm.referenceNote && oldest > run.days) {
-    bm.referenceNote += ` Their creative was captured ${Math.round(oldest)} days ago and is refreshed quarterly, so it may fall outside the ${run.days}-day window the local rows describe.`;
-  }
+  // The national age caveat used to be appended HERE, to bm.referenceNote —
+  // a field buildBenchmark() has never produced. It was dead code: the
+  // condition read undefined every time, so the caveat could not fire on any
+  // run in the product's history. It now lives in boardFor(), on the note the
+  // snapshot actually carries and the UI actually renders. See F-022.
   return bm;
 }
 
@@ -902,7 +891,7 @@ function boardFor(run) {
     // them reports the extra window as "newly observed". See F-020.
     days: run.days,
   });
-  return buildBoard({
+  const board = buildBoard({
     client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },
     competitors: run.competitors.map((c) => ({
       ...c, ads: run.ads.filter((a) => !a.isClient && a.institution === c.domain),
@@ -912,6 +901,31 @@ function boardFor(run) {
     previous,
     ratePages: run.ratePages || null,
   });
+
+  // A NATIONAL CAPTURE CAN BE OLDER THAN THE WINDOW IT SITS BESIDE.
+  //
+  // Nationals are cached for a quarter because that is how often their creative
+  // turns over, and that is the right trade — but it means the ads in the
+  // reference rows may have been captured over a stretch of time months away
+  // from the one the client is being read over. The note already explains why
+  // nationals are in no local count; it has to say this too, or the reader
+  // reasonably assumes every row on the page describes the same window.
+  //
+  // It goes on the SNAPSHOT's note, because that is the one the reference block
+  // carries and the one snapshotHtml() renders. It was previously appended to
+  // the audit table's referenceNote, which buildBenchmark() does not produce —
+  // so the caveat has never once appeared. Said as "may fall outside": the
+  // capture is old, and whether the creative changed is not something this
+  // tool can see.
+  const ages = (run.competitors || [])
+    .filter((c) => c.tier === "national")
+    .map((c) => run.progress?.[c.domain]?.captureAgeDays)
+    .filter((n) => Number.isFinite(n));
+  const oldest = ages.length ? Math.max(...ages) : 0;
+  if (board.snapshot?.referenceNote && oldest > run.days) {
+    board.snapshot.referenceNote += ` Their creative was captured ${Math.round(oldest)} days ago and is refreshed quarterly, so it may fall outside the ${run.days}-day window the local rows describe.`;
+  }
+  return board;
 }
 
 // ---------------------------------------------------------------------------

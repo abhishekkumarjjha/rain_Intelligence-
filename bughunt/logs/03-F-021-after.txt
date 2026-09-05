@@ -1,0 +1,13 @@
+# F-021 AFTER
+
+── H11 — three different losses in one run still leave the counts consistent
+  ok  the run completes rather than throwing
+  ok  preview-only creatives are counted where they were lost
+  ok  a download failure reads as a download failure, not as 'no ads'
+  ok  nothing invented anything to fill the gaps
+  ok  the screen says which kind of nothing this is
+  ok  an extraction failure is counted against the read step
+  ok  a run that read nothing does not report a wall
+  ok  and the funnel still adds up at zero
+
+164 passed, 0 failed

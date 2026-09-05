@@ -1,0 +1,15 @@
+# H10 — the wall's funnel counts competitors, on a client that HAS ads.
+
+# Every earlier test of this ran on a client with nothing captured, where
+# 'excluded from the funnel' and 'absent from the capture' are indistinguishable.
+
+── H10 — the wall's funnel counts competitors, with a client that has ads
+  ok  the premise holds — the client really does have captured ads
+  ok  the funnel's 'read' is the competitor count, not everything captured
+  ok  every funnel step is a real subset of the one above it
+  ok  each step's declared loss equals the drop it describes
+  ok  the client's own numbers reconcile separately and are never merged
+  ok  the competitor breakdown and the wall total agree
+  ok  unreadable creatives are counted, not quietly dropped
+
+── H11 — three different losses in one run still leave the counts consistent

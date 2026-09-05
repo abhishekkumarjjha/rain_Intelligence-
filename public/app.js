@@ -835,6 +835,9 @@ const reasonText = (r) => ({
   no_ads: "no ads in this window", preview_only: "creatives are preview-only",
   not_configured: "provider not configured",
   extraction_failed: "creatives found but none could be read",
+  // A capture problem, said as one. Without this the target read as "empty"
+  // with no explanation, which on screen is the same as "not advertising".
+  download_failed: "creatives found but their artwork could not be downloaded",
   unexpected: "unexpected error",
   serpapi_not_configured: "SERPAPI_API_KEY is not set",
   anthropic_not_configured: "ANTHROPIC_API_KEY is not set",
