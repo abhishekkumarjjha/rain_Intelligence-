@@ -1,0 +1,2102 @@
+// =============================================================================
+// test/benchmark.test.js — THE ACCEPTANCE TEST FOR CAMPAIGN BENCHMARK.
+//
+// "Does the benchmark table render?" is not the bar. The bar is whether the
+// engine can DISCOVER a fixed set of statements from a known set of ads,
+// without any model-written prose, and point at the evidence for each one.
+//
+// Every model call is stubbed. These tests run with no API key and no network,
+// which is the point: if the arithmetic ever needs a key, the arithmetic has
+// moved somewhere it does not belong.
+// =============================================================================
+
+import assert from "node:assert/strict";
+import { shapeSearch } from "../lib/extract-search.js";
+import { shape as shapeDisplay } from "../lib/extract.js";
+import { normalizeObservation, rollUpBrand, rankAgainst } from "../lib/observations.js";
+import { productFromUrl } from "../lib/products.js";
+import { comparable, better } from "../lib/metrics.js";
+import { buildBoard } from "../lib/benchmark.js";
+import { buildBenchmark, clusterAds } from "../lib/analyze.js";
+import { comparableWindow } from "../lib/store.js";
+import { competitorSetVersion, setDrift } from "../lib/snapshot.js";
+
+let passed = 0, failed = 0;
+function test(name, fn) {
+  try { fn(); console.log(`  ok  ${name}`); passed++; }
+  catch (e) { console.error(`  FAIL ${name}\n       ${e.message}`); failed++; }
+}
+
+// ---------------------------------------------------------------------------
+// Fixture helper — model JSON in, provider metadata attached, normalized out.
+// ---------------------------------------------------------------------------
+let n = 0;
+function ad(modelJson, provider = {}) {
+  const img = {
+    creativeId: provider.creativeId || `CR_${++n}`,
+    domain: provider.domain || "campusfederal.org",
+    advertiser: provider.advertiser || "Campus Federal Credit Union",
+    imageUrl: "https://example.test/x.png",
+    format: "text",
+    firstShown: provider.firstShown || "2026-06-03",
+    lastShown: provider.lastShown || "2026-08-30",
+    totalDaysShown: provider.totalDaysShown ?? 88,
+  };
+  return normalizeObservation(shapeSearch(modelJson, img));
+}
+
+// ===========================================================================
+console.log("\nSTAGE 1 — the bug that started this: one ad, three facts");
+// ===========================================================================
+
+// This is the exact ad from the evidence panel that the old extractor read as
+// "$600 bonus, no rate". It carries a bonus in the headline, an APY in the
+// description and a fee claim in a sitelink. All three must survive.
+const CAMPUS_STACKED = {
+  advertiser: "Campus Federal Credit Union",
+  displayUrl: "www.campusfederal.org/",
+  headlines: ["Campus Federal Checking", "Earn $600 Reward Card"],
+  description: "Upgrade your money with Lagniappe Checking at Campus Federal. Earn 4.50% APY with Lagniappe Checking by Campus Federal, where it pays to be a member.",
+  sitelinks: ["Become a Member", "Savings", "No Monthly Fee"],
+  callouts: ["Great Rates", "Excellent Experiences"],
+  economicFacts: [
+    { metric: "cash_bonus", raw: "$600", qualifiers: {}, sourceField: "headline" },
+    { metric: "apy", raw: "4.50% APY", qualifiers: {}, sourceField: "description" },
+  ],
+  claims: [
+    { claim: "no_monthly_fee", verbatim: "No Monthly Fee", sourceField: "sitelink" },
+    { claim: "member_owned", verbatim: "where it pays to be a member", sourceField: "description" },
+  ],
+  unclassified: [],
+  leadEmphasis: "brand",
+  urgency: { present: false, phrase: "" },
+  product: "checking",
+  productConfidence: 0.95,
+  truncated: false,
+  legible: true,
+};
+
+const campus1 = ad(CAMPUS_STACKED);
+
+test("the APY in the description survives extraction", () => {
+  const apy = campus1.facts.find((f) => f.metric === "apy");
+  assert.ok(apy, "APY was dropped — this is the original Campus Federal bug");
+  assert.equal(apy.raw, "4.50% APY");
+  assert.equal(apy.value, 4.5);
+});
+
+test("the bonus in the headline survives alongside it", () => {
+  const bonus = campus1.facts.find((f) => f.metric === "cash_bonus");
+  assert.ok(bonus, "cash bonus was dropped");
+  assert.equal(bonus.value, 600);
+});
+
+test("one ad holds BOTH figures — the singular-offer bug is gone", () => {
+  assert.equal(campus1.facts.length, 2, `expected 2 economic facts, got ${campus1.facts.length}`);
+});
+
+test("a claim read from a sitelink survives", () => {
+  assert.ok(campus1.claims.some((c) => c.claim === "no_monthly_fee"));
+});
+
+test("verbatim strings are never normalized away", () => {
+  assert.equal(campus1.facts.find((f) => f.metric === "apy").raw, "4.50% APY",
+    "4.50 must not become 4.5 — the printed string is the evidence");
+});
+
+test("a fact outside the product profile is kept as evidence, not counted", () => {
+  const mixed = ad({
+    ...CAMPUS_STACKED,
+    economicFacts: [
+      { metric: "apy", raw: "4.50% APY", qualifiers: {}, sourceField: "description" },
+      // A mortgage APR quoted inside a checking ad. Real, and not a checking
+      // comparison metric — counting it would build a wrong rank from a
+      // correct read.
+      { metric: "points", raw: "0.5 points", qualifiers: {}, sourceField: "callout" },
+    ],
+  });
+  assert.equal(mixed.facts.length, 1);
+  assert.equal(mixed.droppedFacts.length, 1);
+  assert.match(mixed.droppedFacts[0].why, /not a comparison metric/);
+});
+
+test("a claim outside the vocabulary lands in unclassified, not the nearest match", () => {
+  const odd = ad({
+    ...CAMPUS_STACKED,
+    claims: [{ claim: "free_toaster", verbatim: "Free toaster with every account", sourceField: "callout" }],
+  });
+  assert.equal(odd.claims.length, 0);
+  assert.ok(odd.unclassified.includes("Free toaster with every account"));
+});
+
+// ===========================================================================
+console.log("\nSTAGE 2 — direction and comparability");
+// ===========================================================================
+
+test("direction comes from the metric, not the product", () => {
+  assert.equal(better("apy", 4.5, 4.0), 1, "higher APY is stronger");
+  assert.equal(better("apr", 4.5, 4.0), -1, "higher APR is weaker");
+  assert.equal(better("monthly_fee", 0, 5), 1, "lower fee is stronger");
+  assert.equal(better("term_months", 12, 60), 0, "CD term has no direction");
+});
+
+test("a credit card has metrics pointing opposite ways at once", () => {
+  assert.equal(better("intro_apr", 0, 4.9), 1);
+  assert.equal(better("rewards_rate", 3, 1.5), 1);
+  assert.equal(better("annual_fee", 0, 95), 1);
+});
+
+test("same qualifiers -> comparable", () => {
+  const a = { metric: "apy", value: 4.5, qualifiers: { term_months: 12 } };
+  const b = { metric: "apy", value: 4.0, qualifiers: { term_months: 12 } };
+  assert.equal(comparable(a, b).ok, true);
+});
+
+test("different CD terms -> refused, with a stated reason", () => {
+  const a = { metric: "apy", value: 4.5, qualifiers: { term_months: 7 } };
+  const b = { metric: "apy", value: 4.5, qualifiers: { term_months: 12 } };
+  const v = comparable(a, b);
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /term/);
+});
+
+test("the balance-cap trap is refused, not ranked", () => {
+  // 5.00% capped at $5,000 versus 4.50% uncapped. Ranking these is technically
+  // true and commercially misleading, which is the whole reason for this gate.
+  const capped = { metric: "apy", value: 5.0, qualifiers: { balance_cap: 5000 } };
+  const uncapped = { metric: "apy", value: 4.5, qualifiers: {} };
+  const v = comparable(capped, uncapped);
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /balance cap/);
+});
+
+test("neither side printing a qualifier still compares", () => {
+  const a = { metric: "apy", value: 4.5, qualifiers: {} };
+  const b = { metric: "apy", value: 4.0, qualifiers: {} };
+  assert.equal(comparable(a, b).ok, true,
+    "most search ads print a figure and no terms; refusing all of them refuses everything");
+});
+
+// ===========================================================================
+console.log("\nSTAGE 3 — Han's worked example, end to end");
+// ===========================================================================
+
+const cdAd = (domain, label, apy, term = 12) => ad({
+  advertiser: label,
+  displayUrl: `www.${domain}/certificates`,
+  headlines: [`${label} CD Rates`],
+  description: `Earn ${apy}% APY on a ${term}-month certificate.`,
+  sitelinks: ["Open an Account"],
+  callouts: [],
+  economicFacts: [{ metric: "apy", raw: `${apy}% APY`, qualifiers: { term_months: term }, sourceField: "description" }],
+  claims: [],
+  unclassified: [],
+  leadEmphasis: "rate",
+  urgency: { present: false, phrase: "" },
+  product: "cd",
+  productConfidence: 0.95,
+  truncated: false,
+  legible: true,
+}, { domain, advertiser: label });
+
+const CD_BOARD = buildBoard({
+  client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [cdAd("lacapfcu.org", "La Capitol FCU", "4.00")] },
+  competitors: [
+    { label: "Comp A", domain: "a.org", ads: [cdAd("a.org", "Comp A", "3.85")] },
+    { label: "Comp B", domain: "b.org", ads: [cdAd("b.org", "Comp B", "3.85")] },
+    { label: "Comp C", domain: "c.org", ads: [cdAd("c.org", "Comp C", "3.85")] },
+    { label: "Comp D", domain: "d.org", ads: [cdAd("d.org", "Comp D", "4.50")] },
+    { label: "Comp E", domain: "e.org", ads: [cdAd("e.org", "Comp E", "4.50")] },
+  ],
+  product: "cd",
+  progress: Object.fromEntries(["lacapfcu.org", "a.org", "b.org", "c.org", "d.org", "e.org"]
+    .map((d) => [d, { listed: 1, read: 1 }])),
+});
+
+test("the CEO's example produces the CEO's sentence", () => {
+  const f = CD_BOARD.findings.find((x) => x.rule === "rate_position");
+  assert.ok(f, "no rate position finding");
+  assert.equal(f.count, 2, "two competitors advertise a higher APY");
+  assert.equal(f.denominator, 5);
+  assert.match(f.headline, /2 of 5 comparable competitors advertise a higher APY/);
+  assert.match(f.headline, /3 advertise a lower/);
+});
+
+test("the report line is scoped, neutral in voice, and names its denominator", () => {
+  const line = CD_BOARD.reportLines.find((l) => l.id === "rate_position_apy");
+  assert.ok(line);
+  assert.match(line.text, /captured/, "must be scoped to what was captured");
+  assert.doesNotMatch(line.text, /inferior|worse|behind|should/i,
+    "RAIN never asserts the client's product is worse");
+});
+
+test("every finding declares its unit of analysis", () => {
+  for (const f of CD_BOARD.findings) {
+    assert.ok(["brand", "cluster", "creative"].includes(f.unit), `${f.rule} has no unit`);
+  }
+});
+
+// ===========================================================================
+console.log("\nSTAGE 4 — the five findings that define done");
+// ===========================================================================
+
+const chk = (domain, label, json, provider = {}) => ad({
+  advertiser: label, displayUrl: `www.${domain}/checking`,
+  sitelinks: [], callouts: [], unclassified: [],
+  urgency: { present: false, phrase: "" },
+  product: "checking", productConfidence: 0.95, truncated: false, legible: true,
+  ...json,
+}, { domain, advertiser: label, ...provider });
+
+const BOARD = buildBoard({
+  client: {
+    label: "La Capitol FCU", domain: "lacapfcu.org",
+    ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["La Capitol Checking", "6.50% APY"],
+      description: "Earn 6.50% APY on Choice Checking. Get paid up to 2 days early. Limited-time offer.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY", qualifiers: {}, sourceField: "headline" }],
+      claims: [{ claim: "early_direct_deposit", verbatim: "Get paid up to 2 days early", sourceField: "description" }],
+      leadEmphasis: "rate",
+    })],
+  },
+  competitors: [
+    { label: "Campus Federal", domain: "campusfederal.org", ads: [ad(CAMPUS_STACKED, { domain: "campusfederal.org" })] },
+    { label: "Comp B", domain: "b.org", ads: [chk("b.org", "Comp B", {
+      headlines: ["Get $400 When You Switch"],
+      description: "Open a checking account and earn $400, then earn 3.75% APY. No monthly fee.",
+      economicFacts: [{ metric: "cash_bonus", raw: "$400", qualifiers: {}, sourceField: "headline" },
+                      { metric: "apy", raw: "3.75% APY", qualifiers: {}, sourceField: "description" }],
+      claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee", sourceField: "description" }],
+      leadEmphasis: "bonus",
+    })] },
+    { label: "Comp C", domain: "c.org", ads: [chk("c.org", "Comp C", {
+      headlines: ["$300 Checking Bonus"],
+      description: "Earn $300. No monthly fee, no minimum balance.",
+      economicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {}, sourceField: "headline" }],
+      claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee", sourceField: "description" }],
+      leadEmphasis: "bonus",
+    })] },
+    { label: "Comp D", domain: "d.org", ads: [chk("d.org", "Comp D", {
+      headlines: ["$250 Bonus Checking"],
+      description: "Switch and earn $250 with no monthly fee.",
+      economicFacts: [{ metric: "cash_bonus", raw: "$250", qualifiers: {}, sourceField: "headline" }],
+      claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee", sourceField: "description" }],
+      leadEmphasis: "bonus",
+    })] },
+    { label: "Comp E", domain: "e.org", ads: [chk("e.org", "Comp E", {
+      headlines: ["Neighbors Checking"],
+      description: "Checking and savings with 24/7 online and mobile banking.",
+      economicFacts: [],
+      claims: [{ claim: "mobile_banking", verbatim: "24/7 Online & Mobile Banking", sourceField: "description" }],
+      leadEmphasis: "brand",
+    })] },
+  ],
+  product: "checking",
+  progress: Object.fromEntries(["lacapfcu.org", "campusfederal.org", "b.org", "c.org", "d.org", "e.org"]
+    .map((d) => [d, { listed: 1, read: 1 }])),
+});
+
+const has = (rule) => BOARD.findings.find((f) => f.rule === rule)
+  || (() => { throw new Error(`missing finding: ${rule}\n       got: ${BOARD.findings.map((f) => f.rule).join(", ")}`); })();
+
+test("1. bonus gap — 4 of 5 competitors advertise a bonus, the client does not", () => {
+  const f = has("bonus_gap");
+  assert.equal(f.count, 4);
+  assert.equal(f.denominator, 5);
+  assert.equal(f.unit, "brand", "a brand with 40 creatives counts once");
+});
+
+test("2. rate position — the client leads on APY", () => {
+  const f = BOARD.findings.find((x) => x.rule === "rate_advantage" || x.rule === "rate_position");
+  assert.ok(f);
+  assert.equal(f.direction, "positive", "6.50% beats 4.50% and 3.75%");
+});
+
+test("3. offer combination — competitors stack rate and bonus, the client does not", () => {
+  const f = has("offer_combination");
+  assert.equal(f.count, 2, "Campus and Comp B carry two figures in one ad");
+});
+
+test("4. message gap — a majority mention no monthly fee, the client does not", () => {
+  const f = BOARD.findings.find((x) => x.rule === "claim_gap" && /monthly fee/i.test(x.headline));
+  assert.ok(f, "no monthly-fee claim gap");
+  assert.equal(f.count, 4);
+  assert.match(f.headline, /not observed in/i, "absence is a recall claim, never a fact about them");
+});
+
+test("5. message advantage — only the client mentions early direct deposit", () => {
+  const f = has("claim_advantage");
+  assert.match(f.headline, /early direct deposit/i);
+  assert.equal(f.direction, "positive", "Han asked why performance is GOOD as well as bad");
+});
+
+test("every finding can point at the ads that created it", () => {
+  for (const f of BOARD.findings) {
+    if (f.rule === "offer_withdrawn") continue;   // absence has no creative
+    assert.ok(f.evidence.length > 0, `${f.rule} has no evidence`);
+  }
+});
+
+test("the board never pads to a target count", () => {
+  assert.ok(BOARD.findings.length <= 6);
+  assert.equal(BOARD.findings.length, Math.min(6, BOARD.findingsTotal));
+});
+
+test("the offer snapshot carries only this product's metrics", () => {
+  assert.deepEqual(BOARD.snapshot.columns.map((c) => c.metric),
+    ["apy", "cash_bonus", "monthly_fee", "minimum_opening_deposit"]);
+});
+
+// ===========================================================================
+console.log("\nSTAGE 5 — the guards");
+// ===========================================================================
+
+test("zero client ads suppresses every client-gap finding", () => {
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [] },
+    competitors: [
+      { label: "Campus Federal", domain: "campusfederal.org", ads: [ad(CAMPUS_STACKED, { domain: "campusfederal.org" })] },
+      { label: "Comp B", domain: "b.org", ads: [chk("b.org", "Comp B", {
+        headlines: ["$400"], description: "Earn $400.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$400", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus",
+      })] },
+    ],
+    product: "checking",
+    progress: { "lacapfcu.org": { listed: 0, read: 0 }, "campusfederal.org": { listed: 1, read: 1 }, "b.org": { listed: 1, read: 1 } },
+  });
+  assert.equal(board.coverage.allowClientGapFindings, false);
+  for (const f of board.findings) {
+    assert.doesNotMatch(f.headline, /La Capitol FCU'?s captured ads do not/,
+      "cannot state what the client did not advertise when zero client ads were captured");
+  }
+  assert.equal(board.empty?.kind, "no_client_ads");
+});
+
+test("an unreadable competitor is excluded from the denominator, not counted as a 'no'", () => {
+  const board = buildBoard({
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Checking"], description: "Open today.", economicFacts: [], claims: [], leadEmphasis: "brand",
+    })] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: ["$500"], description: "Earn $500.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus",
+      })] },
+      { label: "B", domain: "b.org", ads: [chk("b.org", "B", {
+        headlines: ["$500"], description: "Earn $500.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus",
+      })] },
+      { label: "Dark", domain: "dark.org", ads: [] },
+    ],
+    product: "checking",
+    progress: { "client.org": { listed: 1, read: 1 }, "a.org": { listed: 1, read: 1 }, "b.org": { listed: 1, read: 1 }, "dark.org": { listed: 0, read: 0 } },
+  });
+  const f = board.findings.find((x) => x.rule === "bonus_gap");
+  assert.ok(f);
+  assert.equal(f.denominator, 2, "the competitor we could not read is not a competitor without a bonus");
+});
+
+test("below three readable competitors, ratio language is replaced by names", () => {
+  const board = buildBoard({
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Checking"], description: "Open today.", economicFacts: [], claims: [], leadEmphasis: "brand",
+    })] },
+    competitors: [{ label: "Campus Federal", domain: "campusfederal.org", ads: [ad(CAMPUS_STACKED, { domain: "campusfederal.org" })] }],
+    product: "checking",
+    progress: { "client.org": { listed: 1, read: 1 }, "campusfederal.org": { listed: 1, read: 1 } },
+  });
+  assert.equal(board.coverage.allowRatioLanguage, false);
+  const f = board.findings.find((x) => x.rule === "bonus_gap");
+  if (f) {
+    assert.doesNotMatch(f.headline, /1 of 1/, "'1 of 1 competitors' is an anecdote wearing a denominator");
+    assert.match(f.headline, /Campus Federal/);
+  }
+});
+
+test("a newly added competitor cannot manufacture a 'newly observed' card", () => {
+  const previous = {
+    label: "July 2026",
+    competitorSet: { hash: "old", domains: ["campusfederal.org"] },
+    brands: [{ domain: "campusfederal.org", label: "Campus Federal", positions: {}, claims: [], hasCoverage: true }],
+  };
+  const board = buildBoard({
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Checking"], description: "Open today.", economicFacts: [], claims: [], leadEmphasis: "brand",
+    })] },
+    competitors: [
+      { label: "Campus Federal", domain: "campusfederal.org", ads: [ad(CAMPUS_STACKED, { domain: "campusfederal.org" })] },
+      // Present this month only. Their $700 bonus is new to US, not new.
+      { label: "Newcomer", domain: "new.org", ads: [chk("new.org", "Newcomer", {
+        headlines: ["$700 Bonus"], description: "Earn $700.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$700", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus",
+      })] },
+    ],
+    product: "checking",
+    progress: { "client.org": { listed: 1, read: 1 }, "campusfederal.org": { listed: 1, read: 1 }, "new.org": { listed: 1, read: 1 } },
+    previous,
+  });
+  const bogus = board.findings.find((f) => f.rule === "offer_new" && /Newcomer/.test(f.headline));
+  assert.equal(bogus, undefined, "a competitor with no prior state has no change to report");
+  assert.ok(board.setDrift?.changed, "the board must disclose that the set moved");
+  assert.match(board.setDrift.note, /Competitor set changed/);
+});
+
+test("a real change against a stable competitor IS reported", () => {
+  const previous = {
+    label: "July 2026",
+    competitorSet: { hash: "old", domains: ["campusfederal.org"] },
+    brands: [{
+      domain: "campusfederal.org", label: "Campus Federal", hasCoverage: true, claims: [],
+      positions: { apy: { raw: "4.50% APY", value: 4.5, qualifiers: {} } },
+    }],
+  };
+  const board = buildBoard({
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Checking"], description: "Open today.", economicFacts: [], claims: [], leadEmphasis: "brand",
+    })] },
+    competitors: [{ label: "Campus Federal", domain: "campusfederal.org", ads: [ad(CAMPUS_STACKED, { domain: "campusfederal.org" })] }],
+    product: "checking",
+    progress: { "client.org": { listed: 1, read: 1 }, "campusfederal.org": { listed: 1, read: 1 } },
+    previous,
+  });
+  const f = board.findings.find((x) => x.rule === "offer_new" && /600/.test(x.headline));
+  assert.ok(f, "the $600 bonus is genuinely new against a competitor present in both runs");
+});
+
+test("unclassified selling points are surfaced so profiles can be improved", () => {
+  const board = buildBoard({
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Checking"], description: "Free toaster.", economicFacts: [], claims: [],
+      unclassified: ["Free toaster with every account"], leadEmphasis: "brand",
+    })] },
+    competitors: [{ label: "A", domain: "a.org", ads: [] }],
+    product: "checking",
+    progress: { "client.org": { listed: 1, read: 1 }, "a.org": { listed: 0, read: 0 } },
+  });
+  assert.ok(board.unclassified.includes("Free toaster with every account"));
+});
+
+// ===========================================================================
+console.log("\nSTAGE 6 — the scoreboard, the reference tier, the BaZing case");
+// ===========================================================================
+
+const nat = (domain, label, json) => ({ ...chk(domain, label, json), tier: "national" });
+
+const SB = buildBoard({
+  client: {
+    label: "La Capitol", domain: "lacapfcu.org",
+    ads: [
+      // The real ad: an add-on package price AND a rate in the same creative.
+      chk("lacapfcu.org", "La Capitol", {
+        headlines: ["Personal Checking Account", "Personal Banking In Louisiana"],
+        description: "Enjoy mobile protection, roadside help, ID theft aid & more for $5.99/month* with BaZing. Celebrate La Cap's 65th anniversary with 6.50% APY* on Checking. Limited-time offer!",
+        economicFacts: [
+          { metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "description" },
+          // Correctly tagged: this is BaZing's price, not the account's fee.
+          { metric: "monthly_fee", raw: "$5.99/month*", qualifiers: { applies_to: "BaZing" }, sourceField: "description" },
+        ],
+        claims: [], leadEmphasis: "feature",
+      }, { creativeId: "CR_BAZING" }),
+      chk("lacapfcu.org", "La Capitol", {
+        headlines: ["No Deposit Checking Account"],
+        description: "No Fee checking with no minimum balance.",
+        economicFacts: [],
+        claims: [
+          { claim: "no_monthly_fee", verbatim: "No Fee", sourceField: "description" },
+          { claim: "no_minimum_balance", verbatim: "no minimum balance", sourceField: "description" },
+        ],
+        leadEmphasis: "feature",
+      }, { creativeId: "CR_NOFEE" }),
+    ],
+  },
+  competitors: [
+    { label: "Campus Federal", domain: "campusfederal.org", ads: [ad(CAMPUS_STACKED, { domain: "campusfederal.org" })] },
+    { label: "Baton Rouge Telco", domain: "brtelco.org", ads: [chk("brtelco.org", "Baton Rouge Telco", {
+      headlines: ["$300 Checking Bonus"], description: "Earn $300. No monthly fee.",
+      economicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {}, sourceField: "headline" }],
+      claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee", sourceField: "description" }],
+      leadEmphasis: "bonus",
+    })] },
+    { label: "Neighbors FCU", domain: "neighborsfcu.org", ads: [chk("neighborsfcu.org", "Neighbors FCU", {
+      headlines: ["Neighbors FCU"], description: "Checking & Savings w/ 24/7 Online & Mobile Banking.",
+      economicFacts: [], claims: [{ claim: "mobile_banking", verbatim: "24/7 Online & Mobile Banking", sourceField: "description" }],
+      leadEmphasis: "brand",
+    })] },
+    // Reference tier. Must never touch a denominator.
+    { label: "J.P. Morgan Chase", domain: "chase.com", tier: "national", ads: [nat("chase.com", "J.P. Morgan Chase", {
+      headlines: ["Chase Total Checking", "$900 Bonus"], description: "Earn $900 with qualifying activities. 5.00% APY.",
+      economicFacts: [
+        { metric: "cash_bonus", raw: "$900", qualifiers: {}, sourceField: "headline" },
+        { metric: "apy", raw: "5.00% APY", qualifiers: {}, sourceField: "description" },
+      ],
+      claims: [{ claim: "no_monthly_fee", verbatim: "No monthly service fee", sourceField: "description" }],
+      leadEmphasis: "bonus",
+    })] },
+  ],
+  product: "checking",
+  progress: Object.fromEntries(
+    ["lacapfcu.org", "campusfederal.org", "brtelco.org", "neighborsfcu.org", "chase.com"]
+      .map((d) => [d, { listed: 2, read: 2 }])),
+});
+
+test("every shown finding lands in exactly one of the three boards", () => {
+  const t = SB.boards.lead.length + SB.boards.pressure.length + SB.boards.context.length;
+  assert.equal(t, SB.findings.length);
+  for (const f of SB.findings) {
+    assert.ok(["lead", "pressure", "context"].includes(f.outcome), `${f.rule} has no outcome`);
+  }
+});
+
+test("the client's wins and losses are both present", () => {
+  assert.ok(SB.boards.lead.length >= 1, "no lead findings");
+  assert.ok(SB.boards.pressure.length >= 1, "no pressure findings");
+});
+
+test("a national never enters a denominator", () => {
+  assert.ok(!SB.brands.some((b) => b.domain === "chase.com"));
+  assert.ok(SB.referenceBrands.some((b) => b.domain === "chase.com"));
+  const bonus = SB.findings.find((f) => f.rule === "bonus_gap");
+  assert.ok(bonus);
+  assert.equal(bonus.denominator, 3, "3 local competitors, not 4 — Chase is reference only");
+});
+
+test("a national never appears inside a finding headline", () => {
+  for (const f of SB.findings) assert.doesNotMatch(f.headline, /Chase|Capital One/);
+});
+
+test("the national is still visible, in its own labelled block", () => {
+  assert.ok(SB.snapshot.reference.length >= 1);
+  assert.match(SB.snapshot.referenceNote, /never counted among the selected local competitors/);
+});
+
+test("a BaZing add-on price is never ranked against an account fee", () => {
+  const bazing = { metric: "monthly_fee", value: 5.99, qualifiers: { applies_to: "BaZing" } };
+  const accountFee = { metric: "monthly_fee", value: 5.00, qualifiers: {} };
+  const v = comparable(bazing, accountFee);
+  assert.equal(v.ok, false, "a benefits-bundle price is not the account's monthly fee");
+  assert.match(v.reason, /what the fee covers/);
+});
+
+test("the $5.99 / 'No Fee' pair is raised as a question, never as a contradiction", () => {
+  const f = SB.findings.find((x) => x.rule === "mixed_message");
+  if (f) {
+    assert.equal(f.outcome, "context", "not a scoreboard entry — no competitor is beating anyone");
+    assert.match(f.detail, /different products or an optional add-on/,
+      "the tool cannot tell a real inconsistency from two ads about two things");
+    assert.doesNotMatch(f.headline, /contradict|inconsistent/i);
+  }
+});
+
+test("no headline says 'all 1 comparable competitor'", () => {
+  for (const f of SB.findings) assert.doesNotMatch(f.headline, /all 1 comparable/);
+});
+
+test("named gap findings agree with their verb", () => {
+  for (const f of SB.findings) assert.doesNotMatch(f.headline, /^\S[^.]*\b[A-Z]\w+ Federal advertise\b/);
+});
+
+test("evidence counts creatives, not facts", () => {
+  const f = SB.findings.find((x) => x.evidence?.length);
+  assert.ok(f);
+  assert.equal(f.evidence.length, new Set(f.evidence).size);
+});
+
+// ===========================================================================
+console.log("\nSTAGE 6 — figures the tool must refuse to read");
+// ===========================================================================
+//
+// Both fixtures are verbatim from the 2026-08-31 La Capitol capture, and each
+// put a false sentence on the board before these guards existed.
+// ===========================================================================
+
+// Google clipped this description mid-number. The reader proposed it as a cash
+// bonus of "Up To 5.5…". The same advertiser's uncut ad reads "Earn Up To 5.55%
+// APY*" — so it was not a bonus, and it was not 5.5 of anything.
+const CLIPPED = buildBoard({
+  client: {
+    label: "La Capitol FCU", domain: "lacapfcu.org",
+    ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["La Capitol Checking"],
+      description: "Earn 6.50% APY on Choice Checking.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })],
+  },
+  competitors: [
+    { label: "BR Telco", domain: "brtelco.org", ads: [chk("brtelco.org", "BR Telco", {
+      headlines: ["Baton Rouge Telco Federal Credit Union"],
+      description: "Open A Checking Account With BR Telco & Earn Up To 5.5…",
+      truncated: true,
+      economicFacts: [{ metric: "cash_bonus", raw: "Up To 5.5…", qualifiers: {}, sourceField: "description" }],
+    })] },
+    { label: "Campus Federal", domain: "campusfederal.org", ads: [chk("campusfederal.org", "Campus Federal", {
+      headlines: ["Earn $600 Reward Card"],
+      description: "Earn $600 with Lagniappe Checking.",
+      economicFacts: [{ metric: "cash_bonus", raw: "$600", qualifiers: {}, sourceField: "headline" }],
+    })] },
+  ],
+  product: "checking",
+  progress: Object.fromEntries(["lacapfcu.org", "brtelco.org", "campusfederal.org"]
+    .map((d) => [d, { listed: 1, read: 1 }])),
+});
+
+test("a clipped figure never becomes a brand's advertised position", () => {
+  const br = CLIPPED.brands.find((b) => b.domain === "brtelco.org");
+  assert.equal(br.positions.cash_bonus, undefined, "a cut-off figure was counted as an offer");
+});
+
+test("a clipped figure is not counted in a gap denominator", () => {
+  const gap = CLIPPED.findings.find((f) => f.rule === "bonus_gap");
+  assert.ok(gap, "expected a bonus gap finding");
+  assert.equal(gap.count, 1, `expected 1 competitor advertising a bonus, got: ${gap.headline}`);
+});
+
+test("the clipped reading survives as evidence, flagged as cut off", () => {
+  const row = CLIPPED.snapshot.rows.find((r) => r.domain === "brtelco.org");
+  const cell = row.cells.find((c) => c.metric === "cash_bonus");
+  assert.equal(cell.clipped, true, "the cell must say the figure was cut off");
+  assert.ok(cell.evidence.length, "the clipped ad must still be reachable");
+});
+
+test("an unclipped figure carrying its unit is unaffected", () => {
+  const cf = CLIPPED.brands.find((b) => b.domain === "campusfederal.org");
+  assert.equal(cf.positions.cash_bonus.raw, "$600");
+});
+
+// "$5.99/month* with BaZing" is the price of an optional benefits bundle. Read
+// as the account's monthly fee it says the client charges for an account their
+// competitors give away — about the client's own product, in the client's own
+// report.
+const BUNDLE = buildBoard({
+  client: {
+    label: "La Capitol FCU", domain: "lacapfcu.org",
+    ads: [
+      chk("lacapfcu.org", "La Capitol FCU", {
+        headlines: ["Personal Checking Account"],
+        description: "Enjoy mobile protection, roadside help & more for $5.99/month* with BaZing.",
+        economicFacts: [{ metric: "monthly_fee", raw: "$5.99/month*", qualifiers: { applies_to: "BaZing" }, sourceField: "description" }],
+      }, { creativeId: "FEE_AD" }),
+      chk("lacapfcu.org", "La Capitol FCU", {
+        headlines: ["Free Checking"],
+        description: "No Fee Choice Checking.",
+        claims: [{ claim: "no_monthly_fee", verbatim: "No Fee Choice Checking", sourceField: "description" }],
+      }, { creativeId: "FREE_AD" }),
+    ],
+  },
+  competitors: [
+    { label: "Campus Federal", domain: "campusfederal.org", ads: [chk("campusfederal.org", "Campus Federal", {
+      headlines: ["Lagniappe Checking"], description: "Earn 4.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "4.50% APY", qualifiers: {}, sourceField: "description" }],
+    })] },
+  ],
+  product: "checking",
+  progress: Object.fromEntries(["lacapfcu.org", "campusfederal.org"].map((d) => [d, { listed: 1, read: 1 }])),
+});
+
+test("an add-on price is never the brand's monthly fee", () => {
+  const c = BUNDLE.brands.find((b) => b.isClient);
+  assert.equal(c.positions.monthly_fee, undefined, "a bundle price was read as the account's fee");
+});
+
+test("no card asserts a cost the client's own ads contradict", () => {
+  const asserted = BUNDLE.findings.filter((f) => f.rule === "fee_position");
+  assert.equal(asserted.length, 0,
+    `a cost was asserted on a contested fee: ${asserted.map((f) => f.headline).join(" | ")}`);
+});
+
+test("a national never enters the competitor set version", () => {
+  // The snapshot writer used to recompute this from run.competitors, which
+  // includes the reference tier. Stored 6, compared 4, and every run reported
+  // "competitor set changed: −2" that no user action could clear.
+  const withNationals = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Checking"], description: "Earn 6.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })] },
+    competitors: [
+      { label: "Campus Federal", domain: "campusfederal.org", tier: "local", ads: [] },
+      { label: "J.P. Morgan Chase", domain: "chase.com", tier: "national", ads: [] },
+      { label: "Capital One", domain: "capitalone.com", tier: "national", ads: [] },
+    ],
+    product: "checking",
+    progress: { "lacapfcu.org": { listed: 1, read: 1 } },
+  });
+  assert.deepEqual(withNationals.competitorSet.domains, ["campusfederal.org"],
+    "the national tier leaked into set identity");
+});
+
+test("an extractor improvement is not reported as a market change", () => {
+  // A snapshot written before the clipped-figure gate holds "Up To 5.5…" as a
+  // cash bonus. Refusing it today must read as silence, not as a competitor
+  // withdrawing an offer they never advertised.
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Checking"], description: "Earn 6.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })] },
+    competitors: [{ label: "BR Telco", domain: "brtelco.org", tier: "local", ads: [chk("brtelco.org", "BR Telco", {
+      headlines: ["Free Checking"], description: "Earn Up To 5.55% APY*.",
+      economicFacts: [{ metric: "apy", raw: "5.55% APY*", qualifiers: {}, sourceField: "description" }],
+    })] }],
+    product: "checking",
+    progress: { "lacapfcu.org": { listed: 1, read: 1 }, "brtelco.org": { listed: 1, read: 1 } },
+    previous: {
+      label: "August 2026",
+      competitorSet: { hash: "x", domains: ["brtelco.org"] },
+      brands: [{ domain: "brtelco.org", label: "BR Telco", positions: {
+        cash_bonus: { raw: "Up To 5.5…", value: null, qualifiers: {}, creativeId: "OLD" },
+        apy: { raw: "5.55% APY*", value: 5.55, qualifiers: {}, creativeId: "OLD2" },
+      } }],
+    },
+  });
+  const withdrawn = board.findings.filter((f) => f.rule === "offer_withdrawn");
+  assert.equal(withdrawn.length, 0,
+    `a refused figure was reported as a withdrawn offer: ${withdrawn.map((f) => f.headline).join(" | ")}`);
+});
+
+// ===========================================================================
+console.log("\nSTAGE 8 — what the set is competing on");
+// ===========================================================================
+
+test("the set read names the contested axis with its denominator", () => {
+  const s = BOARD.setShape;
+  assert.ok(s, "no set shape produced");
+  const axis = s.observations.find((o) => o.kind === "contested_axis");
+  assert.ok(axis, "expected a contested axis");
+  assert.ok(axis.denominator >= 3, "an axis needs a stated population");
+  assert.match(axis.text, new RegExp(`\\b${axis.count} of ${axis.denominator}\\b`),
+    `the count must be visible in the sentence: ${axis.text}`);
+});
+
+test("no observation claims performance, only advertising", () => {
+  // The capture holds no click, conversion or spend. Any verb about outcomes
+  // would be invented, and it would read as RAIN asserting what works.
+  const BANNED = /\b(wins?|winning|works?|performs?|effective|best|should|recommend|you should|drives?|converts?)\b/i;
+  for (const o of BOARD.setShape.observations) {
+    assert.doesNotMatch(o.text, BANNED, `outcome language in a counted observation: "${o.text}"`);
+  }
+  assert.doesNotMatch(BOARD.setShape.framing, /\b(wins?|works?|recommend)\b/i);
+});
+
+test("every observation points at the ads that produced it", () => {
+  for (const o of BOARD.setShape.observations) {
+    assert.ok(o.evidence?.length, `${o.kind} carries no evidence`);
+    assert.equal(o.evidence.length, new Set(o.evidence).size, "evidence must be deduped");
+  }
+});
+
+test("a national never enters the counted population", () => {
+  // Same rule as every denominator on the board: we cannot tell whether a
+  // national's ads served in this market, so they cannot describe it.
+  const s = BOARD.setShape;
+  const local = BOARD.brands.filter((b) => (b.tier || "local") !== "national" && b.hasCoverage);
+  assert.equal(s.brandsCounted, local.length, "the population must be local brands only");
+  for (const o of s.observations.filter((x) => !x.reference)) {
+    assert.ok(o.denominator <= local.length, `${o.kind} counted beyond the local set`);
+  }
+});
+
+test("below three readable brands the set has no shape", () => {
+  const thin = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Checking"], description: "Earn 6.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })] },
+    competitors: [{ label: "Campus Federal", domain: "campusfederal.org", ads: [chk("campusfederal.org", "Campus Federal", {
+      headlines: ["Lagniappe"], description: "Earn 4.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "4.50% APY", qualifiers: {}, sourceField: "description" }],
+    })] }],
+    product: "checking",
+    progress: { "lacapfcu.org": { listed: 1, read: 1 }, "campusfederal.org": { listed: 1, read: 1 } },
+  });
+  assert.equal(thin.setShape, null, "two brands is a coincidence, not a shape");
+});
+
+// ===========================================================================
+console.log("\nSTAGE 9 — weight, and the one sentence at the top");
+// ===========================================================================
+
+test("a lone COMPETITOR's tactic is not weighted like a shared pattern", () => {
+  // The complaint this fixes: "1 of 3 competitors advertise a $5 minimum" was
+  // rendering identically to "2 of 3 mention member-owned", telling the reader
+  // they carried the same diagnostic weight.
+  const byRule = Object.fromEntries(BOARD.findings.map((f) => [f.rule, f]));
+  for (const f of BOARD.findings) {
+    assert.ok(f.significance, `${f.rule} has no significance`);
+    const n = Number(f.count), d = Number(f.denominator);
+    if (Number.isFinite(n) && Number.isFinite(d) && d >= 3 && n === 1 && f.outcome === "pressure") {
+      assert.equal(f.significance, "isolated", `${f.rule} at ${n}/${d} should be isolated`);
+    }
+    if (Number.isFinite(n) && Number.isFinite(d) && d > 0 && n / d >= 0.5 && f.outcome !== "context") {
+      assert.equal(f.significance, "primary", `${f.rule} at ${n}/${d} should be primary`);
+    }
+  }
+  assert.ok(Object.values(byRule).some((f) => f.significance === "primary"), "expected a primary finding");
+});
+
+test("the client being the only one doing something is never demoted", () => {
+  // The same 1-of-4 arithmetic means opposite things depending on WHO the one
+  // is. Read as an outlier it hid every sole advantage behind a fold, and the
+  // La Capitol auto-loan board printed "Where you lead: 0" directly above two
+  // cards naming exactly where they led.
+  const quiet = (domain, label) => chk(domain, label, {
+    headlines: ["Checking"], description: "Open an account online today.",
+    economicFacts: [], claims: [],
+  });
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Choice Checking", "6.50% APY"],
+      description: "Earn 6.50% APY. Get paid up to 2 days early.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+      claims: [{ claim: "early_direct_deposit", verbatim: "Get paid up to 2 days early", sourceField: "description" }],
+    })] },
+    competitors: [
+      { label: "Campus Federal", domain: "campusfederal.org", ads: [quiet("campusfederal.org", "Campus Federal")] },
+      { label: "Neighbors FCU", domain: "neighborsfcu.org", ads: [quiet("neighborsfcu.org", "Neighbors FCU")] },
+      { label: "BR Telco", domain: "brtelco.org", ads: [quiet("brtelco.org", "BR Telco")] },
+    ],
+    product: "checking",
+    progress: {
+      "lacapfcu.org": { listed: 1, read: 1 }, "campusfederal.org": { listed: 1, read: 1 },
+      "neighborsfcu.org": { listed: 1, read: 1 }, "brtelco.org": { listed: 1, read: 1 },
+    },
+  });
+
+  const leads = board.findings.filter((f) => f.outcome === "lead");
+  assert.ok(leads.length >= 1, "expected the client's sole APY to be a lead finding");
+  for (const f of leads) {
+    assert.notEqual(f.significance, "isolated",
+      `${f.rule} is about the client, so being alone in it is the finding, not a reason to hide it`);
+  }
+  // A single advertiser out of four — the arithmetic that used to demote it.
+  assert.ok(leads.some((f) => Number(f.count) === 1 && Number(f.denominator) >= 3),
+    "the fixture no longer exercises the 1-of-many case");
+  // And it has to reach the column, not just carry the right label.
+  assert.ok(board.boards.lead.some((f) => f.significance !== "isolated"),
+    "the lead column would still render 0");
+});
+
+test("no finding in the lead column is ever filed as a single advertiser's tactic", () => {
+  // The section below the columns pulls isolated findings from BOTH boards. If
+  // a lead one can land there it appears under a heading about competitors,
+  // which is how a client advantage came to read as competitive pressure.
+  for (const f of BOARD.boards.lead) {
+    assert.notEqual(f.significance, "isolated", `${f.rule} would fall out of the lead column`);
+  }
+});
+
+test("the client's stance on the headline rate is always primary", () => {
+  const rate = BOARD.findings.find((f) => f.metric === "apy" && f.outcome !== "context");
+  assert.ok(rate, "expected a finding on the primary rate");
+  assert.equal(rate.significance, "primary");
+});
+
+test("the client's own inconsistency is internal, never a competitor win", () => {
+  for (const f of BOARD.findings.filter((f) => f.outcome === "context")) {
+    assert.equal(f.significance, "internal", `${f.rule} should be internal`);
+  }
+});
+
+test("the primary read states where the client stands, with its denominator", () => {
+  const pr = BOARD.primaryRead;
+  assert.ok(pr, "no primary read produced");
+  assert.match(pr.headline, /\d+ comparable local competitor/,
+    `the headline must name the comparable count: ${pr.headline}`);
+});
+
+test("the read separates a shared pattern from a single advertiser's tactic", () => {
+  const pr = BOARD.primaryRead;
+  // Only PRESSURE findings reach the differences line — a lone thing the client
+  // LEADS on is not a competitor difference.
+  const isolated = BOARD.findings.filter((f) => f.significance === "isolated" && f.outcome === "pressure");
+  if (isolated.length) {
+    assert.match(pr.differences, /one advertiser only/,
+      `a lone tactic must be marked as one: ${pr.differences}`);
+  }
+  for (const f of BOARD.findings.filter((x) => x.significance === "primary" && x.outcome === "pressure")) {
+    assert.match(pr.differences, new RegExp(`${f.count} of ${f.denominator}`),
+      `a shared pattern must carry its share: ${pr.differences}`);
+  }
+});
+
+test("the read never recommends anything", () => {
+  const ADVICE = /\b(should|recommend|consider|adopt|improve|increase|ought|need to|try)\b/i;
+  for (const k of ["framing", "headline", "differences", "boundary"]) {
+    assert.doesNotMatch(BOARD.primaryRead[k], ADVICE, `advice in ${k}`);
+  }
+});
+
+test("the read never claims a difference caused performance", () => {
+  // Scoped to the ASSERTIVE lines. The boundary is where causation is denied —
+  // "it cannot show what any of it caused" — so a blanket ban would fail the one
+  // sentence doing the guarding.
+  const CAUSATION = /\b(because of|caused by|driving|drove|due to|resulted in|led to)\b/i;
+  for (const k of ["headline", "differences"]) {
+    assert.doesNotMatch(BOARD.primaryRead[k], CAUSATION, `causation asserted in ${k}`);
+  }
+  assert.match(BOARD.primaryRead.boundary, /cannot show what any of it caused/i,
+    "the boundary must deny causation explicitly");
+});
+
+test("the read never calls the product weak — only the advertising", () => {
+  const BANNED = /\b(inferior|weak|uncompetitive|worse|poor|behind the market)\b/i;
+  const all = Object.values(BOARD.primaryRead).filter((v) => typeof v === "string").join(" ");
+  assert.doesNotMatch(all, BANNED);
+});
+
+test("the read states what the capture cannot establish", () => {
+  assert.match(BOARD.primaryRead.boundary, /no click, conversion or spend/i);
+});
+
+test("the framing says this is read after delivery, not instead of it", () => {
+  assert.match(BOARD.primaryRead.framing, /delivery|execution/i);
+});
+
+test("a discount off a rate is never read as the rate", () => {
+  // Verbatim from La Capitol's auto-loan ad: "Rates as low as 4.59% APR* ...
+  // get 0.65% off your rate". Both were filed as apr, and because a LOWER apr
+  // wins, 0.65 became the advertised position — so the board told the client
+  // they advertised a 0.65% auto loan.
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["4.59% APR* For 67 - 75 Months"],
+      description: "Refinance your auto loan. Rates as low as 4.59% APR* and get 0.65% off your rate.",
+      product: "auto-loan",
+      economicFacts: [
+        { metric: "apr", raw: "4.59% APR*", qualifiers: {}, sourceField: "headline" },
+        { metric: "apr", raw: "0.65% off", qualifiers: {}, sourceField: "description" },
+      ],
+    })] },
+    competitors: ["a", "b", "c"].map((k) => ({
+      label: `Comp ${k.toUpperCase()}`, domain: `${k}.org`, ads: [chk(`${k}.org`, `Comp ${k.toUpperCase()}`, {
+        headlines: ["Auto Loans"], description: "Rates from 4.84% APR*.", product: "auto-loan",
+        economicFacts: [{ metric: "apr", raw: "4.84% APR*", qualifiers: {}, sourceField: "description" }],
+      })],
+    })),
+    product: "auto-loan",
+    progress: Object.fromEntries(["lacapfcu.org", "a.org", "b.org", "c.org"].map((d) => [d, { listed: 1, read: 1 }])),
+  });
+  const c = board.brands.find((b) => b.isClient);
+  assert.equal(c.positions.apr.raw, "4.59% APR*",
+    `a discount became the advertised rate: ${c.positions.apr.raw}`);
+  // RETYPED, not dropped. The ad really does offer 0.65% off — it is simply a
+  // different mechanic, and a separate metric id makes ranking it against a
+  // rate impossible by construction rather than by a filter someone can remove.
+  assert.equal(c.positions.rate_discount?.raw, "0.65% off", "the discount was lost entirely");
+  assert.equal(c.positions.rate_discount.retypedFrom, "apr", "the reclassification is not recorded");
+});
+
+test("a product page URL is detected, plural or singular", () => {
+  // "/credit-cards" resolved to `other`, which matches every ad ever captured —
+  // so every finding and every piece of evidence on that board was about the
+  // wrong product, while looking exactly as confident as a correct one.
+  for (const [path, want] of [
+    ["/credit-cards", "credit-card"], ["/credit-card", "credit-card"],
+    ["/personal-loans", "personal-loan"], ["/home-loans", "mortgage"],
+    ["/money-markets", "money-market"], ["/equity-lines", "heloc"],
+    ["/checking-accounts", "checking"], ["/auto-loan", "auto-loan"],
+  ]) {
+    assert.equal(productFromUrl(`https://lacapfcu.org${path}`).product, want, `${path} misread`);
+  }
+  assert.equal(productFromUrl("https://lacapfcu.org/").from, "none", "a homepage must not guess");
+});
+
+test("an advertiser's own name is never a message strategy", () => {
+  // "Federal credit union" is the institution's legal type and appears in the
+  // verified-advertiser line of essentially every credit-union ad. Counted as
+  // member-owned positioning it produces a message gap against a competitor who
+  // never chose to say anything.
+  for (const v of ["Federal credit union", "Your Local Credit Union", "Credit Union"]) {
+    const ad = normalizeObservation({ product: "checking", rawEconomicFacts: [], allText: v,
+      rawClaims: [{ claim: "member_owned", verbatim: v }] });
+    assert.equal(ad.claims.length, 0, `identity counted as a claim: ${v}`);
+  }
+  // A real selling claim still passes.
+  const real = normalizeObservation({ product: "checking", rawEconomicFacts: [], allText: "x",
+    rawClaims: [{ claim: "member_owned", verbatim: "where it pays to be a member" }] });
+  assert.equal(real.claims.length, 1, "a genuine member claim was rejected");
+});
+
+test("one offer mechanic produces one claim, not two", () => {
+  // "No Payments For 60 Days" was returned as both payment_deferral and
+  // no_payment_days, and rendered as two advantages quoting one sentence.
+  const ad = normalizeObservation({ product: "auto-loan", rawEconomicFacts: [], allText: "x",
+    rawClaims: [
+      { claim: "payment_deferral", verbatim: "No Payments For 60 Days" },
+      { claim: "no_payment_days", verbatim: "No Payments For 60 Days" },
+    ] });
+  assert.deepEqual(ad.claims.map((c) => c.claim), ["payment_deferral"]);
+});
+
+test("an amount you can borrow is never a cash bonus", () => {
+  // "Borrow Funds Up To $30,000*" was filed as a bonus and ranked against
+  // Chase's $3,000 welcome offer. Both are dollars; only one is a payment.
+  const ad = normalizeObservation({ product: "personal-loan", rawClaims: [],
+    allText: "Apply For A Personal Loan - Borrow Funds Up To $30,000*",
+    rawEconomicFacts: [{ metric: "cash_bonus", raw: "$30,000*", qualifiers: {} }] });
+  assert.deepEqual(ad.facts.map((f) => f.metric), ["loan_amount"],
+    "a loan size was left countable as a bonus");
+  assert.equal(ad.facts[0].retypedFrom, "cash_bonus", "the reclassification is not recorded");
+  // A genuine bonus on the same product is untouched.
+  const bonus = normalizeObservation({ product: "personal-loan", rawClaims: [],
+    allText: "Earn a $300 bonus when you open a personal loan",
+    rawEconomicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {} }] });
+  assert.deepEqual(bonus.facts.map((f) => f.metric), ["cash_bonus"], "a real bonus was refused");
+});
+
+test("financing availability is its own mechanic, not a down payment", () => {
+  // "Up to 100% Financing" is how a lender competes when it is not competing on
+  // rate. Read as a down payment it says the opposite of what the ad says.
+  const ad = normalizeObservation({ product: "auto-loan", rawClaims: [],
+    allText: "Great Rates with Extended Loan Terms and Up to 100% Financing",
+    rawEconomicFacts: [{ metric: "down_payment", raw: "Up to 100% Financing", qualifiers: {} }] });
+  assert.deepEqual(ad.facts.map((f) => f.metric), ["financing_percent"]);
+});
+
+test("no two offer mechanics are ever ranked against each other", () => {
+  // The structural guarantee: different metric ids cannot meet in a comparison,
+  // whatever a later stage decides to do. A rate, a discount off that rate and
+  // a financing percentage are three promises, not three values of one.
+  const ids = ["apr", "rate_discount", "financing_percent", "loan_amount", "cash_bonus"];
+  assert.equal(new Set(ids).size, ids.length, "mechanics must not share an id");
+});
+
+test("participation is stated before any ratio is read", () => {
+  // A competitor absent from the product and one present but silent on price
+  // are different facts, and a ratio alone cannot tell them apart.
+  const pr = BOARD.primaryRead;
+  assert.ok(pr.participation, "no participation line");
+  assert.match(pr.participation, /of \d+ selected competitors? advertised/,
+    `participation must name the selected set: ${pr.participation}`);
+});
+
+test("an advertiser with nothing on this product is named once, not tabled", () => {
+  const snap = BOARD.snapshot;
+  assert.ok(Array.isArray(snap.summaries), "expected per-advertiser summaries");
+  for (const x of snap.summaries) {
+    assert.ok(x.adCount > 0, `${x.label} has no ads and should not be summarised`);
+    assert.ok(x.text, `${x.label} has no summary sentence`);
+  }
+  for (const a of snap.absent || []) {
+    // Never "they don't advertise this" — always what OUR capture saw.
+    assert.doesNotMatch(a.text, /does not advertise|no longer/i,
+      `absence stated as a product fact: ${a.text}`);
+  }
+});
+
+test("local and national conclusions never merge into one claim", () => {
+  const t = BOARD.primaryRead.localVsNational;
+  if (!t) return;
+  // "The market is moving toward bonuses" is the sentence to prevent: a
+  // national's ads may never have served in this client's market.
+  assert.doesNotMatch(t, /\bthe market is\b|\bthe industry is\b|\bmoving toward\b|\btrend\b/i,
+    `a market-wide claim was made from reference data: ${t}`);
+  if (/national/i.test(t)) {
+    assert.match(t, /not as evidence of this local market|shown for context/i,
+      "national behaviour must be attributed as reference, not local evidence");
+  }
+});
+
+test("every finding carries a stable id its evidence can be cited by", () => {
+  const ids = BOARD.findings.map((f) => f.id);
+  for (const id of ids) assert.match(id, /^[a-z_]+$/, `unusable finding id: ${id}`);
+  assert.equal(ids.length, new Set(ids).size, "finding ids must be unique on a board");
+  assert.ok(ids.includes("rate_advantage_apy") || ids.includes("rate_position_apy"),
+    `expected a stable id on the primary-rate finding, got: ${ids.join(", ")}`);
+});
+
+test("month-over-month change is surfaced in the read when it exists", () => {
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Checking"], description: "Earn 6.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })] },
+    competitors: ["a", "b", "c"].map((k) => ({
+      label: `Comp ${k.toUpperCase()}`, domain: `${k}.org`, ads: [chk(`${k}.org`, `Comp ${k.toUpperCase()}`, {
+        headlines: ["Checking"], description: "Earn $600 with checking.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$600", qualifiers: {}, sourceField: "description" }],
+      })],
+    })),
+    product: "checking",
+    progress: Object.fromEntries(["lacapfcu.org", "a.org", "b.org", "c.org"].map((d) => [d, { listed: 1, read: 1 }])),
+    previous: {
+      label: "July 2026",
+      competitorSet: { hash: "x", domains: ["a.org", "b.org", "c.org"] },
+      brands: [{ domain: "a.org", label: "Comp A", positions: {} },
+               { domain: "b.org", label: "Comp B", positions: {} },
+               { domain: "c.org", label: "Comp C", positions: {} }],
+    },
+  });
+  assert.ok(board.primaryRead.changes.length, "a newly observed offer must reach the read");
+  for (const c of board.primaryRead.changes) {
+    assert.ok(c.id, "a change must cite the finding it came from");
+    assert.doesNotMatch(c.text, /newly launched|started offering/i,
+      "newly OBSERVED is not newly launched");
+  }
+});
+
+test("below three readable competitors there is no read at all", () => {
+  const thin = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Checking"], description: "Earn 6.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })] },
+    competitors: [{ label: "Campus Federal", domain: "campusfederal.org", ads: [chk("campusfederal.org", "Campus Federal", {
+      headlines: ["Lagniappe"], description: "Earn 4.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "4.50% APY", qualifiers: {}, sourceField: "description" }],
+    })] }],
+    product: "checking",
+    progress: { "lacapfcu.org": { listed: 1, read: 1 }, "campusfederal.org": { listed: 1, read: 1 } },
+  });
+  assert.equal(thin.primaryRead, null, "two brands is a comparison, not a read");
+});
+
+// ===========================================================================
+console.log("\nSTAGE 7 — the board reads at a glance");
+// ===========================================================================
+
+test("every finding declares the population it was counted over", () => {
+  for (const f of BOARD.findings) {
+    assert.ok(["regional", "national"].includes(f.scope), `${f.rule} has no scope`);
+  }
+});
+
+test("a regional denominator never grows past the local set", () => {
+  const local = BOARD.brands.filter((b) => !b.isClient && (b.tier || "local") !== "national" && b.hasCoverage).length;
+  for (const f of BOARD.findings.filter((x) => x.scope === "regional")) {
+    if (Number.isFinite(Number(f.denominator))) {
+      assert.ok(Number(f.denominator) <= local + 1, `${f.rule} counted beyond the local set`);
+    }
+  }
+});
+
+test("a national finding names its population and carries its caveat", () => {
+  // Excluding nationals from the COUNT was never a reason to hide them from the
+  // PAGE. Both nationals leading on a bonus the client does not advertise is
+  // real, and a scoreboard reading zero while that is true is its own wrong
+  // answer. But a reader who misses that it is national reads it as a local
+  // competitor, so the sentence says so and the caveat travels with the card.
+  const board = buildBoard({
+    client: { label: "La Capitol FCU", domain: "lacapfcu.org", ads: [chk("lacapfcu.org", "La Capitol FCU", {
+      headlines: ["Checking"], description: "Earn 6.50% APY.",
+      economicFacts: [{ metric: "apy", raw: "6.50% APY*", qualifiers: {}, sourceField: "headline" }],
+    })] },
+    competitors: [
+      { label: "Comp A", domain: "a.org", tier: "local", ads: [chk("a.org", "Comp A", {
+        headlines: ["Checking"], description: "Earn 4.00% APY.",
+        economicFacts: [{ metric: "apy", raw: "4.00% APY", qualifiers: {}, sourceField: "description" }],
+      })] },
+      { label: "Chase", domain: "chase.com", tier: "national", ads: [chk("chase.com", "Chase", {
+        headlines: ["Checking"], description: "Earn a $3,000 bonus.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$3,000", qualifiers: {}, sourceField: "description" }],
+      })] },
+      { label: "Capital One", domain: "capitalone.com", tier: "national", ads: [chk("capitalone.com", "Capital One", {
+        headlines: ["Checking"], description: "Earn a $500 bonus.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "description" }],
+      })] },
+    ],
+    product: "checking",
+    progress: Object.fromEntries(["lacapfcu.org", "a.org", "chase.com", "capitalone.com"]
+      .map((d) => [d, { listed: 1, read: 1 }])),
+  });
+  const nat = board.findings.find((f) => f.scope === "national");
+  assert.ok(nat, "both nationals advertise a bonus the client does not — that must reach the page");
+  assert.match(nat.headline, /national reference advertiser/i, "the sentence must name the population");
+  assert.match(nat.detail, /whether it served in this market/i, "the caveat must travel with the card");
+  assert.equal(nat.denominator, 2, "a national finding counts nationals, never locals");
+  // And the local counts are untouched by it.
+  for (const f of board.findings.filter((x) => x.scope === "regional")) {
+    assert.ok(Number(f.denominator) <= 2, `${f.rule} absorbed a national into its denominator`);
+  }
+});
+
+test("every advertiser in the summary is clickable, figures or not", () => {
+  // "Baton Rouge Telco — 1 credit card ad, no figure printed" is exactly the row
+  // a strategist wants to open: "no figure" is a claim about their advertising,
+  // and the ad is the only thing that settles it.
+  for (const sum of BOARD.snapshot.summaries) {
+    assert.ok(sum.evidence?.length, `${sum.label} has no way to see its ads`);
+  }
+});
+
+test("every finding carries a short subject chip", () => {
+  for (const f of BOARD.findings) {
+    assert.ok(f.chip, `${f.rule} has no chip`);
+    assert.ok(f.chip.split(/\s+/).length <= 3, `chip too long to scan: "${f.chip}"`);
+  }
+});
+
+test("a metric finding's chip matches its snapshot column header", () => {
+  const withMetric = BOARD.findings.filter((f) => f.metric);
+  assert.ok(withMetric.length, "expected at least one metric finding");
+  for (const f of withMetric) {
+    const col = BOARD.snapshot.columns.find((c) => c.metric === f.metric);
+    if (col) assert.equal(f.chip, col.label, `card says "${f.chip}", table says "${col.label}"`);
+  }
+});
+
+test("an absent cell states an observation, never a product fact", () => {
+  for (const row of BOARD.snapshot.rows) {
+    for (const cell of row.cells.filter((c) => c.absent)) {
+      assert.doesNotMatch(cell.value, /^no (bonus|fee|minimum|apy)/i,
+        `"${cell.value}" claims a product fact the capture cannot support`);
+      assert.notEqual(cell.value, "—", "an em-dash reads as nothing rather than as an observation");
+    }
+  }
+});
+
+// ===========================================================================
+console.log("\nSTAGE 10 — grounding: a figure only counts if the ad printed it");
+// ===========================================================================
+
+// The gate this file has always described itself as being, applied to the one
+// thing it never checked: whether the string the model handed back was ever on
+// screen. Every case below is a legal model answer under the current prompt.
+
+const GROUNDED_AD = {
+  advertiser: "Comp G",
+  displayUrl: "www.g.org/checking",
+  headlines: ["G Bank Checking", "Earn 5.55% APY"],
+  description: "Open Choice Checking and earn 5.55% APY. No monthly fee.",
+  sitelinks: ["Open an Account"],
+  callouts: [],
+  economicFacts: [{ metric: "apy", raw: "5.55% APY", qualifiers: {}, sourceField: "headline" }],
+  claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee", sourceField: "description" }],
+  unclassified: [],
+  leadEmphasis: "rate",
+  urgency: { present: false, phrase: "" },
+  product: "checking",
+  productConfidence: 0.9,
+  truncated: false,
+  legible: true,
+};
+
+test("a figure the ad text contains is grounded and counts", () => {
+  const a = ad(GROUNDED_AD, { domain: "g.org" });
+  const apy = a.facts.find((f) => f.metric === "apy");
+  assert.equal(apy.grounded, true);
+  assert.equal(apy.rankable, true);
+  const brand = rollUpBrand({ key: "g.org", label: "Comp G", domain: "g.org", ads: [a] });
+  assert.equal(brand.positions.apy.raw, "5.55% APY");
+});
+
+test("a figure that is nowhere in the ad text is kept, marked, and never counted", () => {
+  // The reader transcribed an ad with no rate in it and returned a rate anyway.
+  // Nothing before this checked, so 6.75% became the brand's advertised
+  // position and was ranked against the client.
+  const a = ad({
+    ...GROUNDED_AD,
+    headlines: ["G Bank Checking"],
+    description: "Open Choice Checking today. No monthly fee.",
+    economicFacts: [{ metric: "apy", raw: "6.75% APY", qualifiers: {}, sourceField: "description" }],
+  }, { domain: "g.org" });
+
+  const apy = a.facts.find((f) => f.metric === "apy");
+  assert.ok(apy, "an ungrounded fact is EVIDENCE OF A BAD READ and must not be deleted");
+  assert.equal(apy.grounded, false);
+  assert.equal(apy.rankable, false, "an invented figure must never be rankable");
+
+  const brand = rollUpBrand({ key: "g.org", label: "Comp G", domain: "g.org", ads: [a] });
+  assert.equal(brand.positions.apy, undefined, "it must not become the brand's advertised position");
+  assert.equal(brand.partial.apy, undefined,
+    "and it must not be reported as 'cut off' — the capture was not clipped, the read was wrong");
+  assert.equal(brand.ungrounded.apy.length, 1, "it stays visible to whoever debugs the reader");
+});
+
+test("a figure grounded only in a DIFFERENT ad of the same brand does not count", () => {
+  // Grounding is per creative. "5.55% APY" printed by one of Comp G's ads is
+  // not evidence that a second, rate-free ad printed it — and the brand rollup
+  // counts ads, so letting one ad vouch for another is how one real figure
+  // turns into two.
+  const withRate = ad(GROUNDED_AD, { domain: "g.org", creativeId: "CR_G1" });
+  const withoutRate = ad({
+    ...GROUNDED_AD,
+    headlines: ["G Bank Checking"],
+    description: "Switch to G Bank. No monthly fee.",
+    economicFacts: [{ metric: "apy", raw: "5.55% APY", qualifiers: {}, sourceField: "description" }],
+  }, { domain: "g.org", creativeId: "CR_G2" });
+
+  assert.equal(withRate.facts.find((f) => f.metric === "apy").grounded, true);
+  assert.equal(withoutRate.facts.find((f) => f.metric === "apy").grounded, false);
+
+  const brand = rollUpBrand({ key: "g.org", label: "Comp G", domain: "g.org", ads: [withRate, withoutRate] });
+  assert.equal(brand.positions.apy.adCount, 1,
+    "two ads must not both be counted as advertising a rate when only one printed it");
+  assert.deepEqual(brand.positions.apy.all.map((f) => f.creativeId), ["CR_G1"]);
+});
+
+test("a claim whose quote is not in the ad is never counted against the brand", () => {
+  // The board prints the verbatim in quotation marks next to the count. A claim
+  // the ad does not contain puts an invented sentence in a client's report.
+  const a = ad({
+    ...GROUNDED_AD,
+    claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee ever, guaranteed", sourceField: "description" }],
+  }, { domain: "g.org" });
+
+  const claim = a.claims.find((c) => c.claim === "no_monthly_fee");
+  assert.ok(claim, "kept as evidence of what the reader proposed");
+  assert.equal(claim.grounded, false);
+
+  const brand = rollUpBrand({ key: "g.org", label: "Comp G", domain: "g.org", ads: [a] });
+  assert.equal(brand.claims.has("no_monthly_fee"), false);
+});
+
+test("a clipped figure is still recognised as present, and refused for being clipped", () => {
+  // The two gates are independent and must stay that way. "Up To 5.5…" IS in
+  // the ad, so grounding passes; it is refused by isCompleteFigure(), which is
+  // the refusal that carries the right explanation to the snapshot cell.
+  const a = ad({
+    ...GROUNDED_AD,
+    headlines: ["BR Telco Checking"],
+    description: "…Open A Checking Account With BR Telco & Earn Up To 5.5…",
+    economicFacts: [{ metric: "cash_bonus", raw: "Up To 5.5…", qualifiers: {}, sourceField: "description" }],
+    claims: [],
+  }, { domain: "brtelco.org" });
+
+  const f = a.facts.find((x) => x.metric === "cash_bonus");
+  assert.equal(f.grounded, true, "it was on screen — that is not what is wrong with it");
+  assert.equal(f.complete, false);
+  assert.equal(f.rankable, false);
+  const brand = rollUpBrand({ key: "brtelco.org", label: "BR Telco", domain: "brtelco.org", ads: [a] });
+  assert.equal(brand.positions.cash_bonus, undefined);
+  assert.ok(brand.partial.cash_bonus, "it must still read as 'cut off', not as 'not observed'");
+});
+
+test("spacing, curly quotes and unicode never cost a real figure its grounding", () => {
+  // The transcription and the extracted figure come out of the same model call
+  // and routinely disagree about spacing. That is not a reason to refuse a
+  // figure the ad plainly printed.
+  const a = ad({
+    ...GROUNDED_AD,
+    headlines: ["G Bank Checking"],
+    description: "Add BaZing for $5.99 / month and earn 5.55 % APY.",
+    economicFacts: [{ metric: "apy", raw: "5.55% APY", qualifiers: {}, sourceField: "description" }],
+    claims: [],
+  }, { domain: "g.org" });
+  assert.equal(a.facts.find((f) => f.metric === "apy").grounded, true);
+});
+
+test("a display creative's offer figure is grounded against its own transcription", () => {
+  // The display path never reaches normalizeObservation(), and a vision read has
+  // more room to invent than a text one. `numeric` is the gate: strongestOffer(),
+  // the wall's offer counts and the cluster key all read it.
+  const artwork = {
+    headline: "Auto Loans Made Easy", subhead: "Apply in minutes", cta: "Apply Now",
+    allText: "Rates as low as 4.59% APR · Member FDIC", brand: "G Bank",
+    product: "auto_loan", productConfidence: 0.9, legible: true,
+  };
+  const img = { creativeId: "CR_D1", domain: "g.org", imageUrl: "https://example.test/x.png", format: "image" };
+
+  const real = shapeDisplay({ ...artwork, offer: { present: true, type: "rate", value: "4.59% APR", unit: "APR" } }, img);
+  assert.equal(real.offer.grounded, true);
+  assert.equal(real.offer.numeric.n, 4.59);
+
+  const invented = shapeDisplay({ ...artwork, offer: { present: true, type: "rate", value: "2.99% APR", unit: "APR" } }, img);
+  assert.equal(invented.offer.value, "2.99% APR", "kept — the wall shows what was captured");
+  assert.equal(invented.offer.grounded, false);
+  assert.equal(invented.offer.numeric, null, "and it can never sort against a transcribed figure");
+});
+
+// ===========================================================================
+console.log("\nSTAGE 11 — the two population rules, swept over the whole board");
+// ===========================================================================
+//
+// H4 and H5 each had exactly one test: one finding type for the unreadable
+// competitor, one for the national. Both rules are about DENOMINATORS, and a
+// board carries denominators in five places — the findings, the set shape, the
+// primary read, the snapshot and the coverage block. A rule enforced in one of
+// five is a rule that holds by luck.
+
+const POP = (() => {
+  const bonusAd = (domain, label, amount) => chk(domain, label, {
+    headlines: [`Earn ${amount}`], description: `Open checking and earn ${amount}. No monthly fee.`,
+    economicFacts: [{ metric: "cash_bonus", raw: amount, qualifiers: {}, sourceField: "headline" }],
+    claims: [{ claim: "no_monthly_fee", verbatim: "No monthly fee", sourceField: "description" }],
+    leadEmphasis: "bonus",
+  });
+  return buildBoard({
+    client: { label: "Client CU", domain: "client.org", ads: [chk("client.org", "Client CU", {
+      headlines: ["Client Checking", "3.00% APY"], description: "Earn 3.00% APY on Choice Checking.",
+      economicFacts: [{ metric: "apy", raw: "3.00% APY", qualifiers: {}, sourceField: "headline" }],
+      claims: [], leadEmphasis: "rate",
+    })] },
+    competitors: [
+      { label: "Readable A", domain: "a.org", ads: [bonusAd("a.org", "Readable A", "$500")] },
+      { label: "Readable B", domain: "b.org", ads: [bonusAd("b.org", "Readable B", "$400")] },
+      { label: "Readable C", domain: "c.org", ads: [bonusAd("c.org", "Readable C", "$300")] },
+      // CAPTURED NOTHING. Not a competitor without a bonus — a competitor we
+      // could not read. The difference is the whole finding.
+      { label: "Dark One", domain: "dark1.org", ads: [] },
+      { label: "Dark Two", domain: "dark2.org", ads: [] },
+      // The standing national ceiling. Excluded from every local denominator,
+      // because the Transparency Center cannot say whether these served here.
+      { label: "J.P. Morgan Chase", domain: "chase.com", tier: "national",
+        ads: [bonusAd("chase.com", "J.P. Morgan Chase", "$900")] },
+      { label: "Capital One", domain: "capitalone.com", tier: "national",
+        ads: [bonusAd("capitalone.com", "Capital One", "$800")] },
+    ],
+    product: "checking",
+    progress: {
+      "client.org": { listed: 1, read: 1 },
+      "a.org": { listed: 1, read: 1 }, "b.org": { listed: 1, read: 1 }, "c.org": { listed: 1, read: 1 },
+      "dark1.org": { listed: 0, read: 0 }, "dark2.org": { listed: 0, read: 0 },
+      "chase.com": { listed: 400, read: 1 }, "capitalone.com": { listed: 300, read: 1 },
+    },
+  });
+})();
+
+// Three readable locals, two unreadable locals, two nationals. Every local
+// denominator on this board must therefore be 3, and never 5 and never 7.
+const READABLE_LOCALS = 3;
+
+test("H4/H5 — no finding's denominator counts an unreadable competitor or a national", () => {
+  for (const f of POP.findings) {
+    if (typeof f.denominator !== "number") continue;
+    if (f.scope === "national") continue;               // its own population, named on the card
+    assert.ok(f.denominator <= READABLE_LOCALS + 1,     // +1: findings that include the client
+      `${f.rule} counted over ${f.denominator}; only ${READABLE_LOCALS} competitors were readable and locally scoped`);
+  }
+});
+
+test("H4/H5 — no finding's SENTENCE quotes a population bigger than the readable local set", () => {
+  // The number in the prose and the number in the field are two chances to get
+  // this wrong, and only one of them was ever checked.
+  for (const f of POP.findings) {
+    if (f.scope === "national") continue;
+    const text = [f.headline, f.detail, f.reportLine].filter(Boolean).join(" ");
+    for (const m of text.matchAll(/(\d+)\s+(?:of\s+(\d+)\s+)?competitors?/gi)) {
+      const stated = Number(m[2] ?? m[1]);
+      assert.ok(stated <= READABLE_LOCALS,
+        `${f.rule} says "${m[0]}" — there are only ${READABLE_LOCALS} readable local competitors`);
+    }
+  }
+});
+
+test("H4/H5 — the set shape counts over readable locals only", () => {
+  const shape = POP.setShape;
+  if (!shape) return;                                   // a thin set has no shape, which is correct
+  for (const o of shape.observations || []) {
+    if (typeof o.of === "number") {
+      assert.ok(o.of <= READABLE_LOCALS, `set shape counted over ${o.of}`);
+    }
+    const text = [o.text, o.detail].filter(Boolean).join(" ");
+    for (const m of text.matchAll(/of (\d+)/gi)) {
+      assert.ok(Number(m[1]) <= READABLE_LOCALS + 1, `set shape says "${m[0]}"`);
+    }
+  }
+});
+
+test("H4/H5 — the primary read counts over readable locals only", () => {
+  const pr = POP.primaryRead;
+  if (!pr) return;
+
+  // Every ratio in the read, sentence by sentence, so the exception can be
+  // stated rather than swallowed: PARTICIPATION legitimately counts over the
+  // SELECTED set — "3 of 5 selected competitors advertised checking" is the
+  // sentence that makes the gap between chosen and readable visible, and it
+  // says "selected" in so many words. Every other sentence is about the
+  // readable local set and may not exceed it (+1 where the client is a brand
+  // in the count, which the source text always names).
+  for (const [key, text] of Object.entries(pr)) {
+    if (typeof text !== "string") continue;
+    for (const m of text.matchAll(/(\d+)\s+of\s+(?:about\s+)?(\d+)/g)) {
+      const of = Number(m[2]);
+      if (of <= READABLE_LOCALS + 1) continue;
+      const clause = text.slice(Math.max(0, m.index - 10), m.index + 60);
+      assert.match(clause, /selected|listed/i,
+        `primaryRead.${key} says "${m[0]}" over ${READABLE_LOCALS} readable local competitors, without saying it is counting the selected set: "${clause}"`);
+    }
+  }
+
+  // The specific leak this test was written for: a national finding inside a
+  // sentence about local competitors. The national set here is two brands, so
+  // a "(2 of 2)" anywhere in the local clauses is that leak.
+  assert.doesNotMatch(String(pr.differences || ""), /\(2 of 2\)/,
+    "a national reference count is inside 'Where competitors differ'");
+  assert.doesNotMatch(String(pr.headline || ""), /\b(5|7) (comparable|local|readable)/,
+    "the headline counted the competitors we could not read, or the nationals, or both");
+});
+
+test("H4/H5 — a sole-advertiser lead is never written as a ranked win", () => {
+  // No competitor in this fixture printed an APY. The card says so — "Only
+  // Client CU shows APY in the captured set" — and the primary read, which is
+  // the most quotable line on the page, used to answer it with "holds the
+  // strongest advertised APY of the 4 comparable local competitors captured":
+  // a ranked win over a set that printed nothing, with the client counted among
+  // its own competitors.
+  const h = String(POP.primaryRead?.headline || "");
+  assert.doesNotMatch(h, /strongest advertised/i,
+    `the read claims a ranked win where nothing was ranked: "${h}"`);
+  assert.match(h, /not observed|nothing to rank/i,
+    `the read does not say that no competitor printed one: "${h}"`);
+  assert.equal(POP.primaryRead.counts.comparableOnRate, 0,
+    "the brand count was reported as a count of comparable competitors");
+});
+
+test("H4/H5 — an unreadable competitor is named as unread, never as a 'no'", () => {
+  // "Dark One does not advertise a bonus" is the false sentence. "No ads were
+  // captured for Dark One" is the true one, and it has to be somewhere.
+  const rows = POP.snapshot.rows.filter((r) => /Dark/.test(r.label));
+  assert.equal(rows.length, 2, "the unreadable competitors vanished from the snapshot entirely");
+  for (const r of rows) {
+    assert.equal(r.hasCoverage, false);
+    assert.match(String(r.absentReason), /no ads captured|none about/i,
+      `Dark row reads "${r.absentReason}"`);
+    for (const cell of r.cells) {
+      assert.doesNotMatch(String(cell.value), /^no (bonus|fee|minimum|apy)/i,
+        `an unread competitor's cell asserts a product fact: "${cell.value}"`);
+    }
+  }
+});
+
+test("H5 — the nationals are on the page, in their own block, never in the local one", () => {
+  const localLabels = POP.snapshot.summaries.map((s) => s.label);
+  assert.ok(!localLabels.some((l) => /Chase|Capital One/i.test(l)),
+    `a national is in the local summary: ${JSON.stringify(localLabels)}`);
+  const refLabels = (POP.snapshot.referenceSummaries || []).map((s) => s.label);
+  assert.ok(refLabels.some((l) => /Chase/i.test(l)),
+    "the national ceiling was excluded from the count AND from the page");
+});
+
+test("H5 — a national's $900 never becomes the set's strongest local bonus", () => {
+  const text = JSON.stringify({ f: POP.findings, s: POP.setShape, p: POP.primaryRead });
+  if (/\$900|\$800/.test(text)) {
+    // Allowed only where the sentence says it is national.
+    for (const f of POP.findings) {
+      const t = [f.headline, f.detail].filter(Boolean).join(" ");
+      if (/\$900|\$800/.test(t)) {
+        assert.equal(f.scope, "national", `${f.rule} quotes a national figure without saying so`);
+      }
+    }
+  }
+});
+
+test("H4 — coverage names how many competitors could not be read", () => {
+  // The reader has to be able to see the gap between the set they chose and the
+  // set the board counted, or a denominator of 3 over a set of 5 is invisible.
+  const c = POP.coverage;
+  assert.ok(c, "no coverage block");
+  const json = JSON.stringify(c);
+  assert.match(json, /"?(readable|withAds|usable|covered)"?/i,
+    `coverage does not report how much of the set was readable: ${json.slice(0, 200)}`);
+});
+
+// ===========================================================================
+console.log("\nSTAGE 12 — adversarial input, and the table agreeing with the board");
+// ===========================================================================
+//
+// H3. The board and the table are two aggregations over the same ads, and this
+// exact class already produced 4.84% APR in a finding and 6.74% in the table
+// beneath it. The table now reads the board's own rollup, which is the right
+// fix — so what is left to prove is that it STAYS true when the input is ugly,
+// because a second rule creeping back in would look like this again.
+
+const LONG = "Open A Free Checking Account Today And Earn A Bonus When You Switch Your Direct Deposit Over To Us This Month Only While Offer Lasts";
+const RTL = "احصل على 500 دولار";
+
+const ADVERSARIAL = [
+  ["zero ads for every competitor", {
+    client: { label: "Client", domain: "client.org", ads: [] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [] },
+      { label: "B", domain: "b.org", ads: [] },
+      { label: "C", domain: "c.org", ads: [] },
+    ],
+  }],
+  ["exactly one ad in the whole set", {
+    client: { label: "Client", domain: "client.org", ads: [] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: ["Earn $500"], description: "Earn $500 when you switch.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "B", domain: "b.org", ads: [] },
+      { label: "C", domain: "c.org", ads: [] },
+    ],
+  }],
+  ["duplicate creative ids across two advertisers", {
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Client Checking"], description: "Open today.", economicFacts: [], claims: [], leadEmphasis: "brand",
+    }, { creativeId: "CR_DUPE" })] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: ["Earn $500"], description: "Earn $500 when you switch.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" }, { creativeId: "CR_DUPE" })] },
+      { label: "B", domain: "b.org", ads: [chk("b.org", "B", {
+        headlines: ["Earn $400"], description: "Earn $400 when you switch.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$400", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" }, { creativeId: "CR_DUPE" })] },
+      { label: "C", domain: "c.org", ads: [chk("c.org", "C", {
+        headlines: ["Earn $300"], description: "Earn $300 when you switch.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" }, { creativeId: "CR_DUPE" })] },
+    ],
+  }],
+  ["no headline at all, and a 130-character one", {
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: [], description: "", economicFacts: [], claims: [], leadEmphasis: "" })] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: [LONG], description: `${LONG} Earn $500.`,
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "B", domain: "b.org", ads: [chk("b.org", "B", {
+        headlines: ["Earn $400"], description: "Earn $400.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$400", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "C", domain: "c.org", ads: [chk("c.org", "C", {
+        headlines: ["Earn $300"], description: "Earn $300.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+    ],
+  }],
+  ["unicode and RTL copy", {
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Chèque «gratuit» — 3,50 % APY"], description: "Chèque «gratuit» — 3,50 % APY・今すぐ開設",
+      economicFacts: [], claims: [], leadEmphasis: "rate" })] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: [RTL], description: `${RTL} — $500`,
+        economicFacts: [{ metric: "cash_bonus", raw: "$500", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "B", domain: "b.org", ads: [chk("b.org", "B", {
+        headlines: ["Earn $400 💸"], description: "Earn $400 💸 today.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$400", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+      { label: "C", domain: "c.org", ads: [chk("c.org", "C", {
+        headlines: ["Earn $300"], description: "Earn $300.",
+        economicFacts: [{ metric: "cash_bonus", raw: "$300", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "bonus" })] },
+    ],
+  }],
+  ["an absurd figure", {
+    client: { label: "Client", domain: "client.org", ads: [chk("client.org", "Client", {
+      headlines: ["Earn 999999% APY"], description: "Earn 999999% APY on checking.",
+      economicFacts: [{ metric: "apy", raw: "999999% APY", qualifiers: {}, sourceField: "headline" }],
+      claims: [], leadEmphasis: "rate" })] },
+    competitors: [
+      { label: "A", domain: "a.org", ads: [chk("a.org", "A", {
+        headlines: ["Earn 4.50% APY"], description: "Earn 4.50% APY.",
+        economicFacts: [{ metric: "apy", raw: "4.50% APY", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "rate" })] },
+      { label: "B", domain: "b.org", ads: [chk("b.org", "B", {
+        headlines: ["Earn 4.00% APY"], description: "Earn 4.00% APY.",
+        economicFacts: [{ metric: "apy", raw: "4.00% APY", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "rate" })] },
+      { label: "C", domain: "c.org", ads: [chk("c.org", "C", {
+        headlines: ["Earn 3.50% APY"], description: "Earn 3.50% APY.",
+        economicFacts: [{ metric: "apy", raw: "3.50% APY", qualifiers: {}, sourceField: "headline" }],
+        claims: [], leadEmphasis: "rate" })] },
+    ],
+  }],
+];
+
+for (const [name, input] of ADVERSARIAL) {
+  const progress = Object.fromEntries(
+    [input.client.domain, ...input.competitors.map((c) => c.domain)]
+      .map((d) => [d, { listed: 1, read: 1 }]));
+
+  let board = null, table = null, threw = null;
+  try {
+    board = buildBoard({ ...input, product: "checking", progress });
+    table = buildBenchmark({
+      client: input.client, competitors: input.competitors,
+      product: "checking", runs: [], brands: board.brands,
+    });
+  } catch (e) { threw = e; }
+
+  test(`${name} — the board is built rather than thrown`, () => {
+    assert.equal(threw, null, `buildBoard threw: ${threw?.message}\n${threw?.stack || ""}`);
+    assert.ok(board, "no board");
+  });
+
+  test(`${name} — nothing renders undefined, NaN or [object Object]`, () => {
+    const json = JSON.stringify({ board, table });
+    const m = json.match(/"[^"]*\b(undefined|NaN)\b[^"]*"|\[object [A-Z]/);
+    assert.equal(m, null, `rendered: ${m?.[0]}`);
+  });
+
+  test(`${name} — no sentence asserts a product fact`, () => {
+    const CLAIM = /\b(do(es)?n'?t (offer|have)|do(es)? not (offer|have|provide)|no longer (offers?|runs?))\b/i;
+    for (const f of board?.findings || []) {
+      const t = [f.headline, f.detail, f.reportLine].filter(Boolean).join(" ");
+      assert.doesNotMatch(t, CLAIM, `${f.rule}: "${t}"`);
+    }
+  });
+
+  test(`${name} — H3: every table figure equals the board's figure for that brand and metric`, () => {
+    if (!table?.rows?.length) return;                    // nothing to disagree about
+    const byKey = new Map((board.brands || []).map((b) => [b.isClient ? "client" : b.domain, b]));
+    for (const row of table.rows) {
+      if (row.kind === "count" || !row.metric) continue;
+      for (const cell of row.cells) {
+        const pos = byKey.get(cell.column)?.positions?.[row.metric];
+        if (cell.absent) {
+          assert.ok(!pos, `${row.metric}/${cell.column}: the table says absent, the board holds ${pos?.raw}`);
+          continue;
+        }
+        assert.ok(pos, `${row.metric}/${cell.column}: the table prints ${cell.value}, the board holds nothing`);
+        assert.equal(cell.value, pos.raw,
+          `${row.metric}/${cell.column}: table says ${cell.value}, board says ${pos.raw}`);
+      }
+    }
+  });
+
+  test(`${name} — every finding's evidence resolves to an ad in this set`, () => {
+    const known = new Set([
+      ...(input.client.ads || []),
+      ...input.competitors.flatMap((c) => c.ads || []),
+    ].map((a) => a.creativeId));
+    for (const f of board?.findings || []) {
+      for (const id of f.evidence || []) {
+        assert.ok(known.has(id), `${f.rule} cites ${id}, which is in no ad of this set`);
+      }
+    }
+  });
+}
+
+// ===========================================================================
+console.log("\nSTAGE 13 — H6: a refusal to rank must reach the reader with its reason");
+// ===========================================================================
+//
+// comparable() returns { ok, reason } and the reason is the whole point: "we are
+// not ranking these" is only useful if it says why. The failure mode is a
+// SILENTLY BLANK CELL, which looks exactly like "not observed" and means
+// something completely different. One is "nobody printed a figure"; the other is
+// "both printed one and we refuse to compare them".
+
+const refusalBoard = ({ clientFact, competitorFacts, product = "cd" }) => buildBoard({
+  client: { label: "Client CU", domain: "client.org", ads: [chk("client.org", "Client CU", {
+    headlines: [`Earn ${clientFact.raw}`], description: `Earn ${clientFact.raw} on a certificate.${clientFact.blurb || ""}`,
+    economicFacts: [clientFact], claims: [], leadEmphasis: "rate", product,
+  })] },
+  competitors: competitorFacts.map((f, i) => ({
+    label: `Comp ${"ABC"[i]}`, domain: `${"abc"[i]}.org`,
+    ads: [chk(`${"abc"[i]}.org`, `Comp ${"ABC"[i]}`, {
+      headlines: [`Earn ${f.raw}`], description: `Earn ${f.raw} on a certificate.${f.blurb || ""}`,
+      economicFacts: [f], claims: [], leadEmphasis: "rate", product,
+    })],
+  })),
+  product,
+  progress: Object.fromEntries(["client.org", "a.org", "b.org", "c.org"].map((d) => [d, { listed: 1, read: 1 }])),
+});
+
+// --- the three refusal kinds the work order names ---------------------------
+
+const REFUSALS = [
+  ["different CD terms", {
+    clientFact: { metric: "apy", raw: "5.00% APY", qualifiers: { term_months: 12 }, sourceField: "headline",
+                  blurb: " 12-month term." },
+    competitorFacts: [
+      { metric: "apy", raw: "5.25% APY", qualifiers: { term_months: 60 }, sourceField: "headline", blurb: " 60-month term." },
+      { metric: "apy", raw: "5.10% APY", qualifiers: { term_months: 36 }, sourceField: "headline", blurb: " 36-month term." },
+      { metric: "apy", raw: "5.05% APY", qualifiers: { term_months: 24 }, sourceField: "headline", blurb: " 24-month term." },
+    ],
+  }, /term/i],
+  ["a balance cap on one side only", {
+    clientFact: { metric: "apy", raw: "5.00% APY", qualifiers: { term_months: 12 }, sourceField: "headline",
+                  blurb: " 12-month term." },
+    competitorFacts: [
+      { metric: "apy", raw: "6.00% APY", qualifiers: { term_months: 12, balance_cap: 5000 }, sourceField: "headline",
+        blurb: " 12-month term on balances up to $5,000." },
+      { metric: "apy", raw: "5.90% APY", qualifiers: { term_months: 12, balance_cap: 2500 }, sourceField: "headline",
+        blurb: " 12-month term on balances up to $2,500." },
+      { metric: "apy", raw: "5.80% APY", qualifiers: { term_months: 12, balance_cap: 1000 }, sourceField: "headline",
+        blurb: " 12-month term on balances up to $1,000." },
+    ],
+  }, /balance/i],
+];
+
+for (const [name, input, reasonShape] of REFUSALS) {
+  const board = refusalBoard(input);
+
+  test(`H6 — ${name}: the refusal is a finding, not a silence`, () => {
+    const notRanked = board.findings.find((f) => f.rule === "not_ranked");
+    const ranked = board.findings.find((f) => /rate_(advantage|position)/.test(f.rule) && (f.excluded || []).length);
+    assert.ok(notRanked || ranked,
+      `neither a NOT LIKE-FOR-LIKE card nor an excluded list — the refusal vanished.\n       findings: ${board.findings.map((f) => f.rule).join(", ")}`);
+  });
+
+  test(`H6 — ${name}: the reason travels with it, in words`, () => {
+    const notRanked = board.findings.find((f) => f.rule === "not_ranked");
+    const withExcl = board.findings.find((f) => (f.excluded || []).length);
+    const text = notRanked
+      ? [notRanked.headline, notRanked.detail].join(" ")
+      : withExcl.excluded.map((x) => x.reason).join(" ");
+    assert.match(text, reasonShape,
+      `the refusal reached the reader with no usable reason: "${text}"`);
+  });
+
+  test(`H6 — ${name}: the figures are still SHOWN, never hidden by the refusal`, () => {
+    // A fact you decline to rank is still a fact the strategist should see.
+    const cells = board.snapshot.rows.flatMap((r) => r.cells);
+    const printed = cells.filter((c) => !c.absent).map((c) => c.value);
+    for (const f of [input.clientFact, ...input.competitorFacts]) {
+      assert.ok(printed.includes(f.raw),
+        `${f.raw} was advertised and is nowhere in the snapshot — a refusal to rank became a refusal to show`);
+    }
+  });
+
+  test(`H6 — ${name}: no cell goes silently blank`, () => {
+    for (const row of board.snapshot.rows) {
+      for (const cell of row.cells) {
+        assert.notEqual(String(cell.value).trim(), "", `${row.metric}/${cell.column} rendered an empty string`);
+        assert.notEqual(String(cell.value).trim(), "—", "an em-dash reads as nothing rather than as an observation");
+        if (cell.absent) {
+          assert.ok(cell.note, `${row.metric}/${cell.column} is absent with no note explaining which kind of absence`);
+        }
+      }
+    }
+  });
+}
+
+test("H6 — an add-on price and an account fee are never ranked against each other", () => {
+  // matchOn: ["waiver_condition", "applies_to"] on monthly_fee. The comment in
+  // metrics.js says a $5.99 benefits bundle and a $5.00 account fee are not the
+  // same measurement; this is the assertion behind that comment.
+  const v = comparable(
+    { metric: "monthly_fee", value: 5.99, qualifiers: { applies_to: "BaZing" } },
+    { metric: "monthly_fee", value: 5.00, qualifiers: {} },
+  );
+  assert.equal(v.ok, false, "a benefits bundle was ranked against an account fee");
+  assert.match(v.reason, /fee covers|applies_to/i, `the refusal gives no usable reason: "${v.reason}"`);
+});
+
+test("H6 — every refusal reason is a sentence, not a code", () => {
+  // These strings are rendered to the user verbatim. A reason like
+  // "matchOn:term_months" is a refusal the reader cannot act on.
+  const cases = [
+    [{ metric: "apy", value: 5, qualifiers: { term_months: 12 } }, { metric: "apy", value: 5, qualifiers: { term_months: 60 } }],
+    [{ metric: "apy", value: 5, qualifiers: { term_months: 12 } }, { metric: "apy", value: 5, qualifiers: {} }],
+    [{ metric: "apy", value: 5, qualifiers: {} }, { metric: "cash_bonus", value: 5, qualifiers: {} }],
+    [{ metric: "loan_amount", value: 5, qualifiers: {} }, { metric: "loan_amount", value: 6, qualifiers: {} }],
+    [{ metric: "apy", value: NaN, qualifiers: {} }, { metric: "apy", value: 5, qualifiers: {} }],
+  ];
+  for (const [a, b] of cases) {
+    const v = comparable(a, b);
+    assert.equal(v.ok, false, `expected a refusal for ${a.metric} vs ${b.metric}`);
+    assert.ok(v.reason && v.reason.length > 8, `reason too terse to render: "${v.reason}"`);
+    assert.doesNotMatch(v.reason, /_|matchOn|undefined|null/,
+      `the reason is a code, not a sentence: "${v.reason}"`);
+  }
+});
+
+// ===========================================================================
+console.log("\nSTAGE 14 — H7: a change to the SET is not a change in the MARKET");
+// ===========================================================================
+//
+// The snapshot delta is the most quotable thing this tool produces — "their
+// bonus is newly observed since the July benchmark" is a sentence a strategist
+// repeats out loud. It is also the easiest to manufacture: add a competitor to
+// the set and every figure they print is new to the comparison while nothing at
+// all has changed in the market.
+
+const bonusAdFor = (domain, label, amount) => chk(domain, label, {
+  headlines: [`Earn ${amount}`], description: `Open checking and earn ${amount}.`,
+  economicFacts: [{ metric: "cash_bonus", raw: amount, qualifiers: {}, sourceField: "headline" }],
+  claims: [], leadEmphasis: "bonus",
+});
+
+const clientAd = () => chk("client.org", "Client CU", {
+  headlines: ["Client Checking"], description: "Open Choice Checking today.",
+  economicFacts: [], claims: [], leadEmphasis: "brand",
+});
+
+/** A previous snapshot in the shape putSnapshot() writes. */
+const prevSnapshot = (domains, { label = "July" } = {}) => ({
+  label,
+  competitorSet: competitorSetVersion(domains),
+  brands: domains.map((d) => ({
+    domain: d, label: d, isClient: false, adCount: 1, hasCoverage: true,
+    // Deliberately EMPTY positions: in July nobody had printed a bonus. So any
+    // "newly observed" card today is the engine comparing against a brand it
+    // had no prior state for, which is exactly the manufacture being tested.
+    positions: {}, claims: [],
+  })),
+});
+
+const boardWith = ({ competitors, previous }) => buildBoard({
+  client: { label: "Client CU", domain: "client.org", ads: [clientAd()] },
+  competitors,
+  product: "checking",
+  previous,
+  progress: Object.fromEntries(
+    ["client.org", ...competitors.map((c) => c.domain)].map((d) => [d, { listed: 1, read: 1 }])),
+});
+
+const A = { label: "Comp A", domain: "a.org", ads: [bonusAdFor("a.org", "Comp A", "$500")] };
+const B = { label: "Comp B", domain: "b.org", ads: [bonusAdFor("b.org", "Comp B", "$400")] };
+const C = { label: "Comp C", domain: "c.org", ads: [bonusAdFor("c.org", "Comp C", "$300")] };
+const NEWCOMER = { label: "Comp D", domain: "d.org", ads: [bonusAdFor("d.org", "Comp D", "$900")] };
+
+test("H7 — adding a competitor never manufactures a 'newly observed' card", () => {
+  // July watched A, B, C. August adds D, who prints the biggest bonus in the
+  // set. D has no prior state at all, so every figure they print is new TO THE
+  // COMPARISON and nothing has changed in the market.
+  const board = boardWith({
+    competitors: [A, B, C, NEWCOMER],
+    previous: prevSnapshot(["a.org", "b.org", "c.org"]),
+  });
+  const manufactured = board.findings.filter(
+    (f) => /^offer_(new|changed|withdrawn)$/.test(f.rule) && /Comp D/.test(f.headline));
+  assert.equal(manufactured.length, 0,
+    `a competitor added this month produced a change card: ${manufactured.map((f) => f.headline).join(" | ")}`);
+});
+
+test("H7 — the set change is DISCLOSED rather than silently absorbed", () => {
+  const board = boardWith({
+    competitors: [A, B, C, NEWCOMER],
+    previous: prevSnapshot(["a.org", "b.org", "c.org"]),
+  });
+  assert.ok(board.setDrift, "the set changed and the board says nothing about it");
+  assert.deepEqual(board.setDrift.added, ["d.org"]);
+  assert.match(board.setDrift.note, /only the 3 competitors present in both/i,
+    `the drift note does not say what the comparison actually covers: "${board.setDrift.note}"`);
+});
+
+test("H7 — REMOVING a competitor never manufactures a 'withdrawn' card", () => {
+  // The mirror image, and the more damaging one: "Comp C withdrew their bonus"
+  // about a competitor who was simply dropped from the set this month.
+  const board = boardWith({
+    competitors: [A, B],
+    previous: prevSnapshot(["a.org", "b.org", "c.org"]),
+  });
+  const withdrawn = board.findings.filter((f) => f.rule === "offer_withdrawn");
+  assert.equal(withdrawn.length, 0,
+    `dropping a competitor produced a withdrawal card: ${withdrawn.map((f) => f.headline).join(" | ")}`);
+  assert.deepEqual(board.setDrift?.removed, ["c.org"]);
+});
+
+test("H7 — with the set unchanged, a real change IS still reported", () => {
+  // The control. If the guard above worked by suppressing all deltas it would
+  // be useless, so this proves the engine still speaks when it should.
+  const previous = prevSnapshot(["a.org", "b.org", "c.org"]);
+  const board = boardWith({ competitors: [A, B, C], previous });
+  const changes = board.findings.filter((f) => /^offer_(new|changed|withdrawn)$/.test(f.rule));
+  assert.ok(changes.length > 0,
+    "the set did not change and three competitors newly printed a bonus, and nothing was reported");
+  assert.equal(board.setDrift, null, "an unchanged set reported drift");
+});
+
+test("H7 — a set version ignores order, so re-ordering is not a change", () => {
+  const one = competitorSetVersion(["a.org", "b.org", "c.org"]);
+  const two = competitorSetVersion(["c.org", "a.org", "b.org"]);
+  assert.equal(one.hash, two.hash,
+    "the same three competitors in a different order read as a different set");
+});
+
+test("H7 — a different WINDOW is not comparable to a different window", () => {
+  // The window IS in findPreviousRun()'s gate now — it was the sibling defect
+  // F-020 fixed in previousSnapshot() and left standing in the path that feeds
+  // the run-diff strip. Covered directly by the test below; this one keeps its
+  // original job, which is the shape of the drift record.
+  const drift = setDrift(competitorSetVersion(["a.org"]), {
+    label: "July", competitorSet: competitorSetVersion(["a.org", "b.org"]),
+  });
+  assert.ok(drift, "a shrunken set produced no drift record");
+  assert.deepEqual(drift.stable, ["a.org"], "the intersection is what deltas may run over");
+});
+
+test("a run over a different window is never offered as the previous run", () => {
+  // The run-diff strip says "Since 2026-09-02, 67 seen in both captures". Fed a
+  // 30-day run as the previous of a 90-day one, everything the wider window
+  // reveals reads as new — the market did not change, the question did.
+  const base = {
+    id: "run_now", mode: "benchmark", source: "google_search", product: "checking",
+    client: { domain: "lacapfcu.org" }, createdAt: "2026-09-05T00:00:00.000Z",
+  };
+  const cmp = (a, b) => comparableWindow(a, b);
+  assert.equal(cmp({ ...base, days: 30 }, { ...base, days: 30 }), true, "same window compares");
+  assert.equal(cmp({ ...base, days: 31 }, { ...base, days: 30 }), true, "a DST day of slack is absorbed");
+  assert.equal(cmp({ ...base, days: 30 }, { ...base, days: 90 }), false, "30 must never meet 90");
+  assert.equal(cmp({ ...base, days: undefined }, { ...base, days: 30 }), false,
+    "a run whose window cannot be established is refused, not guessed at");
+});
+
+// ===========================================================================
+console.log("\nSTAGE 15 — H9: whose idea is it? clustering must stay advertiser-scoped");
+// ===========================================================================
+//
+// Without the advertiser in the cluster key, two banks running the same generic
+// line collapse into one card credited to whichever ran longer, and the other
+// bank's evidence disappears from the wall. The CLIENT tier is new, so the
+// question is whether a client design can absorb — or be absorbed by — a
+// competitor's.
+
+const banner = (institution, headline, { isClient = false, tier = "local", days = 100, offer = null, id } = {}) => ({
+  creativeId: id, institution, institutionLabel: institution, isClient, tier,
+  headline, subhead: "", product: "checking", offer,
+  totalDaysShown: days, width: 300, height: 250, legible: true,
+});
+
+test("H9 — a client design and a competitor's identical design stay two cards", () => {
+  // THE SAME GENERIC LINE. "Open An Account Today" is copy every bank runs, and
+  // it is the exact case that collapses if the advertiser leaves the key.
+  const clusters = clusterAds([
+    banner("client.org", "Open An Account Today", { isClient: true, tier: "client", days: 400, id: "CL1" }),
+    banner("a.org", "Open An Account Today", { days: 50, id: "A1" }),
+  ]);
+  assert.equal(clusters.length, 2,
+    "a client design and a competitor's were collapsed into one idea");
+  const owners = clusters.map((c) => c.institution).sort();
+  assert.deepEqual(owners, ["a.org", "client.org"]);
+});
+
+test("H9 — the longer-running client design does not absorb the competitor's evidence", () => {
+  // The failure is directional and silent: the representative is the
+  // longest-running member, so the client — who has run their line for 400 days
+  // — would become the face of the competitor's card, and the competitor's
+  // creative id would vanish from the wall entirely.
+  const clusters = clusterAds([
+    banner("client.org", "Open An Account Today", { isClient: true, tier: "client", days: 400, id: "CL1" }),
+    banner("a.org", "Open An Account Today", { days: 50, id: "A1" }),
+  ]);
+  const competitorCard = clusters.find((c) => c.institution === "a.org");
+  assert.ok(competitorCard, "the competitor's card is gone");
+  assert.deepEqual(competitorCard.variationIds, ["A1"]);
+  assert.equal(competitorCard.isClient, false);
+  const clientCard = clusters.find((c) => c.institution === "client.org");
+  assert.deepEqual(clientCard.variationIds, ["CL1"]);
+  assert.equal(clientCard.isClient, true);
+});
+
+test("H9 — nor the other way round when the competitor has run longer", () => {
+  const clusters = clusterAds([
+    banner("client.org", "Open An Account Today", { isClient: true, tier: "client", days: 20, id: "CL1" }),
+    banner("a.org", "Open An Account Today", { days: 900, id: "A1" }),
+  ]);
+  assert.equal(clusters.length, 2);
+  assert.equal(clusters.find((c) => c.institution === "client.org").isClient, true,
+    "the client's own design was absorbed into a competitor's card");
+});
+
+test("H9 — a national cannot absorb a local card either", () => {
+  const clusters = clusterAds([
+    banner("chase.com", "Open An Account Today", { tier: "national", days: 1200, id: "CH1" }),
+    banner("a.org", "Open An Account Today", { days: 30, id: "A1" }),
+    banner("client.org", "Open An Account Today", { isClient: true, tier: "client", days: 60, id: "CL1" }),
+  ]);
+  assert.equal(clusters.length, 3, "three advertisers running one generic line collapsed");
+  assert.deepEqual(clusters.map((c) => c.tier).sort(), ["client", "local", "national"]);
+});
+
+test("H9 — one advertiser's design cut into many sizes IS still one card", () => {
+  // The guard must not be so wide that clustering stops working. Same
+  // advertiser, same line, three sizes: one idea, three executions.
+  const clusters = clusterAds([
+    { ...banner("a.org", "Switch And Get Paid", { days: 100, id: "A1" }), width: 300, height: 250 },
+    { ...banner("a.org", "Switch And Get Paid", { days: 80, id: "A2" }), width: 728, height: 90 },
+    { ...banner("a.org", "Switch And Get Paid", { days: 60, id: "A3" }), width: 970, height: 250 },
+  ]);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].variations, 3);
+  assert.deepEqual(clusters[0].sizes.sort(), ["300x250", "728x90", "970x250"]);
+});
+
+// ===========================================================================
+console.log(`\n${passed} passed, ${failed} failed\n`);
+process.exit(failed ? 1 : 0);

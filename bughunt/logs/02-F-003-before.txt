@@ -1,0 +1,20 @@
+# F-003 BEFORE — /api/rate-pages fetches whatever URL it is given.
+
+(node:4190) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+target            : http://127.0.0.1:33021/rates
+loopback hits     : 1
+result.ok         : false
+result.reason     : read_failed
+text was read     : YES — the internal page's contents were fetched
+
+# and the guard tests cannot even import the function that should exist:
+
+file:///home/user/rain_Intelligence-/test/degraded.test.js:10
+import { checkPublicUrl, readRatePages } from "../lib/rate-page.js";
+         ^^^^^^^^^^^^^^
+SyntaxError: The requested module '../lib/rate-page.js' does not provide an export named 'checkPublicUrl'
+    at ModuleJob._instantiate (node:internal/modules/esm/module_job:226:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:335:5)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)

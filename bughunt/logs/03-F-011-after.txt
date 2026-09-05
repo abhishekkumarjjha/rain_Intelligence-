@@ -1,0 +1,9 @@
+# F-011 AFTER
+
+── health checks whether anything can actually be stored
+  ok  a working install reports its storage, writable, with free space
+  ok  an unwritable data directory is reported, not painted green
+  ok  and health itself stops claiming to be ok
+  ok  the keys are still reported truthfully alongside it
+
+51 passed, 0 failed

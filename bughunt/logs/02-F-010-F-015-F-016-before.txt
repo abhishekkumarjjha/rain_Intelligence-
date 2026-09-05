@@ -1,0 +1,54 @@
+# F-010, F-015, F-016 BEFORE — the first time test/ui.test.js was ever executed.
+#
+# On the base commit the suite could not fail:
+#
+#   $ npm run test:ui
+#     (playwright not installed — skipping UI tests)
+#     exit 0
+#
+# After installing Playwright as a devDependency and pointing it at the
+# pre-installed Chromium, the first real run crashed, and then failed six ways.
+
+## Run 1 — crashed outright
+page.waitForSelector: Timeout 20000ms exceeded.
+Call log:
+  - waiting for locator('table.bench') to be visible
+    43 x locator resolved to hidden <table class="bench">...</table>
+  at test/ui.test.js:497
+  # the audit table moved behind a <details> disclosure when the findings board
+  # became the deliverable. The suite had never noticed.
+
+## Run 2 — six failures
+Failures:
+  · the URL path is one click away for anyone not in the directory: page.click: Timeout 30000ms exceeded.
+      - <div class="acname">Bank of Missouri</div> from <div id="pickBar" class="pickbar">…</div>
+        subtree intercepts pointer events
+      # F-015. An empty query renders eight arbitrary directory rows over
+      # "Use a landing page instead". The rows handle mousedown and
+      # preventDefault() it, so the click selects Bank of Missouri instead.
+  · opening the URL path closes the client picker: the client picker stayed open beside the URL bar
+      # cascade of the same defect
+  · the way back restores the picker and drops the URL: page.fill: Timeout 30000ms exceeded
+      # cascade of the same defect
+  · every block of findings carries its own heading: .scol.lead .scolhead missing
+      # a results-screen assertion stranded in the landing-screen section
+  · Proposal mode is visibly not built, not silently broken: no 'next build' marker on the stubbed mode
+      # the Proposal card is not in index.html at all
+  · the absence finding is shown with its denominator: findings were [...]
+      # "N of M competitors" is one shape of denominator; below the tabling
+      # threshold the board names the advertisers instead, which is doctrine
+
+## F-010 — startCapture() with no try/catch
+# Not reachable from any test that existed. The journey added in this branch
+# aborts the /api/capture POST at the network layer and asserts the button comes
+# back; against the pre-fix code the POST throws out of an un-awaited async
+# function, the button stays disabled forever, and nothing on screen says so.
+
+## F-016 — filters outliving their run
+# Not reachable either: "New analysis" reloads the page, which hides it. The
+# journey takes "Add a competitor" instead, which returns to the capture screen
+# WITHOUT a reload. Against the pre-fix code the second wall renders zero cards,
+# because the advertiser chip from the first run is still filtering it and that
+# advertiser is not in the second set.
+
+# See bughunt/logs/92-playwright.txt for the passing run.

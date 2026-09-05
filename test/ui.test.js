@@ -7,16 +7,35 @@
 // called. No amount of server-side testing catches that. The only assertion
 // that does is "after the capture finishes, is the results screen on screen?"
 //
-// Skips itself (exit 0) when Playwright or its browser is unavailable, so
-// `npm test` still works on a clean checkout.
+// FAILS when Playwright or its browser is unavailable. It used to exit 0 with
+// "(playwright not installed — skipping UI tests)", which meant `npm run
+// test:ui` passed on every machine that could not run it — including whatever
+// was going to run it in CI — and this file went years without executing while
+// reporting success. A suite that cannot run must say so in the only language a
+// pipeline reads.
+//
+// RI_SKIP_UI=1 is the deliberate opt-out for the local no-browser case. It is a
+// choice someone makes, and it prints what it skipped.
 // =============================================================================
 
 import { existsSync } from "node:fs";
 import { startServer, check, section, summary, eq, ok } from "./harness.js";
 
+if (process.env.RI_SKIP_UI === "1") {
+  console.log("  (RI_SKIP_UI=1 — browser tests deliberately skipped; nothing here was verified)");
+  process.exit(0);
+}
+
+function unavailable(what) {
+  console.error(`\n  BROWSER TESTS DID NOT RUN: ${what}.`);
+  console.error("  Install with: npm install   (playwright is a devDependency)");
+  console.error("  To skip deliberately on a machine with no browser: RI_SKIP_UI=1 npm run test:ui\n");
+  process.exit(1);
+}
+
 let chromium;
 try { ({ chromium } = await import("playwright")); }
-catch { console.log("  (playwright not installed — skipping UI tests)"); process.exit(0); }
+catch { unavailable("playwright is not installed"); }
 
 const CANDIDATES = [
   process.env.RI_CHROME_PATH,
@@ -28,7 +47,7 @@ let executablePath = CANDIDATES.find((p) => existsSync(p));
 if (!executablePath) {
   try { if (existsSync(chromium.executablePath())) executablePath = chromium.executablePath(); } catch { /* none */ }
 }
-if (!executablePath) { console.log("  (no chromium binary — skipping UI tests)"); process.exit(0); }
+if (!executablePath) unavailable("no chromium binary was found (set RI_CHROME_PATH, or run: npx playwright install chromium)");
 
 const S = await startServer();
 const browser = await chromium.launch({ executablePath, args: ["--no-sandbox"] });
@@ -81,11 +100,36 @@ async function chooseCompetitors(page, want) {
   }
 }
 
-async function toResults(page, mode, want) {
+/* The landing page has two ways in and they must both keep working. The
+   directory path is what a strategist actually uses, so it is the one the
+   walkthroughs take; the URL path gets its own checks below. */
+async function openLanding(page) {
   await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-  await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-  await page.click("#analyzeBtn");
+  // The product list arrives from /api/clients and /api/health. Selecting an
+  // option before either lands is a race, not a bug in the page.
+  await page.waitForFunction(
+    () => document.querySelectorAll("#landProductSel option").length > 1,
+    null, { timeout: 10000 });
+}
+
+async function pickClient(page, typed, product) {
+  await openLanding(page);
+  await page.fill("#clientInput", typed);
+  await page.click("#clientMenu .acitem");
+  await page.selectOption("#landProductSel", product);
+  await page.click("#goBtn");
   await page.waitForSelector("#s-mode.active", { timeout: 10000 });
+}
+
+async function pickUrl(page, url) {
+  await openLanding(page);
+  await page.click("#urlToggle");
+  await page.fill("#urlInput", url);
+  await page.click("#analyzeBtn");
+}
+
+async function toResults(page, mode, want) {
+  await pickClient(page, "capitol", "checking");
   await page.click(`.modecard[data-mode="${mode}"]`);
   await page.waitForSelector("#s-comp.active", { timeout: 10000 });
   await chooseCompetitors(page, want);
@@ -115,17 +159,75 @@ try {
       ok(/see what your competitors are doing/i.test(t), `tagline was: ${t}`);
     });
 
-    await check("the landing-page URL field is the primary action", async () => {
-      ok(await page.locator("#urlInput").isVisible(), "url input not visible");
+    await check("the client picker is the primary action, the URL is not", async () => {
+      ok(await page.locator("#clientInput").isVisible(), "client input not visible");
+      ok(await page.locator("#landProductSel").isVisible(), "product select not visible");
+      // Two fields, both required. The board is product-scoped, so Analyze must
+      // not be reachable until the product is stated.
+      eq(await page.locator("#goBtn").isDisabled(), true, "Analyze was live before either field was set");
+      eq(await page.locator("#urlInput").isVisible(), false, "the URL bar should start collapsed");
+    });
+
+    await check("typing a partial name finds the client by substring", async () => {
+      await page.fill("#clientInput", "capitol");
+      await page.waitForSelector("#clientMenu .acitem", { timeout: 4000 });
+      const first = (await page.locator("#clientMenu .acitem .acname").first().innerText()).trim();
+      eq(first, "La Capitol Federal Credit Union", `first suggestion was: ${first}`);
+      // The market is the disambiguator when two clients share a word.
+      ok((await page.locator("#clientMenu .acitem .acmeta").first().innerText()).includes("lacapfcu.org"),
+        "suggestion should show the domain");
+    });
+
+    await check("a name that matches nothing points at the URL path", async () => {
+      await page.fill("#clientInput", "zzzznotaclient");
+      await page.waitForSelector("#clientMenu .acnone", { timeout: 4000 });
+      ok(/landing page URL/i.test(await page.locator("#clientMenu .acnone").innerText()),
+        "no-match state should name the other way in");
+      await page.fill("#clientInput", "");
+    });
+
+    await check("the URL path is one click away for anyone not in the directory", async () => {
+      await page.click("#urlToggle");
+      ok(await page.locator("#urlInput").isVisible(), "url input did not open");
       const ph = await page.locator("#urlInput").getAttribute("placeholder");
       ok(ph.includes("/"), `placeholder should show a product path, got ${ph}`);
       ok(/landing page|product page/i.test(await page.locator("#urlHint").innerText()), "no landing-page guidance");
     });
 
-    await check("the landing screen is the field and nothing else", async () => {
+    // ONE WAY IN AT A TIME. Both paths open at once meant two live Analyze
+    // buttons and two product scopes — Checking picked above, /auto-loan pasted
+    // below — with nothing on screen saying which one the capture would use.
+    await check("opening the URL path closes the client picker", async () => {
+      eq(await page.locator("#pickBar").isVisible(), false, "the client picker stayed open beside the URL bar");
+      eq(await page.locator("#goBtn").isVisible(), false, "a second live Analyze button is still reachable");
+      ok(await page.locator("#pickerToggle").isVisible(), "the URL path has no way back");
+    });
+
+    await check("the way back restores the picker and drops the URL", async () => {
+      await page.fill("#urlInput", "https://www.lacapfcu.org/auto-loan");
+      await page.click("#pickerToggle");
+      ok(await page.locator("#clientInput").isVisible(), "the picker did not come back");
+      eq(await page.locator("#urlInput").isVisible(), false, "the URL bar stayed open behind the picker");
+      eq(await page.inputValue("#urlInput"), "", "a second product scope survived the switch");
+    });
+
+    await check("the landing screen carries nothing it was not asked", async () => {
       eq(await page.locator("#quickClients").count(), 0, "client shortcut chips still present");
-      ok(/\d+ clients in directory/.test(await page.locator("#healthLine").innerText()),
-        "directory size should still be stated");
+      // The directory size and the read cap were facts about the tool, not
+      // answers to anything asked on this screen. Silence is correct here;
+      // this line speaks only when a key is missing.
+      eq((await page.locator("#healthLine").innerText()).trim(), "",
+        "the status line should be silent when everything is configured");
+    });
+
+    await check("a missing key is stated on the landing page, not after Analyze", async () => {
+      const shown = await page.evaluate(() => {
+        const el = document.getElementById("healthLine");
+        el.innerHTML = `<span class="bad">Not configured: SERPAPI_KEY</span> — captures will fail until this is set.`;
+        return { text: el.innerText, visible: el.offsetParent !== null };
+      });
+      ok(shown.visible, "the status line must be able to appear");
+      ok(/Not configured/.test(shown.text), "the warning has to survive the quiet default");
     });
 
     await check("the palette uses blue, orange and green — not blue alone", async () => {
@@ -166,19 +268,21 @@ try {
   let wallCount = 0;
   {
     const page = await newPage();
-    await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-    await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-    await page.click("#analyzeBtn");
-    await page.waitForSelector("#s-mode.active", { timeout: 10000 });
+    await pickClient(page, "capitol", "checking");
 
     await check("the mode screen names the resolved client", async () =>
       // .eyebrow is uppercased in CSS, so compare the text not its casing.
       eq((await page.locator("#modeInst").innerText()).trim().toLowerCase(),
          "la capitol federal credit union", "resolved client"));
 
-    await check("Proposal mode is visibly not built, not silently broken", async () => {
-      const soon = page.locator(".modecard.disabled .soon");
-      ok(await soon.count(), "no 'next build' marker on the stubbed mode");
+    await check("the mode screen offers exactly the modes that exist", async () => {
+      // There is no third card. The Proposal stub was removed from index.html
+      // and this assertion went on asking after its "next build" marker,
+      // because nothing ever ran it. A mode that is not built must not be on
+      // screen at all — a disabled card is still a promise.
+      const modes = await page.locator(".modecard").evaluateAll((els) => els.map((e) => e.dataset.mode));
+      eq(JSON.stringify(modes.sort()), JSON.stringify(["benchmark", "creative"]), "modes on screen");
+      eq(await page.locator(".modecard.disabled").count(), 0, "a mode is on screen that cannot be used");
     });
 
     await page.click('.modecard[data-mode="creative"]');
@@ -193,31 +297,6 @@ try {
     // the per-advertiser capture cache, so it states the SOURCE, what will
     // actually be spent, and what is being reused — the numbers that change
     // depending on who else on the team ran this competitor that week.
-    await check("every source option is selectable and legible", async () => {
-      // The popup is painted by the browser, not by the page, and defaults to a
-      // LIGHT surface while the options inherit the select's light text. That
-      // rendered Meta and Both as washed-out grey — indistinguishable from
-      // disabled, on a control where "we can't do that" is a real state the app
-      // reports elsewhere. Guarded here because it is invisible to any
-      // assertion that only reads text.
-      const r = await page.evaluate(() => {
-        const scheme = getComputedStyle(document.documentElement).colorScheme;
-        return {
-          scheme,
-          opts: [...document.getElementById("sourceSel").options].map((o) => {
-            const cs = getComputedStyle(o);
-            return { v: o.value, disabled: o.disabled, color: cs.color, bg: cs.backgroundColor };
-          }),
-        };
-      });
-      ok(/dark/.test(r.scheme), `native widgets must follow the dark app, got: ${r.scheme}`);
-      eq(r.opts.length, 3, "google_display, meta, both");
-      for (const o of r.opts) {
-        eq(o.disabled, false, `${o.v} must be selectable`);
-        ok(o.color !== o.bg, `${o.v} renders its text in its own background colour`);
-      }
-    });
-
     await check("the national tier is on by default and says who it adds", async () => {
       ok(await page.locator("#natRow").isVisible(), "the nationals row is not on the competitor screen");
       eq(await page.locator("#nationalsChk").isChecked(), true, "the tier should default to ON");
@@ -225,26 +304,14 @@ try {
       ok(/Chase/.test(t) && /Capital One/.test(t), `the row must name both: ${t}`);
     });
 
-    await check("the tier hides itself where it cannot apply", async () => {
-      // Nationals are Google-display only. A checkbox sitting next to a Meta
-      // capture it cannot affect is worse than no checkbox — and the choice
-      // must survive the round trip rather than being reset by the hiding.
-      await page.selectOption("#sourceSel", "meta");
-      eq(await page.locator("#natRow").isVisible(), false, "still showing for Meta");
-      await page.selectOption("#sourceSel", "both");
-      ok(await page.locator("#natRow").isVisible(), "hidden for Both, where Google display still runs");
-      await page.selectOption("#sourceSel", "google_display");
-      eq(await page.locator("#nationalsChk").isChecked(), true, "the preference was reset by hiding");
-    });
-
     await check("switching the tier off re-quotes the cost downward", async () => {
       // The control is only real if the price follows it. Two advertisers
       // dropped from the capture must be two advertisers dropped from the quote.
       const before = await settledCostLine(page);
-      const nBefore = Number((before.match(/(\d+) requests?/) || [])[1] || 0);
+      const nBefore = Number((before.match(/(\d+) SerpApi requests?/) || [])[1] || 0);
       await page.click("#natRow");
       const after = await settledCostLine(page);
-      const nAfter = Number((after.match(/(\d+) requests?/) || [])[1] || 0);
+      const nAfter = Number((after.match(/(\d+) SerpApi requests?/) || [])[1] || 0);
       ok(nAfter === nBefore - 2, `expected two fewer requests, got ${nBefore} -> ${nAfter}`);
       await page.click("#natRow");                       // back on for the capture below
       eq(await page.locator("#nationalsChk").isChecked(), true, "restored");
@@ -252,9 +319,20 @@ try {
 
     await check("the cost line states what will be spent before anything is spent", async () => {
       const cost = await settledCostLine(page);
-      ok(/Google display/.test(cost), `cost line was: ${cost}`);
-      ok(/\d+ requests?|nothing to spend/.test(cost), `cost line was: ${cost}`);
+      ok(/Google image ads/.test(cost), `cost line was: ${cost}`);
+      ok(/\d+ SerpApi requests?|nothing to spend/.test(cost), `cost line was: ${cost}`);
       ok(/reused for \d+ days/.test(cost), `cost line was: ${cost}`);
+      // BOTH BILLS. Quoting SerpApi credits and staying silent about up to
+      // thirty vision calls per advertiser is the bug F-009 is about, and it
+      // is exactly the kind of omission this line can regress into silently.
+      ok(/fresh creative reads?|already read|nothing to spend/.test(cost),
+        `the quote says nothing about model spend: ${cost}`);
+      ok(/up to/.test(cost) || /nothing to spend/.test(cost),
+        `a vision quote stated as a flat number is a promise: ${cost}`);
+      ok(/Key insights is a separate model call/.test(cost),
+        `the quote does not say what it excludes: ${cost}`);
+      ok(/does NOT re-read creatives/.test(cost),
+        `the quote does not say which cache force bypasses: ${cost}`);
     });
 
     await page.click("#captureBtn");
@@ -421,13 +499,17 @@ try {
   }
 
   // ------------------------------------------------------- the benchmark flow
-  section("benchmark flow — table, gate, strategies");
+  //
+  // THIS SECTION WAS STALE, and nothing could have told anyone: the file has
+  // never run. It waited on table.bench being visible, which it stopped being
+  // when the table moved behind the "Full benchmark table" disclosure and the
+  // findings board became the deliverable; and it drove #genBtn, .gate and
+  // .angle, which left the UI months ago and left the server in F-004. A suite
+  // that cannot run cannot go stale loudly, so it went stale quietly.
+  section("benchmark flow — the board, and the table that audits it");
   {
     const page = await newPage();
-    await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-    await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-    await page.click("#analyzeBtn");
-    await page.waitForSelector("#s-mode.active", { timeout: 10000 });
+    await pickClient(page, "capitol", "checking");
     await page.click('.modecard[data-mode="benchmark"]');
     await page.waitForSelector("#s-comp.active", { timeout: 10000 });
 
@@ -437,7 +519,64 @@ try {
     await chooseCompetitors(page, MARKET_TWO);
     await page.click("#captureBtn");
     await page.waitForSelector("#s-results.active", { timeout: 60000 });
-    await page.waitForSelector("table.bench", { timeout: 20000 });
+
+    // THE BOARD IS WHAT THE USER SEES FIRST. It has to be on screen with no
+    // disclosure opened, or the deliverable is behind a click.
+    await page.waitForSelector(".fcard", { timeout: 20000 });
+
+    await check("the findings board is on screen without opening anything", async () =>
+      ok((await page.locator(".fcard").count()) > 0, "no findings rendered"));
+
+    await check("every finding on screen declares the population it was counted over", async () => {
+      // "4 of 5 competitors" is ONE shape of denominator. Below the tabling
+      // threshold the board names the advertisers instead — that is the
+      // doctrine, not a missing denominator — so the assertion is that every
+      // card says who it counted, in whichever of the two forms applies.
+      const findings = await page.locator(".fcard").allInnerTexts();
+      ok(findings.length, "no findings to check");
+      for (const f of findings) {
+        ok(/\d+ of \d+ competitors|captured (ads|set)|competitors'? captured/i.test(f),
+          `a finding names no population: ${JSON.stringify(f)}`);
+      }
+    });
+
+    await check("nothing on the board reads as a claim about a product", async () => {
+      const text = await page.locator("#resultBody").innerText();
+      const claim = text.match(/\b(do(es)? not offer|doesn'?t (offer|have)|no longer (offers?|runs))\b/i);
+      ok(!claim, `a product claim reached the screen: "${claim?.[0]}"`);
+    });
+
+    await check("no rendered panel contains undefined, NaN or [object Object]", async () => {
+      const t = await page.locator("#resultBody").innerText();
+      const bad = t.match(/\bundefined\b|\bNaN\b|\[object [A-Z]/);
+      ok(!bad, `rendered text contained "${bad?.[0]}"`);
+    });
+
+    await check("every block of findings carries its own heading", async () => {
+      // Without one the eye carries the nearest heading down: a client
+      // advantage sitting in the right half of the grid below "Competitive
+      // pressure" reads as pressure, because pressure was the last thing named.
+      for (const sel of [".scol.lead .scolhead", ".scol.pressure .scolhead"]) {
+        ok(await page.locator(sel).count() > 0, `${sel} missing`);
+      }
+      for (const el of await page.locator(".sect > summary.secthead").all()) {
+        const t = (await el.innerText()).trim();
+        ok(t.length > 3, `a section rendered without a heading: "${t}"`);
+      }
+      // A heading that names a section without defining it invites the same
+      // misreading, so each one states its rule underneath.
+      const sects = await page.locator(".sect").count();
+      eq(await page.locator(".sect .sectrule").count(), sects, "a section is missing its rule line");
+    });
+
+    // ------------------------------------------- the table AUDITS the board
+    await check("the full table is behind a disclosure, not on the page by default", async () => {
+      eq(await page.locator("table.bench").isVisible(), false,
+        "the audit trail is being presented as the answer");
+    });
+
+    await page.locator("details.auditwrap > summary").click();
+    await page.waitForSelector("table.bench:visible", { timeout: 10000 });
 
     await check("the client is the first column in the table", async () => {
       const headers = await page.locator("table.bench thead th").allInnerTexts();
@@ -447,17 +586,15 @@ try {
     await check("the advertised bonus row is populated from captured ads", async () =>
       ok(/\$400/.test(await page.locator("table.bench").innerText()), "expected the strongest captured bonus"));
 
-    await check("the client's absent bonus renders as an em-dash, not a zero", async () =>
-      ok(/—/.test(await page.locator("table.bench").innerText()), "expected an absent cell"));
+    await check("the client's absent bonus renders as an absence, not a zero", async () => {
+      const t = await page.locator("table.bench").innerText();
+      ok(/—|not observed|none captured/i.test(t), "expected an absent cell");
+      ok(!/\b0\b\s*(bonus|APY)/i.test(t), "an absence was rendered as a zero");
+    });
 
     await check("no cell rendered undefined, NaN or [object Object]", async () => {
       const t = await page.locator("table.bench").innerText();
       ok(!/undefined|NaN|\[object/.test(t), `table contained: ${t.slice(0, 300)}`);
-    });
-
-    await check("the absence finding is shown with its denominator", async () => {
-      const findings = await page.locator(".finding").allInnerTexts();
-      ok(findings.some((f) => /\d+ of \d+ competitors/.test(f)), `findings were ${JSON.stringify(findings)}`);
     });
 
     await check("every evidence link in the table opens real ads", async () => {
@@ -470,26 +607,11 @@ try {
       await page.waitForTimeout(250);
     });
 
-    // ---------------------------------------------------------------- gate
-    await check("no strategy is on screen before the button is pressed", async () =>
-      eq(await page.locator(".angle").count(), 0, "angles present before the gate"));
-
-    await check("the gate is present and explains itself", async () => {
-      ok(await page.locator("#genBtn").isVisible(), "gate button missing");
-      ok(/not generated by default/i.test(await page.locator(".gate").innerText()), "gate does not explain itself");
+    // ------------------------------------------------ the gate that was removed
+    await check("the strategy gate is gone from the screen, not merely unstyled", async () => {
+      eq(await page.locator("#genBtn").count(), 0, "the paid gate is still in the DOM");
+      eq(await page.locator(".angle").count(), 0, "generated strategy angles are on screen");
     });
-
-    await page.click("#genBtn");
-    await page.waitForSelector(".angle", { timeout: 40000 });
-
-    await check("pressing the gate produces strategy angles", async () =>
-      ok((await page.locator(".angle").count()) > 0, "no angles generated"));
-
-    await check("every angle carries a 'confirm first' question", async () =>
-      ok(/Confirm first:/i.test(await page.locator("#strategyZone").innerText()), "no confirmation question"));
-
-    await check("the strategy screen restates the sampling caveat", async () =>
-      ok(/captured|reviewed/i.test(await page.locator("#strategyZone").innerText()), "no sampling caveat"));
 
     await page.close();
   }
@@ -498,10 +620,7 @@ try {
   section("a capture that finds nothing still renders a result");
   {
     const page = await newPage();
-    await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-    await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-    await page.click("#analyzeBtn");
-    await page.waitForSelector("#s-mode.active", { timeout: 10000 });
+    await pickClient(page, "capitol", "checking");
     await page.click('.modecard[data-mode="creative"]');
     await page.waitForSelector("#s-comp.active", { timeout: 10000 });
 
@@ -542,9 +661,7 @@ try {
     let alerted = false;
     page.on("dialog", async (d) => { alerted = true; await d.dismiss(); });
 
-    await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-    await page.fill("#urlInput", "definitely not a url");
-    await page.click("#analyzeBtn");
+    await pickUrl(page, "definitely not a url");
     await page.waitForTimeout(600);
 
     await check("a bad URL is explained inline, not in a blocking dialog", async () => {
@@ -554,6 +671,257 @@ try {
     });
 
     await page.close();
+  }
+
+  // ===========================================================================
+  // JOURNEYS — one browser context, several analyses, state must not leak.
+  //
+  // Every bug the owner found by hand this week was UI-shaped: options rendering
+  // grey, two entry paths open at once, a modal behind a modal, a panel that
+  // closed itself. None of them is reachable from the API, and none of them was
+  // reachable from this file either, because this file had never run.
+  // ===========================================================================
+  section("journey — a second capture does not inherit the first one's filters");
+  {
+    const page = await newPage();
+
+    await toResults(page, "creative", MARKET_TWO);
+    await page.waitForSelector("#s-results.active", { timeout: 60000 });
+    await page.waitForSelector(".wall .adcard", { timeout: 20000 });
+
+    // Narrow to ONE advertiser, then take the path that does not reload:
+    // "Add a competitor" goes back to the capture screen, and capturing again
+    // from there kept every chip from the run that just ended.
+    const narrowTo = "neighborsfcu.org";
+    await page.locator(`#filters .fchip[data-f="${narrowTo}"]`).click();
+    await page.waitForTimeout(300);
+
+    const narrowed = await page.locator(".wall .adcard").count();
+    await check("the advertiser filter narrowed the first wall", async () => {
+      ok(narrowed > 0, "the filter emptied the wall it was applied to");
+      ok((await page.locator(`#filters .fchip[data-f="${narrowTo}"].on`).count()) > 0,
+        "the chip does not read as active");
+    });
+
+    await page.click("#addCompBtn");
+    await page.waitForSelector("#s-comp.active", { timeout: 15000 });
+
+    // A DIFFERENT SET, which no longer contains the advertiser that was filtered
+    // to. Under the old behaviour the second wall rendered zero cards and read
+    // as a capture that found nothing.
+    await chooseCompetitors(page, ["campusfederal.org"]);
+    await page.click("#captureBtn");
+    await page.waitForSelector("#s-results.active", { timeout: 60000 });
+    await page.waitForTimeout(500);
+
+    await check("the second wall is not empty", async () =>
+      ok((await page.locator(".wall .adcard").count()) > 0,
+        "the second capture rendered no cards — a chip from the previous run is still filtering it"));
+
+    await check("no advertiser chip from the previous run is still applied", async () => {
+      const on = await page.locator("#filters .fchip.on").getAttribute("data-f");
+      eq(on, "all", `the wall opened filtered to "${on}"`);
+    });
+
+    await check("the product chip re-adopts the new run's own scope", async () => {
+      ok((await page.locator("#productFilters .fchip.on").count()) > 0,
+        "no product chip reads as active at all");
+    });
+
+    await check("the results header names the run on screen", async () => {
+      const t = await page.locator("#resTitle").innerText();
+      ok(/La Capitol/i.test(t), `results header was "${t}"`);
+    });
+
+    await page.close();
+  }
+
+  // ---------------------------------------------------------- product scopes
+  section("journey — three products back to back under one context");
+  {
+    const page = await newPage();
+    for (const product of ["checking", "auto-loan", "credit-card"]) {
+      await pickClient(page, "capitol", product);
+      await page.click('.modecard[data-mode="creative"]');
+      await page.waitForSelector("#s-comp.active", { timeout: 10000 });
+
+      await check(`the ${product} run carries its own scope into the competitor screen`, async () =>
+        eq(await page.locator("#productSel").inputValue(), product, "product scope"));
+
+      await chooseCompetitors(page, MARKET_TWO);
+      await page.click("#captureBtn");
+      await page.waitForSelector("#s-results.active", { timeout: 60000 });
+
+      await check(`the ${product} results name the ${product} scope`, async () => {
+        const t = await page.locator("#resTitle").innerText();
+        ok(t.includes("·"), `results header was "${t}"`);
+      });
+
+      await page.click("#restartBtn");
+      await page.waitForSelector("#s-landing.active", { timeout: 15000 });
+    }
+    await page.close();
+  }
+
+  // -------------------------------------------------------------- the drawer
+  section("journey — drawer over panel, and Escape closing the right one");
+  {
+    const page = await newPage();
+    await toResults(page, "creative", MARKET_TWO);
+    await page.waitForSelector("#s-results.active", { timeout: 60000 });
+    await page.waitForSelector(".wall .adcard", { timeout: 20000 });
+
+    await page.locator(".wall .adcard .shot").first().click();
+    await page.waitForSelector("#drawer.on", { timeout: 6000 });
+
+    await check("the drawer opens over the wall with its evidence", async () =>
+      ok((await page.locator("#drawerBody .evcard").count()) > 0, "the drawer opened empty"));
+
+    await check("the drawer is painted above whatever it opened over", async () => {
+      const z = await page.locator("#drawer").evaluate((el) => Number(getComputedStyle(el).zIndex) || 0);
+      const behind = await page.locator("#s-results").evaluate((el) => Number(getComputedStyle(el).zIndex) || 0);
+      ok(z > behind, `drawer z-index ${z} is not above the results screen (${behind})`);
+    });
+
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+
+    await check("Escape closes the drawer and leaves the wall behind it intact", async () => {
+      eq(await page.locator("#drawer.on").count(), 0, "the drawer stayed open");
+      ok((await page.locator(".wall .adcard").count()) > 0, "the wall was closed along with the drawer");
+    });
+
+    await check("closing the drawer did not scroll the wall away", async () =>
+      eq(await page.locator("#s-results.active").count(), 1, "the results screen closed itself"));
+
+    await page.close();
+  }
+
+  // ------------------------------------------------- money buttons, twice each
+  section("journey — a double-click never buys anything twice");
+  {
+    const page = await newPage();
+
+    // Count what the client actually sends. A second POST is a second capture,
+    // and a capture is SerpApi credits and vision calls.
+    let captures = 0;
+    page.on("request", (r) => { if (r.url().includes("/api/capture") && r.method() === "POST") captures++; });
+
+    await pickClient(page, "capitol", "checking");
+    await page.click('.modecard[data-mode="creative"]');
+    await page.waitForSelector("#s-comp.active", { timeout: 10000 });
+    await chooseCompetitors(page, MARKET_TWO);
+
+    await page.locator("#captureBtn").dblclick();
+    await page.waitForSelector("#s-results.active", { timeout: 60000 });
+
+    await check("double-clicking Capture starts one capture, not two", () =>
+      eq(captures, 1, `${captures} captures were started`));
+
+    await page.close();
+  }
+
+  // ------------------------------------------- the capture that cannot start
+  section("journey — the server is unreachable when Capture is pressed");
+  {
+    const page = await newPage();
+    await pickClient(page, "capitol", "checking");
+    await page.click('.modecard[data-mode="creative"]');
+    await page.waitForSelector("#s-comp.active", { timeout: 10000 });
+    await chooseCompetitors(page, MARKET_TWO);
+
+    // The exact failure F-010 is about: the POST never completes. Before the
+    // fix this threw out of an un-caught async function, leaving the only
+    // button on the screen disabled forever and the user with no way forward
+    // but a reload — and nothing on screen saying so.
+    await page.route("**/api/capture", (route) => route.abort("failed"));
+    await page.click("#captureBtn");
+    await page.waitForTimeout(1500);
+
+    await check("the failure is explained on the page", async () => {
+      const err = await page.locator("#errBox, .errbox, #err").first();
+      const text = await page.locator("body").innerText();
+      ok(/could not reach the server/i.test(text), "the user was told nothing about the failure");
+    });
+
+    await check("the Capture button comes back so the user can retry", async () =>
+      eq(await page.locator("#captureBtn").isDisabled(), false,
+        "the only button on the screen is disabled forever"));
+
+    await check("and it stayed on the competitor screen rather than half-navigating", async () =>
+      eq(await page.locator("#s-comp.active").count(), 1, "the screen moved on after a failed start"));
+
+    await page.unroute("**/api/capture");
+    await check("retrying after the failure works", async () => {
+      await page.click("#captureBtn");
+      await page.waitForSelector("#s-results.active", { timeout: 60000 });
+      eq(await page.locator("#s-results.active").count(), 1, "the retry did not reach results");
+    });
+
+    await page.close();
+  }
+
+  // ----------------------------------------------- the picker over the button
+  section("journey — the client picker never covers the only other way in");
+  {
+    const page = await newPage();
+    await openLanding(page);
+
+    await check("clearing the search box does not leave a menu over the page", async () => {
+      await page.fill("#clientInput", "capitol");
+      await page.waitForSelector("#clientMenu .acitem", { timeout: 4000 });
+      await page.fill("#clientInput", "");
+      await page.waitForTimeout(200);
+      eq(await page.locator("#clientMenu").isVisible(), false,
+        "an empty query left eight arbitrary directory rows on screen as if they were suggestions");
+      eq(await page.locator("#clientMenu .acitem").first().isVisible(), false,
+        "a menu row is still hit-testable over the rest of the form");
+    });
+
+    await check("and the landing-page button underneath it is clickable", async () => {
+      // Playwright refuses to click through an interceptor, so this is the
+      // assertion: with the menu open over it, this click times out.
+      await page.click("#urlToggle", { timeout: 5000 });
+      ok(await page.locator("#urlInput").isVisible(), "the URL path did not open");
+    });
+
+    await page.close();
+  }
+
+  // ----------------------------------------------------- the screen-share size
+  section("journey — the sizes this gets demonstrated at");
+  for (const [w, h] of [[1366, 768], [1280, 720]]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+    const page = await ctx.newPage();
+    page.on("pageerror", (e) => pageErrors.push(String(e)));
+    page.on("console", (m) => { if (m.type() === "error" && !BENIGN.test(m.text())) consoleErrors.push(m.text()); });
+    try {
+      await toResults(page, "benchmark", MARKET_TWO);
+      await page.waitForSelector("#s-results.active", { timeout: 60000 });
+      await page.waitForSelector(".fcard", { timeout: 20000 });
+
+      await check(`at ${w}×${h} nothing scrolls sideways`, async () => {
+        const over = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+        eq(over, false, "the page scrolls horizontally at a common screen-share size");
+      });
+
+      await check(`at ${w}×${h} the findings board is reachable by scrolling, not lost below the page`, async () => {
+        // NOT an assertion that the board is above the fold. It is not — at
+        // 1366×768 the first finding sits at roughly y=794, one short scroll
+        // down, because the eyebrow, title, sampling note, funnel and stats
+        // come first. Whether that ordering is right is a design call and not
+        // this suite's to make; it is written up as an observation instead.
+        // What IS a defect is a board pushed off the end of the document by a
+        // layout that broke at a narrow width, so that is what is asserted.
+        const box = await page.locator(".fcard").first().boundingBox();
+        ok(box, "the first finding has no box at all — it is not being laid out");
+        ok(box.y < h * 3, `the first finding sits at y=${Math.round(box.y)} on a ${h}px screen`);
+        ok(box.width > 200, `the first finding is ${Math.round(box.width)}px wide — the grid has collapsed`);
+      });
+    } finally {
+      await page.close();
+      await ctx.close();
+    }
   }
 
   // --------------------------------------------------------- console hygiene

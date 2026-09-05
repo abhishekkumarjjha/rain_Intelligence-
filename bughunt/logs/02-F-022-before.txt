@@ -1,0 +1,22 @@
+# F-022 BEFORE — the national age caveat is appended to a field that does not exist.
+
+# server.js benchmarkFor():   if (bm.referenceNote && oldest > run.days) { bm.referenceNote += ... }
+# lib/analyze.js buildBenchmark() never sets referenceNote — grep finds no match:
+$ grep -c referenceNote lib/analyze.js
+0
+
+# So the condition reads undefined on every run, and the caveat has never fired.
+
+── H19 — the national age caveat appears exactly when it should
+  ok  the premise holds — the nationals are in the run as reference
+  ok  a national captured today carries NO age caveat
+  ok  the national capture entries were found and aged
+  ok  the aged national is still served from cache, not silently refetched
+  FAIL the caveat fires, names the age AND names the window
+       the note does not state the age: "National advertisers, shown as reference context. They are never counted among the selected local competitors — we cannot tell from the Transparency Center whether their ads served in this market — but where every one of them advertises something the client does not, the board says so on a card tagged National reference."
+  FAIL the caveat is about the CAPTURE, never about the advertiser
+       the note asserts more than it can: "National advertisers, shown as reference context. They are never counted among the selected local competitors — we cannot tell from the Transparency Center whether their ads served in this market — but where every one of them advertises something the client does not, the board says so on a card tagged National reference."
+  ok  ageing a national never moves a local count
+  ok  a 60-day-old capture read over a 90-day window raises no caveat
+
+170 passed, 2 failed

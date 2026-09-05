@@ -1,0 +1,84 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_RATE_DISCOUNT",
+  "advertiser": "lacapfcu.org",
+  "adText": {
+    "headlines": [
+      "La Cap Auto Loans",
+      "Rates As Low As 4.59% APR*"
+    ],
+    "description": "Rates as low as 4.59% APR* on new and used autos. Members get 0.65% off your rate with autopay.",
+    "sitelinks": [
+      "Apply Online"
+    ],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "lacapfcu.org",
+    "displayUrl": "",
+    "headlines": [
+      "La Cap Auto Loans",
+      "Rates As Low As 4.59% APR*"
+    ],
+    "description": "Rates as low as 4.59% APR* on new and used autos. Members get 0.65% off your rate with autopay.",
+    "sitelinks": [
+      "Apply Online"
+    ],
+    "callouts": [],
+    "economicFacts": [
+      {
+        "metric": "apr",
+        "raw": "4.59% APR",
+        "qualifiers": {},
+        "sourceField": "headline"
+      },
+      {
+        "metric": "apr",
+        "raw": "0.65% off your rate",
+        "qualifiers": {},
+        "sourceField": "description"
+      }
+    ],
+    "claims": [],
+    "unclassified": [],
+    "leadEmphasis": "rate",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "auto-loan",
+    "productConfidence": 0.95,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "auto-loan",
+    "productConfidenceAtLeast": 0.8,
+    "facts": [
+      {
+        "metric": "apr",
+        "raw": "4.59% APR",
+        "value": 4.59,
+        "complete": true,
+        "rankable": true,
+        "grounded": true
+      },
+      {
+        "metric": "rate_discount",
+        "raw": "0.65% off your rate",
+        "value": 0.65,
+        "complete": true,
+        "rankable": true,
+        "grounded": true,
+        "retypedFrom": "apr"
+      }
+    ],
+    "claims": [],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "A REDUCTION OF A RATE IS NOT A RATE. Both figures were filed as apr, and because a lower APR wins, 0.65 became the brand's advertised auto-loan rate and was ranked against a competitor's real 4.84%. The grammar is the tell: a percentage bound to 'off' is what comes off a rate. rate_discount IS rankable, against another rate_discount — 'more off is more', per the metric registry. What it must never be ranked against is the apr it was standing in for, and that is guaranteed by it being a different metric id. The corpus said unrankable and the corpus was wrong."
+}

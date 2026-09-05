@@ -1,0 +1,13 @@
+# F-001 AFTER
+
+STAGE 10 — grounding: a figure only counts if the ad printed it
+  ok  a figure the ad text contains is grounded and counts
+  ok  a figure that is nowhere in the ad text is kept, marked, and never counted
+  ok  a figure grounded only in a DIFFERENT ad of the same brand does not count
+  ok  a claim whose quote is not in the ad is never counted against the brand
+  ok  a clipped figure is still recognised as present, and refused for being clipped
+  ok  spacing, curly quotes and unicode never cost a real figure its grounding
+  ok  a display creative's offer figure is grounded against its own transcription
+
+92 passed, 0 failed
+

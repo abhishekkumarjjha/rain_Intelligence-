@@ -1,0 +1,94 @@
+# =============================================================================
+# render.yaml — RAIN Intelligence on Render.
+#
+# THE DISK IS NOT OPTIONAL. Render's filesystem is ephemeral: it is wiped on
+# every deploy, every restart and every instance replacement. This app keeps
+# ALL of its state as flat files under RI_DATA_DIR:
+#
+#   runs/            run history        — irreplaceable. A new capture returns
+#                                         TODAY's ads, so a past run cannot be
+#                                         rebuilt at any price.
+#   _snapshots/      month-over-month   — irreplaceable, and the whole point of
+#                                         Campaign Benchmark. Lose these and
+#                                         every delta silently resets to "first
+#                                         run" forever.
+#   _evidence/       dispute archive    — irreplaceable. Transparency Center
+#                                         creatives disappear from Google; this
+#                                         is the only answer to "show me".
+#   _extractions/    vision cache       — re-buyable, at Anthropic's price.
+#   _captures/       capture cache      — re-buyable, at SerpApi's price.
+#
+# Without the disk the app still runs and still looks correct, which is what
+# makes it dangerous: the failure mode is an empty run list and a benchmark
+# that quietly claims it has never seen this client before.
+#
+# A service with a disk cannot run more than one instance and does not get
+# zero-downtime deploys — Render must stop the old instance to move the disk.
+# Both are fine here: in-flight runs are held in an in-memory map, so this is
+# single-instance by design either way.
+# =============================================================================
+
+services:
+  - type: web
+    name: rain-intelligence
+    runtime: node
+    # Persistent disks require a paid instance type. The free tier cannot mount
+    # one, and also spins down when idle — which would abandon any capture in
+    # flight, since a run's progress lives in memory until it completes.
+    plan: starter
+    region: oregon
+    branch: main
+
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+
+    # /api/health returns 200 whenever the process is up. It deliberately does
+    # NOT fail on a missing provider key — the sources fail independently and an
+    # unpaid SerpApi invoice must not take the whole product down. So a green
+    # health check means "running", not "configured": confirm the keys by
+    # reading the serpapi / searchapi / anthropic booleans in its JSON.
+    healthCheckPath: /api/health
+
+    disk:
+      name: rain-intelligence-data
+      mountPath: /var/data
+      # Runs and evidence bundles are small JSON plus base64 artwork. 10GB is
+      # generous; growing a Render disk later is possible, shrinking is not.
+      sizeGB: 10
+
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+
+      # MUST match the disk mountPath above.
+      - key: RI_DATA_DIR
+        value: /var/data
+
+      # Secrets. sync:false means Render prompts for the value and never stores
+      # it in this file — set them in the dashboard, not in git.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SERPAPI_API_KEY
+        sync: false
+      # Meta only. Omit it and Google keeps working; /api/health reports Meta
+      # as unavailable rather than the app failing to boot.
+      - key: SEARCHAPI_API_KEY
+        sync: false
+
+      # ---------------------------------------------------------------------
+      # Everything below is optional and shown at its PRODUCTION value.
+      #
+      # Do not copy .env.example into the dashboard wholesale: it sets
+      # RI_CAPTURE_TTL_DAYS=30 as a pre-production testing override. Leaving it
+      # unset here gives the 7-day production default, which is what keeps
+      # anyone from showing a client a competitor wall older than one approval
+      # cycle.
+      # ---------------------------------------------------------------------
+      - key: SERPAPI_TC_REGION
+        value: "2840"          # SerpApi's own region id space. 2840 = US.
+      - key: RI_VISION_MODEL
+        value: claude-haiku-4-5-20251001
+      - key: RI_ANALYSIS_MODEL
+        value: claude-sonnet-5
+      - key: RI_MAX_READ
+        value: "30"            # Creatives read per advertiser. ONE VISION CALL EACH.

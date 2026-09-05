@@ -1,0 +1,9 @@
+# F-020 AFTER
+
+── regression — a 30-day snapshot is not the previous of a 90-day run
+  ok  a 30-day run still finds the previous 30-day snapshot
+  ok  the wider window really does reveal a figure the narrower one did not
+  ok  the 90-day run reports no change against the 30-day snapshots
+  ok  and the primary read carries no manufactured month-over-month line
+  ok  the snapshots on disk record the window they covered
+

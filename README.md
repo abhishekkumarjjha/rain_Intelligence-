@@ -1,15 +1,14 @@
 # RAIN Intelligence
 
-Competitive advertising evidence for RAIN. Two modes, three sources.
+Competitive advertising evidence for RAIN. Two halves, one capture set.
 
 ```
 npm install
-cp .env.example .env      # SERPAPI_API_KEY + ANTHROPIC_API_KEY, and
-                          # SEARCHAPI_API_KEY if you want the Meta source
+cp .env.example .env      # SERPAPI_API_KEY + ANTHROPIC_API_KEY
 npm run dev               # :3000 — reads .env
 
-npm test                  # 167 tests — logic, pipeline, whole API, failure paths
-npm run test:ui           # 57 more, in a real browser (see Testing below)
+npm test                  # 196 tests — logic, pipeline, whole API, failure paths
+npm run test:ui           # more, in a real browser (see Testing below)
 ```
 
 `npm run dev` loads `.env` through Node's own `--env-file`; `npm start` does
@@ -18,17 +17,20 @@ variables and a `.env` file should not exist. Nothing here bundles dotenv, so
 running `npm start` locally after filling in `.env` will start a server with no
 keys at all and report every source as unconfigured.
 
-Keys fail independently. Without `SEARCHAPI_API_KEY` the Meta source is refused
-and Google display still works; without `SERPAPI_API_KEY` a Meta-only capture
-still runs. `/api/health` reports availability per source.
+Without `SERPAPI_API_KEY` nothing can be captured; without `ANTHROPIC_API_KEY`
+creatives are retrieved but never read. `/api/health` reports both. `/api/health` reports availability per source.
 
 ---
 
 ## The two modes
 
 **Creative Inspiration** — *"What are competitors making?"*
-Captures **Google display** (`creative_format=image`), **Meta**, or both. Google
-groups near-identical executions into ideas and shows longevity; Meta collapses
+Captures **Google image creatives** (`creative_format=image`). Called *image*, not
+*display*: `creative_format` filters on what the creative IS, and the provider has
+no DISPLAY value in its platform enum, so nothing in the response says an image
+creative served on the Display Network. The source KEY stays `google_display`
+because it is written into every cache filename and every snapshot. Groups near-identical
+executions into ideas and shows longevity; collapses
 DCO cards into distinct messages. Chosen on the competitor screen, before
 anything is spent.
 
@@ -77,12 +79,7 @@ is not solving it. So the wall renders **Local and regional** first, then
 says so rather than letting the national section stand in for a market read.
 
 **Scope.** Google display only. Benchmark is excluded because a national ceiling
-in that table would sit in a column the client reads as a peer. Meta is excluded
-on evidence: the live probe found Chase's Meta presence is influencer and brand
-content, 1 of 36 ads product-classifiable, with Page resolution graded *low* at
-a 0.0033 margin. Filling an empty wall with the wrong ads is not filling it.
-
-**One prerequisite this exposed.** Clustering was keyed on
+in that table would sit in a column the client reads as a peer. **One prerequisite this exposed.** Clustering was keyed on
 `[headline, offer, product]` with no advertiser, so two banks running the same
 generic line collapsed into a single card credited to whichever ran longer. That
 is invisible with three local competitors and severe once national copy is in
@@ -93,52 +90,19 @@ advertiser-scoped, and a test holds it there.
 
 ## Sources are not filters
 
-`google_display`, `google_search` and `meta` never share a wall, a denominator,
+`google_display` and `google_search` never share a wall, a denominator,
 a longevity column, a cache entry or a run diff.
 
 Selecting **Both** creates **two runs**, not one run holding two kinds of record.
 That is deliberate and load-bearing. Google's `totalDaysShown` is a
-provider-supplied count of days served; Meta has no equivalent and never will.
+provider-supplied count of days served, and it means something different on
+each surface.
 Concatenating the two produces a column that is sometimes one measurement and
 sometimes another with no way for a reader to tell which — and the front end
 keeps one state tree per source so a filter chosen on one wall cannot silently
 apply to the other's data.
 
-`[...googleAds, ...metaAds]` is a bug even when it typechecks.
-
----
-
-## What Meta needed that Google did not
-
-The README used to claim adding a source would be "a new file in the provider
-layer and nothing else". A live probe of 111 real Meta ads disproved that.
-
-**Cardinality.** Google: one ad, one creative, one image, one record. Meta: one
-ad, up to seven cards, up to eight assets. 95 of 111 probed ads carried cards,
-with 420 cards behind them. So a Meta ad is a *container* and the thing worth
-classifying is the *card*.
-
-**Dynamic creative.** 64 of 111 ads — 58% — had `{{product.name}}` /
-`{{product.brand}}` as their top-level text while the real copy sat in the
-cards. **Zero** cards carried a template. Reading `snapshot.body` classifies the
-majority of the corpus as gibberish, so cards outrank parents and template
-strings are blanked rather than passed through.
-
-**Cheap facts.** Unlike a banner, where copy exists only in pixels, a Meta card
-ships machine-readable title, body, CTA and destination. Classification runs
-URL → provider text → vision, in that order, and every record carries a
-`productFrom` provenance so an audit can tell which tier answered.
-
-**Expiring media.** Every Meta media URL is a signed `fbcdn.net` link with an
-`oe=` expiry token. Google's `simgad` URLs are archival and can be proxied; these
-cannot. Meta creatives are downloaded during capture and served from
-`/api/media/:hash` — an evidence store that keeps only the URL keeps a receipt,
-not the artifact.
-
-**Different time.** All 111 probed ads were `is_active: true` while all 111
-carried an `end_date` already in the past, 78 of them dated the day before the
-probe ran. It behaves like a rolling last-observed stamp. So Meta renders
-`Active · started Aug 18` — never a closed range, never a day count.
+`[...displayAds, ...searchAds]` is a bug even when it typechecks.
 
 ---
 
@@ -202,12 +166,6 @@ this tool captured their ads, not their product set.
 **Google (SerpApi)** — 1 credit per advertiser per capture. 3 competitors = 3
 credits; Benchmark adds 1 for the client. Free tier is 250/month.
 
-**Meta (SearchApi)** — 1 request per page, plus 1 for Page search when the
-advertiser is not already in the identity registry. Capped at `RI_META_MAX_PAGES`
-(default 2). A large advertiser can report 600 ads at ~30 a page, so exhausting
-one would cost ~20 requests — exhaustive capture is a thing a strategist asks
-for, not a default.
-
 **The capture cache is the main saving.** Keyed on `(source, domain, window)`
 and deliberately **not** on product, because capture is product-agnostic — one
 capture of a competitor serves every product scope the team tests that week. If
@@ -222,11 +180,7 @@ that way:
 - **Google** — byte-identical creatives collapse *before* extraction. On the
   recorded fixture that was 17 duplicates reduced to 1 vision call. Extractions
   then cache forever on `creativeId`, because a creative's pixels never change.
-- **Meta** — cards are deduped into distinct messages *before* any model call,
-  and only messages the URL and copy could not resolve are read at all. The read
-  cap applies after dedupe, never before.
 
----
 
 ## Verify before trusting Creative mode
 
@@ -255,12 +209,8 @@ path is pointed at your own book of business.
 ```
 lib/sources.js           the three sources, their windows, and what each mode may capture
 lib/atc-provider.js      Google adapter · capture record · selection · byte dedupe · domain links
-lib/meta-provider.js     SearchApi Meta · Page resolution · pagination · container -> units
-lib/meta-analyze.js      Meta numbers · message dedupe · cheap-first classification · funnel
-lib/platform-identity.js domain -> Meta Page ID, with confidence and provenance
 lib/capture-cache.js     per-advertiser capture cache + the pre-spend cost plan
-lib/media-store.js       durable local copies of Meta creatives (their URLs expire)
-lib/extract.js           vision for BANNER creatives, plus the Meta fallback prompt
+lib/extract.js           vision for BANNER creatives, and the format dispatcher
 lib/analyze.js           every Google number · clustering · benchmark · findings
 lib/strategies.js        the gated interpretation pass
 lib/directory.js         RAIN's 40 curated clients (carried over)
@@ -270,7 +220,6 @@ lib/store.js             run snapshots + extraction cache + source-aware diffing
 docs/UI-SPEC.md       full UI + copy specification, written to be handed to a reviewer
 
 test/fixture-lab.js   a synthetic Google market: 8 advertisers, distinct pixels, known answers
-test/meta-fixture.js  a synthetic Meta market: DCO templates, card duplication, ambiguous Pages
 test/mock-net.js      preload that puts that market under the REAL server
 test/harness.js       server runner + assertions
 test/*.test.js        see Testing
@@ -278,11 +227,6 @@ test/*.test.js        see Testing
 
 Provider responses die at the normalizer. Every commercial ad-library source is
 a reverse-engineered scraper — there is no official Google API for commercial
-Transparency Center data, and the official Meta `ads_archive` API is gated behind
-per-person identity confirmation (`OAuthException 10 / subcode 2332002`), which
-is not a dependency a production tool should carry. So a provider swap should
-touch the provider layer and the analysis grain, and nothing else.
-
 ---
 
 ## Why a capture of 55 can show 2
@@ -323,7 +267,6 @@ slice.
 | `pipeline.test.js` | the recorded SerpApi fixture through the provider layer |
 | `flow.test.js` | every endpoint, driven the way the UI drives it |
 | `degraded.test.js` | quota, bad key, timeout, unreadable creatives, blocked CDN, SSRF |
-| `meta.test.js` | the Meta source — templates, dedupe, Page states, cache, source isolation |
 | `nationals.test.js` | the standing tier — injection, sharing, tiering, and scope |
 | `ui.test.js` | the user flow in a browser, landing to strategies |
 
@@ -371,3 +314,34 @@ npm i -D playwright && npx playwright install chromium
 npm run test:ui
 npm run shots ./shots     # screenshots of every screen
 ```
+
+## Moving the cache between environments
+
+`RI_DATA_DIR` is portable by construction. Nothing under it stores an absolute
+path, a hostname or a port, and no key encodes the machine that wrote it — so
+the directory can be copied from a laptop to a Render disk to an S3-backed
+volume and every entry is a hit. **No SerpApi request and no vision call is
+repeated at any hop.** Roughly 18 MB after a few runs, most of it the evidence
+archive.
+
+```bash
+# localhost -> a Render disk
+scp -r runs/* srv-xxxx@ssh.oregon.render.com:/var/data/
+
+# a Render disk -> S3
+aws s3 sync /var/data s3://rain-intelligence-cache/
+```
+
+What each layer costs to lose:
+
+| | rebuildable? |
+|---|---|
+| `_captures` | yes, at SerpApi's price |
+| `_extractions` | yes, at Anthropic's price |
+| `_snapshots`, `_evidence`, `run_*.json` | **no** — a new capture returns today's ads |
+
+`manifest.json` records the schema the directory was written under. A cache from
+an older build is not dangerous: extractions carry their reader VERSION in the
+filename (`CR123.search-v2.json`), so entries written by a different prompt miss
+rather than mislead, and the first run re-reads them. The startup line says which
+schema it found.

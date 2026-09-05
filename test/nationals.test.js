@@ -10,6 +10,7 @@
 // =============================================================================
 
 import { check, section, summary, eq, ok, startServer } from "./harness.js";
+import { rmSync } from "node:fs";
 import { withNationals, isNational, captureOptionsFor, NATIONAL_TTL_DAYS, NATIONAL_READ_CAP } from "../lib/national-tier.js";
 import { clusterAds } from "../lib/analyze.js";
 
@@ -64,16 +65,26 @@ try {
       clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
       competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
     });
-    await check("one chosen competitor becomes three captured advertisers", () => {
-      eq(body.targets.length, 3, "1 local + 2 standing nationals");
+    await check("one chosen competitor becomes four captured advertisers", () => {
+      // The client is captured on the Wall too now — as its own population,
+      // counted in none of the wall's figures. See flow.test.js.
+      eq(body.targets.length, 4, "the client + 1 local + 2 standing nationals");
     });
     run = await S.awaitRun(body.runs[0].runId);
   }
 
-  await check("every ad carries its tier", () => {
-    ok(run.ads.every((a) => a.tier === "local" || a.tier === "national"), "tier present on all");
+  await check("every ad carries its tier, and the client's is its own", () => {
+    ok(run.ads.every((a) => ["local", "national", "client"].includes(a.tier)), "tier present on all");
     ok(run.ads.some((a) => a.tier === "national"), "nationals captured");
     ok(run.ads.some((a) => a.tier === "local"), "locals captured");
+    // THE CLIENT IS NEVER IN A COMPETITOR TIER. Every count on the wall is
+    // computed over the two market tiers, so a client ad landing in "local"
+    // would inflate the local set with the client's own creative.
+    ok(run.ads.filter((a) => a.isClient).every((a) => a.tier === "client"),
+      "a client ad must never be tiered as a competitor");
+    ok(!run.creative.tiers.local.domains.includes("lacapfcu.org"), "the client is not in the local tier");
+    ok(!run.creative.byCompetitor.some((c) => c.domain === "lacapfcu.org"),
+      "the client must not appear as a competitor chip");
   });
 
   await check("the payload groups the two tiers separately", () => {
@@ -123,8 +134,11 @@ try {
       ok(second.progress["capitalone.com"].fromCaptureCache, "Capital One from cache");
       ok(!second.progress["pelicanstatecu.com"].fromCaptureCache, "the local competitor is fetched fresh");
     });
-    await check("so only the local competitor cost a request", () => {
-      eq(second.requests, 1, "one request for three advertisers");
+    await check("so only the local competitor and the client cost a request", () => {
+      // Two now, and the second one is the point of the change: the client's
+      // own creative is what "competitors lead with a bonus" is measured
+      // against. The nationals are still free.
+      eq(second.requests, 2, "the chosen local and the client; both nationals cached");
     });
   }
 
@@ -137,9 +151,9 @@ try {
     });
     await check("the cost line quotes the nationals it is about to capture", () => {
       const plan = body.plans[0];
-      eq(plan.total, 3, "1 chosen + 2 nationals");
+      eq(plan.total, 4, "the client + 1 chosen + 2 nationals");
       eq(plan.fromCache, 2, "both nationals already held");
-      eq(plan.willFetch, 1, "only the unseen local costs a request");
+      eq(plan.willFetch, 2, "the unseen local and the client");
       eq(plan.nationalWillFetch, 0, "no national spend");
     });
   }
@@ -153,25 +167,34 @@ try {
       clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
       competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
     });
-    await check("Benchmark never gets a national column", () => {
+    // CHANGED DELIBERATELY. Benchmark used to exclude the nationals entirely,
+    // on the grounds that a national column reads as a peer. That objection is
+    // now answered by TIERING rather than by omission: they are captured, shown
+    // under their own heading in the offer snapshot, and excluded from every
+    // denominator and every finding (asserted in flow.test.js). A strategist
+    // sitting with a client can see the national ceiling without it ever
+    // becoming part of a "4 of 5 competitors" sentence.
+    await check("Benchmark captures nationals as a reference tier", () => {
       const domains = body.targets.map((t) => t.domain);
-      ok(!domains.includes("chase.com"), "no Chase");
-      ok(!domains.includes("capitalone.com"), "no Capital One");
-      eq(body.targets.length, 2, "client + the one chosen peer");
+      ok(domains.includes("chase.com"), "Chase should be captured for reference");
+      ok(domains.includes("capitalone.com"), "Capital One should be captured for reference");
+      eq(body.targets.length, 4, "client + one chosen peer + two nationals");
+      const nationals = body.targets.filter((t) => t.domain === "chase.com" || t.domain === "capitalone.com");
+      for (const n of nationals) ok(!n.isClient, "a national is never the client");
     });
-  }
 
-  {
-    const { body } = await S.post("/api/capture", {
-      mode: "creative", sources: ["meta"],
-      clientDomain: "lacaptest.org", clientLabel: "La Cap Test", product: "checking",
-      competitors: [{ label: "Summit Credit Union", domain: "summitcu.test" }],
-    });
-    await check("Meta does not get nationals — their coverage is unproven there", () => {
-      const domains = body.runs[0].targets.map((t) => t.domain);
-      ok(!domains.includes("chase.com"), "no Chase on Meta");
-      eq(body.runs[0].targets.length, 1, "only the chosen competitor");
-    });
+    // The opt-out still holds, and it still means "no national rows at all".
+    {
+      const { body: optedOut } = await S.post("/api/capture", {
+        mode: "benchmark",
+        clientDomain: "lacapfcu.org", clientLabel: "La Capitol", product: "checking",
+        competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
+        includeNationals: false,
+      });
+      await check("Benchmark honours the nationals opt-out", () => {
+        eq(optedOut.targets.length, 2, "client + the one chosen peer");
+      });
+    }
   }
 
   {
@@ -193,7 +216,8 @@ try {
       competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
     });
     await check("a caller can opt out of the tier", () => {
-      eq(body.targets.length, 1, "only what was chosen");
+      eq(body.targets.length, 2, "what was chosen, plus the client");
+      ok(!body.targets.some((t) => t.domain === "chase.com"), "no national was appended");
     });
   }
 
@@ -212,12 +236,81 @@ try {
       competitors: [{ label: "Neighbors FCU", domain: "neighborsfcu.org" }],
     });
     await check("the cost quote honours the opt-out", () => {
-      eq(on.body.plans[0].total, 3, "quoted with the tier on");
-      eq(off.body.plans[0].total, 1, "quoted with the tier off");
+      // The client is quoted either way — it is captured either way. The
+      // opt-out is about the national tier and nothing else.
+      eq(on.body.plans[0].total, 4, "the client + 1 chosen + 2 nationals");
+      eq(off.body.plans[0].total, 2, "the client + 1 chosen, tier off");
     });
   }
 } finally {
   await S.stop();
+}
+
+// ---------------------------------------------------------------------------
+// H16 — ONE DOMAIN, TWO ROLES, ONE CACHE ENTRY.
+//
+// The capture cache is keyed on source + domain + days and deliberately NOT on
+// the client, which is the whole saving: one La Capitol capture serves every
+// run that mentions La Capitol. That also means the same entry is replayed once
+// as THE CLIENT and once as A COMPETITOR, and if any client framing were stored
+// in it, the second run would inherit it — a competitor rendered on the client's
+// own tier, inside the client wall, and out of every competitor denominator.
+// ---------------------------------------------------------------------------
+section("regression — a cached advertiser carries no client framing into its next role");
+{
+  const S = await startServer({}, { keepData: true });
+  let dataDir = S.dataDir;
+  try {
+    // RUN ONE: lacapfcu.org is the CLIENT.
+    const { body: first } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    const runA = await S.awaitRun(first.runId);
+    await check("run one captured the client on the client tier", () => {
+      const own = runA.ads.filter((a) => a.institution === "lacapfcu.org");
+      ok(own.length > 0, "no client ads captured");
+      ok(own.every((a) => a.isClient === true), "the client is not flagged as the client");
+      ok(own.every((a) => a.tier === "client"), "the client is not on the client tier");
+    });
+
+    // RUN TWO: the SAME domain, now a COMPETITOR of somebody else. Served from
+    // the capture cache the first run wrote.
+    const { body: second } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "efcufinancial.org", clientLabel: "EFCU Financial",
+      product: "checking", days: 30,
+      competitors: [{ label: "La Capitol", domain: "lacapfcu.org" }],
+    });
+    const runB = await S.awaitRun(second.runId);
+
+    await check("the second run really did replay the cached capture", () =>
+      ok(runB.progress["lacapfcu.org"]?.fromCaptureCache,
+        "not a cache hit, so this proves nothing — check the cache key"));
+
+    await check("NO CLIENT FRAMING SURVIVED the replay", () => {
+      const asCompetitor = runB.ads.filter((a) => a.institution === "lacapfcu.org");
+      ok(asCompetitor.length > 0, "the cached advertiser produced no ads in the second run");
+      ok(asCompetitor.every((a) => a.isClient === false),
+        "an advertiser cached as the client came back flagged as the client of a different run");
+      ok(asCompetitor.every((a) => a.tier !== "client"),
+        "an advertiser cached as the client came back on the client tier");
+    });
+
+    await check("and it is counted as a competitor, not shown on the client's wall", () => {
+      const wallDomains = new Set((runB.creative?.clusters || []).map((c) => c.institution));
+      ok(wallDomains.has("lacapfcu.org"), "the cached competitor is missing from the wall");
+      const clientOwn = (runB.ads || []).filter((a) => a.isClient).map((a) => a.institution);
+      ok(clientOwn.every((d) => d === "efcufinancial.org"),
+        `the client population of run two contains ${JSON.stringify([...new Set(clientOwn)])}`);
+    });
+
+    await check("the new client is the one this run was started for", () =>
+      eq(runB.client.domain, "efcufinancial.org", "client domain"));
+  } finally {
+    S.stop();
+    try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
 }
 
 summary();

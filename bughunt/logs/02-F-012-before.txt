@@ -1,0 +1,21 @@
+# F-012 BEFORE — see bughunt/logs/01-npm-audit-before.txt for the full report.
+#
+#   3 moderate severity vulnerabilities
+#   qs 2.2.5 - 6.15.3  -> body-parser 1.20.5-1.20.6 -> express 4.22.2
+#   "fix available via `npm audit fix`"
+#
+# The claim in the work order's §4 that a fix is available does not hold here:
+
+$ npm audit fix
+up to date, audited 93 packages in 546ms
+# ...followed by the same three advisories, unchanged.
+
+$ node -e 'console.log(require("./node_modules/body-parser/package.json").dependencies.qs)'
+~6.15.1
+$ node -e 'console.log(require("./node_modules/express/package.json").dependencies.qs)'
+~6.15.1
+
+# ~6.15.1 means >=6.15.1 <6.16.0, which is entirely inside the vulnerable range.
+# The patched release is qs 6.16.0. No range in the tree admits it, so npm has
+# nothing to do. The two real options were express 5 (a breaking major) or an
+# explicit override. See the commit message for which was taken and why.

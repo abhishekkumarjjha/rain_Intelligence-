@@ -1,0 +1,49 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_CHROME_NOT_AN_AD",
+  "advertiser": "example.org",
+  "adText": {
+    "headlines": [
+      "Collapsed ad on mobile"
+    ],
+    "description": "Collapsed ad on desktop · Expanded ad · more_vert",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "example.org",
+    "displayUrl": "",
+    "headlines": [
+      "Collapsed ad on mobile"
+    ],
+    "description": "Collapsed ad on desktop · Expanded ad · more_vert",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [],
+    "claims": [],
+    "unclassified": [],
+    "leadEmphasis": "",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "other",
+    "productConfidence": 0.1,
+    "truncated": false,
+    "legible": false
+  },
+  "expect": {
+    "product": "other",
+    "productConfidenceAtLeast": 0,
+    "productConfidenceAtMost": 0.5,
+    "facts": [],
+    "claims": [],
+    "truncated": false,
+    "legible": false,
+    "showable": false
+  },
+  "notes": "THE TRANSPARENCY CENTRE'S OWN PAGE FURNITURE. When a creative fails to paint, this is what the screenshot holds. It sorts to the top of the wall because it is old, so the first thing a client sees is a picture of Google's UI. Dropped from the wall by isShowable(), counted in the funnel."
+}

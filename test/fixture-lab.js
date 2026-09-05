@@ -142,6 +142,19 @@ export const MARKET = {
     { id: "PEL1", headline: "Drive Away Happy", product: "auto-loan",
       offer: { present: true, type: "rate", value: "5.49% APR", unit: "APR", term: "60-month", minimum: "", qualifier: "" },
       daysShown: 150, first: ago(180), last: ago(5), w: 300, h: 250 },
+    // A creative the reader itself says it could not place. The prompt asks for
+    // exactly this answer — "a creative that just says Bank With Us is other at
+    // low confidence" — and until F-002 the 0.15 entered the auto-loan
+    // denominator beside PEL1 at 0.9 with nothing to tell them apart.
+    { id: "PEL2", headline: "Bank With Us", product: "auto-loan", productConfidence: 0.15,
+      offer: { present: true, type: "rate", value: "1.99% APR", unit: "APR", term: "", minimum: "", qualifier: "" },
+      daysShown: 30, first: ago(40), last: ago(2), w: 300, h: 250 },
+    // STOPPED RUNNING 45 DAYS AGO. Inside a 90-day window, outside a 30-day
+    // one — the only row in this market that distinguishes the two, and the
+    // reason a window change can be mistaken for a market change.
+    { id: "PEL3", headline: "Summer Checking Bonus", product: "checking",
+      offer: { present: true, type: "bonus", value: "$750", unit: "USD", term: "", minimum: "", qualifier: "" },
+      daysShown: 60, first: ago(120), last: ago(45), w: 728, h: 90 },
   ],
   // ---- THE STANDING NATIONALS ---------------------------------------------
   // Deep inventory, because that is the point of the tier: a community bank
@@ -196,8 +209,52 @@ export const MARKET = {
 };
 
 /** Provider-shaped listing response for one domain. */
-export function listingFor(domain, { format = "image", totalOverride = null } = {}) {
-  const rows = MARKET[domain] || [];
+/**
+ * start_date, as the provider spells it, in epoch ms. null when absent.
+ *
+ * Accepts YYYYMMDD (what dateRange() actually sends) and YYYY-MM-DD (what a
+ * caller writes by hand). THROWS on anything else: a mock whose filter quietly
+ * disables itself on an unrecognised format proves nothing while looking green,
+ * which is the same defect class this fixture exists to expose.
+ */
+function windowStartMs(startDate) {
+  if (!startDate) return null;
+  const s = String(startDate).trim();
+  const iso = /^\d{8}$/.test(s) ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : s;
+  const ms = Date.parse(`${iso}T00:00:00Z`);
+  if (!Number.isFinite(ms)) throw new Error(`fixture-lab: unrecognised start_date ${JSON.stringify(startDate)}`);
+  return ms;
+}
+
+/**
+ * THE TRANSPARENCY CENTER FILTERS ON A SERVED WINDOW, and the mock did not.
+ *
+ * Every capture returned every row whatever start_date was asked for, so a
+ * 30-day and a 90-day capture of one advertiser came back identical. That made
+ * a whole class of bug untestable: the snapshot delta compares two captures,
+ * and "a wider window reveals a figure the narrower one did not" is precisely
+ * the case that gets misreported as "newly observed since the July benchmark".
+ *
+ * `startDate` is what the provider adapter actually sends. A row is in the
+ * window when it was LAST SHOWN inside it — which is what the real filter
+ * means, and why a creative that stopped running in June is absent from a
+ * 30-day capture in September and present in a 90-day one.
+ */
+export function listingFor(domain, { format = "image", totalOverride = null, startDate = null } = {}) {
+  const all = MARKET[domain] || [];
+  // ago() yields EPOCH SECONDS, which is the shape the provider's own
+  // first_shown/last_shown carry and what epochToDate() parses on the way back.
+  // start_date arrives as a YYYY-MM-DD string, so one side has to be converted
+  // and it must be this one — comparing a date string against a number silently
+  // matches nothing and filters nothing, which is exactly the bug this filter
+  // was written to make visible.
+  // dateRange() in atc-provider.js formats as YYYYMMDD — hyphens stripped —
+  // and Date.parse of that is NaN, which turns the filter off instead of
+  // failing. A mock that silently stops filtering is worse than one that
+  // never filtered, so both spellings are accepted and anything else is
+  // refused loudly rather than ignored.
+  const fromMs = windowStartMs(startDate);
+  const rows = fromMs === null ? all : all.filter((r) => Number(r.last) * 1000 >= fromMs);
   const ad_creatives = rows.map((r) => {
     const base = {
       advertiser_id: `AR_${domain}`,
@@ -240,10 +297,70 @@ export function extractionFor(id) {
         ? { ...r.offer, finePrintVisible: !!r.offer.minimum }
         : { present: false, type: "none", value: "", unit: "none", term: "", minimum: "", qualifier: "", finePrintVisible: false },
       product: r.product,
-      productConfidence: 0.9,
+      // The fixture may set its own: a low-confidence read is a legal model
+      // answer and the counting gate has to be exercised by one.
+      productConfidence: r.productConfidence ?? 0.9,
       visualStyle: "typographic",
       hasPeople: false,
       tone: "direct confident",
+      legible: true,
+    };
+  }
+  return null;
+}
+
+/**
+ * The same market row, answered as a rendered SEARCH ad.
+ *
+ * The banner reader and the search reader take different prompts and return
+ * different shapes, so a mock that only knows the banner shape leaves the whole
+ * benchmark capture path untested — and worse, looks green, because a creative
+ * run run first would leave banner records in the extraction cache for the
+ * benchmark run to pick up. This is the answer to the search prompt.
+ *
+ * The offer is deliberately put in the DESCRIPTION, not the headline. That is
+ * the field the old single-prompt build told the model did not exist, so a
+ * fixture that keeps the figure in the headline would pass either way and prove
+ * nothing.
+ */
+export function searchExtractionFor(id) {
+  for (const rows of Object.values(MARKET)) {
+    const r = rows.find((x) => x.id === id);
+    if (!r) continue;
+
+    const o = r.offer?.present ? r.offer : null;
+    const metric = !o ? null
+      : o.type === "bonus" ? "cash_bonus"
+      : o.unit === "APR" ? "apr"
+      : "apy";
+
+    const facts = metric ? [{
+      metric,
+      raw: o.value,
+      qualifiers: {
+        term_months: /(\d+)[- ]year/.test(o.term) ? Number(RegExp.$1) * 12 : null,
+        minimum_deposit: /\$([\d,]+)/.test(o.minimum) ? Number(RegExp.$1.replace(/,/g, "")) : null,
+      },
+      sourceField: "description",
+    }] : [];
+
+    return {
+      headlines: [r.headline],
+      description: o ? `${o.value} — ${r.headline}.` : `${r.headline}.`,
+      displayUrl: `${(r.advertiser || "").replace(/^www\./, "")}/`,
+      sitelinks: o?.qualifier ? [o.qualifier] : [],
+      callouts: o?.minimum ? [o.minimum] : [],
+      economicFacts: facts,
+      claims: [],
+      unclassified: [],
+      leadEmphasis: o ? (o.type === "bonus" ? "bonus" : "rate") : "brand",
+      urgency: { present: false, phrase: "" },
+      audience: "",
+      product: r.product,
+      // The fixture may set its own: a low-confidence read is a legal model
+      // answer and the counting gate has to be exercised by one.
+      productConfidence: r.productConfidence ?? 0.9,
+      truncated: false,
       legible: true,
     };
   }

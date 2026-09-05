@@ -1,0 +1,3 @@
+# F-018 AFTER
+
+  ok   CORPUS_ADDON_PRICE

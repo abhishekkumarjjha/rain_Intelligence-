@@ -2,20 +2,28 @@
   "name": "rain-intelligence",
   "version": "0.1.0",
   "type": "module",
-  "description": "RAIN Intelligence \u2014 competitive advertising evidence for Creative inspiration and Campaign benchmarking",
+  "description": "RAIN Intelligence — competitive advertising evidence for Creative inspiration and Campaign benchmarking",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "start": "node server.js",
     "dev": "node --env-file=.env server.js",
-    "test": "node test/smoke.test.js && node test/pipeline.test.js && node test/flow.test.js && node test/degraded.test.js && node test/meta.test.js && node test/nationals.test.js",
+    "test": "node test/smoke.test.js && node test/client-search.test.js && node test/pipeline.test.js && node test/flow.test.js && node test/degraded.test.js && node test/nationals.test.js && node test/benchmark.test.js && node test/corpus-runner.js",
     "test:ui": "node test/ui.test.js",
     "test:all": "npm test && npm run test:ui",
-    "shots": "node test/shots.js"
+    "shots": "node test/shots.js",
+    "corpus": "node test/corpus-runner.js",
+    "corpus:cost": "node test/corpus-runner.js --dry-run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }

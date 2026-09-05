@@ -5,17 +5,14 @@
 //   CREATIVE   — what are competitors making? (inspiration wall)
 //   BENCHMARK  — how do our ads compare to theirs? (ads vs ads, counted facts)
 //
-// Three SOURCES underneath them:
+// Two SOURCES underneath them:
 //   google_display — SerpApi, Transparency Center, image creatives
 //   google_search  — SerpApi, Transparency Center, text creatives (Benchmark only)
-//   meta           — SearchApi, Meta Ad Library, cards
 //
-// A source is a provider AND a surface AND a set of temporal semantics. Creative
-// may capture Google display, Meta, or both — but "both" means TWO RUNS, not one
-// run holding two kinds of record. That is deliberate and load-bearing: separate
-// runs make it structurally impossible for a Google count and a Meta count to
-// end up in the same denominator, or for a Meta capture to be diffed against a
-// Google one. The results screen renders them as sibling tabs.
+// A source is a provider AND a surface AND a set of temporal semantics. One run
+// per source, always: separate runs make it structurally impossible for two
+// surfaces' counts to end up in the same denominator, or for one to be diffed
+// against the other. The results screen renders them as sibling tabs.
 //
 // Capture is asynchronous with polling rather than a blocking POST, for one
 // reason: a run touches N+1 advertisers concurrently and the user needs to see
@@ -28,23 +25,25 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { capture, hasKey, normDomain, buildDomainLink, MAX_READ_PER_ADVERTISER, DEFAULT_LOOKBACK_DAYS } from "./lib/atc-provider.js";
-import { extractCreatives, extractMetaMessages } from "./lib/extract.js";
-import { clusterAds, productBreakdown, filterByProduct, buildBenchmark, creativeSummary, samplingNote, captureFunnel } from "./lib/analyze.js";
-import { captureMeta, hasSearchApiKey, MAX_META_PAGES, MAX_META_READ, DEFAULT_META_LOOKBACK_DAYS } from "./lib/meta-provider.js";
+import { extractByFormat, readerFor, readerKey } from "./lib/extract.js";
+import { buildBoard } from "./lib/benchmark.js";
+import { readThemes, usableFamilies, MIN_FAMILIES } from "./lib/themes.js";
+import { modelCallPeak, modelConcurrencyLimit } from "./lib/claude.js";
+import { channelShape, cohortShape } from "./lib/channel-shape.js";
+import { readRatePages } from "./lib/rate-page.js";
 import {
-  dedupeMessages, enrichDeterministic, metaProductBreakdown, filterMetaByProduct,
-  metaCreativeSummary, metaFunnel, metaSamplingNote,
-} from "./lib/meta-analyze.js";
-import { storeMessageMedia, readMedia } from "./lib/media-store.js";
+  putEvidence, getEvidence, putSnapshot, previousSnapshot,
+  competitorSetVersion, putWatchedSet, getWatchedSet,
+} from "./lib/snapshot.js";
+import { clusterAds, productBreakdown, filterByProduct, buildBenchmark, creativeSummary, samplingNote, captureFunnel, isShowable } from "./lib/analyze.js";
 import * as captureCache from "./lib/capture-cache.js";
-import { SOURCES, SOURCE_LABELS, resolveSources, googleFormatFor, isMeta, WINDOW_OPTIONS, defaultWindowFor } from "./lib/sources.js";
-import { listIdentities, saveIdentity } from "./lib/platform-identity.js";
+import { SOURCES, SOURCE_LABELS, resolveSources, googleFormatFor, WINDOW_OPTIONS, defaultWindowFor } from "./lib/sources.js";
 import { withNationals, isNational, captureOptionsFor, NATIONAL_BENCHMARKS, NATIONAL_TTL_DAYS, NATIONAL_READ_CAP } from "./lib/national-tier.js";
 import { suggestCompetitors, findClient, listClients, DIRECTORY_SIZE } from "./lib/directory.js";
 import { productFromUrl, normalizeProduct, PRODUCT_LABELS, PRODUCT_CODES } from "./lib/products.js";
-import { generateStrategies } from "./lib/strategies.js";
+import { readProductFromUrl, CONFIDENT } from "./lib/product-reader.js";
 import { hasAnthropicKey } from "./lib/claude.js";
-import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, findPreviousRun, diffRuns } from "./lib/store.js";
+import { newRunId, saveRun, loadRun, listRuns, getCachedExtraction, putCachedExtraction, forgetCachedExtraction, findPreviousRun, diffRuns, writeManifest, readManifest, storageHealth, CACHE_SCHEMA } from "./lib/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -58,32 +57,153 @@ app.use(express.static(path.join(__dirname, "public")));
 const ACTIVE = new Map();
 
 // ---------------------------------------------------------------------------
+// ...AND COMPLETED RUNS LEAVE IT.
+//
+// Three .set calls, no .delete. Every run ever captured stayed in memory for the
+// life of the process, holding its full ad records — transcriptions, offers,
+// evidence ids, board — for runs nobody will open again. A demo laptop survives
+// that; a long-lived process does not, and it fails as an OOM with no
+// explanation rather than as anything a user could act on.
+//
+// Eviction is LRU with a cap, and it is SAFE ONLY BECAUSE OF THE DISK COPY, so
+// two runs are never evicted: one that has not finished (it exists nowhere else)
+// and one that failed to persist (F-005 — there is nothing to load it back
+// from). Everything else drops to the loadRun() fallback that every read path
+// already has.
+// ---------------------------------------------------------------------------
+const ACTIVE_LIMIT = Math.max(4, Number(process.env.RI_ACTIVE_RUNS) || 24);
+
+/** Put a run at the tail of the LRU order. Map keeps insertion order, so the
+ *  delete-then-set is what makes a re-read count as recent use. */
+function remember(run) {
+  if (!run?.id) return run;
+  ACTIVE.delete(run.id);
+  ACTIVE.set(run.id, run);
+  evictActive();
+  return run;
+}
+
+function evictActive() {
+  if (ACTIVE.size <= ACTIVE_LIMIT) return;
+  for (const [id, run] of ACTIVE) {
+    if (ACTIVE.size <= ACTIVE_LIMIT) break;
+    // In flight: memory is the only copy there is.
+    if (run.status !== "done" && run.status !== "error") continue;
+    // Finished but never written (F-005). Evicting it would delete it.
+    if (run.persisted === false) continue;
+    ACTIVE.delete(id);
+  }
+}
+
+/**
+ * The one way to reach a run. In memory if it is there — refreshed in the LRU
+ * order so an actively used run is not the next one evicted — otherwise off
+ * disk, which is the fallback path an evicted run is meant to land on.
+ *
+ * A disk read is deliberately NOT re-admitted to ACTIVE: doing that would let
+ * any sequence of reads refill the map that eviction just drained.
+ */
+function getRun(id) {
+  const live = ACTIVE.get(id);
+  if (live) { ACTIVE.delete(id); ACTIVE.set(id, live); return live; }
+  return loadRun(id);
+}
+
+// ---------------------------------------------------------------------------
+// ONE WRITER PER RUN.
+//
+// Opening Key insights fires TWO POSTs at once — the general read and the run
+// own product — and the run record is a single JSON file. When the run is not
+// in ACTIVE (evicted, or the process restarted since the capture), each handler
+// loadRun()s its OWN copy of the record, writes its own scope into
+// themesByScope, and saveRun()s the whole object. The second save overwrites the
+// first: one scope is silently lost from disk, and the next time someone opens
+// that panel it is paid for again.
+//
+// Serialising the read-modify-write is the fix, not serialising the model call.
+// The two scopes are genuinely independent reads and should still run at the
+// same time; it is only the merge into the file that has to be one at a time,
+// and it has to re-read the record INSIDE the lock — a copy loaded before the
+// lock was taken is already stale by the time it is granted.
+// ---------------------------------------------------------------------------
+/**
+ * Save, and REMEMBER WHETHER IT WORKED.
+ *
+ * saveRun() has always returned a boolean and no call site read it, so an
+ * unwritable or full data directory produced one console line and a user who
+ * was told their run completed. It did complete — and it is not on disk, so it
+ * cannot be reopened, cannot be diffed against next month, and every extraction
+ * it would have cached has to be bought again. The flag travels to the UI.
+ *
+ * true is written BEFORE the save so the on-disk copy carries it; false is set
+ * only in memory afterwards, because if the write failed there is no disk copy
+ * to correct.
+ */
+function persist(run) {
+  run.persisted = true;
+  const ok = saveRun(run);
+  if (!ok) run.persisted = false;
+  return ok;
+}
+
+const RUN_WRITE_LOCKS = new Map();
+
+function withRunLock(runId, fn) {
+  const prev = RUN_WRITE_LOCKS.get(runId) || Promise.resolve();
+  // .then(fn, fn): a previous holder that threw must not wedge the queue.
+  const result = prev.then(fn, fn);
+  const tail = result.then(() => {}, () => {});
+  RUN_WRITE_LOCKS.set(runId, tail);
+  tail.then(() => { if (RUN_WRITE_LOCKS.get(runId) === tail) RUN_WRITE_LOCKS.delete(runId); });
+  return result;
+}
+
+/**
+ * Read the run, apply `mutate`, write it back — with nobody else in between.
+ *
+ * Always re-reads through ACTIVE/disk inside the lock, so a scope written by a
+ * request that finished while this one was waiting on the model survives.
+ */
+function updateRun(runId, mutate) {
+  return withRunLock(runId, () => {
+    const current = getRun(runId);
+    if (!current) return { ok: false, run: null, persisted: false };
+    mutate(current);
+    remember(current);
+    return { ok: true, run: current, persisted: persist(current) };
+  });
+}
+
+// The same panel opening twice — a double-click, or a reopened tab — must not
+// buy the same read twice. Keyed on run AND scope, because two DIFFERENT scopes
+// are two different questions and both are legitimately in flight at once.
+const THEMES_INFLIGHT = new Map();
+
+// ---------------------------------------------------------------------------
 // GET /api/health — what is configured, stated plainly.
 // ---------------------------------------------------------------------------
 app.get("/api/health", (_req, res) => {
+  // READINESS, NOT INVENTORY. Every capture ends in a write, so a green line
+  // over an unwritable or full data directory is a lie — and the specific lie
+  // that lets somebody spend SerpApi credits and vision calls on a run that
+  // cannot be saved. `ok` now means "a capture run today would survive".
+  const storage = storageHealth();
   res.json({
-    ok: true,
+    ok: storage.writable,
     serpapi: hasKey(),
-    searchapi: hasSearchApiKey(),
     anthropic: hasAnthropicKey(),
+    storage,
     directorySize: DIRECTORY_SIZE,
+    // How many finished runs are still held in memory. Diagnostic, not a
+    // promise: the number a growing process would have shown climbing forever.
+    runsInMemory: ACTIVE.size,
     maxReadPerAdvertiser: MAX_READ_PER_ADVERTISER,
     defaultLookbackDays: DEFAULT_LOOKBACK_DAYS,
-    // Availability is PER SOURCE. A missing SearchApi key must not disable
-    // Google display, and a missing SerpApi key must not disable a Meta-only
-    // capture — the two providers fail independently because they are
-    // independent, and one unpaid invoice should not take the product down.
+    // Availability is PER SOURCE.
     sources: [
       { key: SOURCES.GOOGLE_DISPLAY, label: SOURCE_LABELS.google_display, available: hasKey(), needs: "SERPAPI_API_KEY" },
-      { key: SOURCES.META, label: SOURCE_LABELS.meta, available: hasSearchApiKey(), needs: "SEARCHAPI_API_KEY" },
     ],
     windows: WINDOW_OPTIONS,
-    meta: {
-      maxPages: MAX_META_PAGES,
-      maxRead: MAX_META_READ,
-      defaultLookbackDays: DEFAULT_META_LOOKBACK_DAYS,
-      identities: Object.keys(listIdentities()).length,
-    },
     cacheTtlDays: captureCache.TTL_DAYS,
     nationals: {
       benchmarks: NATIONAL_BENCHMARKS.map(({ label, domain, role, why }) => ({ label, domain, role, why })),
@@ -100,6 +220,82 @@ app.get("/api/health", (_req, res) => {
 // Reads the per-advertiser cache without touching a provider, so the competitor
 // screen can say "1 request, 3 from cache" while the user is still choosing.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// WHAT THE MODEL HALF COSTS.
+//
+// The quote read the capture cache and stopped there, so it said "1 request, 3
+// from cache" for a run that was also about to buy up to thirty Haiku vision
+// reads. SerpApi credits were quoted; the larger line item was not mentioned.
+//
+// Two caches, and they are NOT the same cache, which is the thing the old line
+// hid:
+//   · the CAPTURE cache holds an advertiser's listing plus the records already
+//     read from it. A hit here costs nothing at all — no request, no vision.
+//   · the EXTRACTION cache holds one creative's transcription, keyed on
+//     creativeId AND reader version. A hit here saves a vision call even when
+//     the listing has to be fetched again.
+//
+// And FORCE only bypasses the first of them. That is not obvious from a button
+// labelled "re-analyze", and it is worth stating plainly rather than leaving a
+// user to infer either that force is free or that it re-buys everything.
+//
+// UPPER BOUNDS, ALWAYS. For an advertiser we are about to fetch, the creatives
+// the listing will return are not knowable without making the request, so the
+// quote uses that advertiser's read cap. Where a stale or force-bypassed cache
+// entry exists we DO know which creativeIds it held, so extractions already in
+// hand are subtracted — but only down to the ids we can actually see, because a
+// refetch may return creatives nobody has read yet. A quote that guesses low is
+// worse than no quote: it is a promise.
+// ---------------------------------------------------------------------------
+function modelSpendFor({ source, format, domains, days, force }) {
+  const reader = readerKey(readerFor({ format }));
+
+  const rows = domains.map((d) => {
+    const domain = typeof d === "string" ? d : d.domain;
+    const opts = captureOptionsFor(domain, {});
+    const cap = opts.max || MAX_READ_PER_ADVERTISER;
+    const ttlDays = (typeof d === "object" && Number.isFinite(d.ttlDays)) ? d.ttlDays : opts.ttlDays;
+
+    const p = captureCache.peek({ source, domain, days, ttlDays });
+    const servedFromCapture = !force && p.hit && !p.stale;
+
+    // Served whole from the capture cache: the run replays the records it
+    // already holds and never reaches the extractor. Nothing is spent.
+    if (servedFromCapture) {
+      return { domain, freshVisionReadsAtMost: 0, extractionsReused: (p.entry?.ads || []).length, willFetch: false };
+    }
+
+    // A listing we are going to fetch. Anything we know about its creatives
+    // comes from the entry we are bypassing or letting expire.
+    const knownIds = (p.entry?.ads || []).map((a) => a.creativeId).filter(Boolean);
+    const alreadyRead = knownIds.filter((id) => !!getCachedExtraction(id, reader)).length;
+    return {
+      domain,
+      freshVisionReadsAtMost: Math.max(0, cap - alreadyRead),
+      extractionsReused: alreadyRead,
+      willFetch: true,
+    };
+  });
+
+  return {
+    reader,
+    // One vision call per creative read. Named "atMost" in the field itself so
+    // it cannot be rendered as a flat number by a caller who did not read this.
+    freshVisionReadsAtMost: rows.reduce((n, r) => n + r.freshVisionReadsAtMost, 0),
+    extractionsReused: rows.reduce((n, r) => n + r.extractionsReused, 0),
+    // Key insights is one ANALYSIS call per scope, and it is bought on the
+    // Wall by an explicit click — never by this capture. Quoted as zero here,
+    // and named, because "not included" and "free" are different.
+    analysisCallsInThisCapture: 0,
+    force: {
+      // Exactly which cache the toggle bypasses, because it is only one of two.
+      bypassesCaptureCache: !!force,
+      bypassesExtractionCache: false,
+    },
+    perAdvertiser: rows,
+  };
+}
+
 app.post("/api/cost", (req, res) => {
   const body = req.body || {};
   const mode = body.mode === "benchmark" ? "benchmark" : "creative";
@@ -117,7 +313,10 @@ app.post("/api/cost", (req, res) => {
     const withTier = (mode === "creative" && source === SOURCES.GOOGLE_DISPLAY && body.includeNationals !== false)
       ? withNationals(picked).map((c) => ({ ...c, ttlDays: isNational(c.domain) ? NATIONAL_TTL_DAYS : undefined }))
       : picked.map((c) => ({ ...c, tier: "local" }));
-    if (mode === "benchmark" && normDomain(body.clientDomain)) {
+    // BOTH halves capture the client now, so both quote it. A cost line that
+    // omits an advertiser the capture is about to fetch is exactly the surprise
+    // this endpoint exists to prevent.
+    if (normDomain(body.clientDomain)) {
       return [{ domain: normDomain(body.clientDomain), label: body.clientLabel || body.clientDomain, tier: "local" }, ...withTier];
     }
     return withTier;
@@ -125,11 +324,17 @@ app.post("/api/cost", (req, res) => {
 
   res.json({
     ok: true,
-    plans: sources.map((source) => captureCache.planCost({
-      source, domains: domainsFor(source),
-      days: Number(body.days?.[source] ?? body.days) || defaultWindowFor(source),
-      force,
-    })),
+    plans: sources.map((source) => {
+      const days = Number(body.days?.[source] ?? body.days) || defaultWindowFor(source);
+      const domains = domainsFor(source);
+      return {
+        ...captureCache.planCost({ source, domains, days, force }),
+        // The other half of the bill. Quoted beside the SerpApi half rather
+        // than instead of it — they are different currencies and a strategist
+        // deciding whether to press the button needs both.
+        model: modelSpendFor({ source, format: googleFormatFor(source), domains, days, force }),
+      };
+    }),
   });
 });
 
@@ -143,7 +348,7 @@ app.get("/api/clients", (_req, res) => res.json({ clients: listClients() }));
 // user's finger is still on the mouse. Everything expensive waits for an
 // explicit Analyze.
 // ---------------------------------------------------------------------------
-app.post("/api/resolve", (req, res) => {
+app.post("/api/resolve", async (req, res) => {
   const url = String(req.body?.url || "").trim();
   const domain = normDomain(url);
   if (!domain) return res.status(400).json({ ok: false, reason: "bad_url" });
@@ -154,8 +359,21 @@ app.post("/api/resolve", (req, res) => {
   // market-wide one the moment checking is what we are looking at.
   const guessed = productFromUrl(url);
   const override = String(req.body?.product || "").trim();
-  const product = override ? normalizeProduct(override) : guessed.product;
-  const from = override ? "explicit" : guessed.from;
+
+  // THE MODEL ONLY RUNS WHEN THE PATTERN FOUND NOTHING.
+  //
+  // The regex handles /checking-accounts and /credit-cards for free. It cannot
+  // handle /choice-checking or /platinum-card, because banks brand everything
+  // and there is no finite list of the names they invent. One cheap call reads
+  // the words; anything short of confident still goes to the user, because a
+  // product this tool cannot infer is one the strategist has to supply.
+  let read = null;
+  if (!override && guessed.from === "none") {
+    try { read = await readProductFromUrl(url); } catch { read = null; }
+  }
+  const inferred = CONFIDENT(read) ? read.product : guessed.product;
+  const product = override ? normalizeProduct(override) : inferred;
+  const from = override ? "explicit" : (CONFIDENT(read) ? "model" : guessed.from);
 
   const dir = suggestCompetitors({ domain, product, limit: 8 });
   const row = findClient(domain);
@@ -163,7 +381,9 @@ app.post("/api/resolve", (req, res) => {
   // A homepage tells us the institution but not the product. Say so rather than
   // silently analysing "other" — the whole benchmark is scoped by product, so a
   // wrong guess here quietly wrecks every count downstream.
-  const looksLikeHomepage = guessed.from === "none" && !override;
+  // Blocks the capture until the user settles it. True whenever neither the
+  // path nor the model produced a product we are willing to act on.
+  const looksLikeHomepage = !override && guessed.from === "none" && !CONFIDENT(read);
 
   res.json({
     ok: true,
@@ -209,25 +429,24 @@ app.post("/api/capture", (req, res) => {
    * Mirrors RAIN's six-column analysis, where slots 4 and 5 are Chase and
    * Capital One and never change. The user does not choose them.
    *
-   * GOOGLE DISPLAY ONLY, on evidence:
-   *
-   *   · Benchmark — that mode compares the client's own ads to peers on one
-   *     product. A national ceiling dropped into that table sits in a column
-   *     the client reads as a peer, which is a different and wrong claim.
-   *
-   *   · Meta — the live probe found Chase's Meta presence is influencer and
-   *     brand content (#Chasepartner), with 1 of 36 ads product-classifiable
-   *     and Page resolution graded LOW at a 0.0033 margin. Injecting it would
-   *     spend a page-search request to land in needs_confirmation, and if
-   *     confirmed would fill the wall with creator posts rather than product
-   *     advertising. Filling an empty wall with the wrong ads is not filling it.
-   *     Revisit when a national's Meta coverage has actually been tested.
+   * GOOGLE DISPLAY ONLY here. Competitive Intelligence gets its own national
+   * reference tier, rendered below a rule and excluded from every denominator —
+   * a national ceiling dropped inline into that table sits in a column the
+   * client reads as a peer, which is a different and wrong claim.
    *
    * `includeNationals: false` turns it off for a caller that wants only what
    * was selected.
    */
+  // Benchmark now carries the nationals too, but as a REFERENCE TIER: they get
+  // a row in the offer snapshot and are excluded from every denominator (see
+  // benchmark.js). Previously they were blocked here entirely, on the grounds
+  // that a national column reads as a peer — that objection is answered by
+  // tiering and labelling the rows rather than by omitting them.
   const nationalsAllowed = (source) =>
-    mode === "creative" && source === SOURCES.GOOGLE_DISPLAY && body.includeNationals !== false;
+    body.includeNationals !== false && (
+      (mode === "creative" && source === SOURCES.GOOGLE_DISPLAY) ||
+      (mode === "benchmark" && source === SOURCES.GOOGLE_SEARCH)
+    );
 
   const competitorsFor = (source) =>
     withNationals(chosen, { enabled: nationalsAllowed(source) })
@@ -239,15 +458,44 @@ app.post("/api/capture", (req, res) => {
   // capture with nothing selected proceed on Chase and Capital One alone — a
   // wall of two national brands and no local evidence, which answers a question
   // nobody asked.
-  if (!chosen.length) return res.status(400).json({ ok: false, reason: "no_competitors" });
+  //
+  // A SEED is the one legitimate exception, and it is a different intent
+  // rather than a loophole. Nationals are captured once per quarter and shared
+  // by every client, so somebody has to fill that cache before any wall can
+  // read from it — and doing it by attaching a local competitor nobody asked
+  // about would distort a real analysis to get a side effect. `seed: true`
+  // says plainly what it is: warm the shared national cache, produce no
+  // client-facing wall. The guard still stands for every ordinary capture.
+  const seed = body.seed === true;
+  if (!chosen.length && !seed) return res.status(400).json({ ok: false, reason: "no_competitors" });
+  if (seed && chosen.length) return res.status(400).json({ ok: false, reason: "seed_takes_no_competitors" });
   if (!hasAnthropicKey()) return res.status(400).json({ ok: false, reason: "anthropic_not_configured" });
 
-  // Per-source key checks. A missing SearchApi key refuses the Meta source only
+  // ---- FAIL CLOSED ON AN UNKNOWN PRODUCT ----------------------------------
+  //
+  // Competitive Intelligence is product-scoped by definition: every
+  // denominator, every ratio and every piece of evidence means "among the ads
+  // about THIS product". "Other" is not a product — bucketFor() treats it as a
+  // wildcard, so the scope filter switches OFF and every captured ad becomes
+  // on-product.
+  //
+  // That is how a credit-card run came back citing Google Maps listings and
+  // auto-loan ads as message-gap evidence, over a funnel proudly reporting
+  // "131 of 131 on the product in scope". Nothing downstream was broken. Every
+  // engine worked correctly on a population that had never been filtered.
+  //
+  // The UI blocks this as well, but a UI guard is a courtesy and this is an
+  // invariant: no later stage can repair an invalid scope, so the run must not
+  // start at all. The Wall is unaffected — browsing everything is its job.
+  if (mode === "benchmark" && (!product || product === "other")) {
+    return res.status(400).json({ ok: false, reason: "product_required" });
+  }
+
+  // Per-source key checks.
   // and leaves a Google capture in the same request running normally.
   const usable = [], refused = [];
   for (const source of sources) {
-    if (isMeta(source) && !hasSearchApiKey()) refused.push({ source, reason: "searchapi_not_configured" });
-    else if (!isMeta(source) && !hasKey()) refused.push({ source, reason: "serpapi_not_configured" });
+    if (!hasKey()) refused.push({ source, reason: "serpapi_not_configured" });
     else usable.push(source);
   }
   if (!usable.length) {
@@ -266,19 +514,30 @@ app.post("/api/capture", (req, res) => {
       id: newRunId(),
       mode, source, product, days, force,
       sourceLabel: SOURCE_LABELS[source],
-      format: isMeta(source) ? null : googleFormatFor(source),
+      format: googleFormatFor(source),
       productLabel: PRODUCT_LABELS[product],
       createdAt: new Date().toISOString(),
       status: "running",
       client: { label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain },
       competitors,
-      // BENCHMARK captures the client's own ads through the identical path. That
-      // is what makes it ads vs ads rather than ads vs a live rate page — the
-      // comparison a consumer actually makes when they choose which link to click.
-      targets: mode === "benchmark"
-        ? [{ label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain, isClient: true },
-           ...competitors.map((c) => ({ ...c, isClient: false }))]
-        : competitors.map((c) => ({ ...c, isClient: false })),
+      // BOTH HALVES capture the client's own ads through the identical path.
+      //
+      // Benchmark always did: it is what makes it ads vs ads rather than ads vs
+      // a live rate page, the comparison a consumer actually makes when they
+      // choose which link to click. The Wall did not, on the grounds that it
+      // showed what competitors MADE — and that reading does not survive
+      // contact with the job. You cannot say "competitors lead with a bonus"
+      // and mean anything by it without knowing whether the client does too,
+      // and a strategist looking at a wall of competitor creative has no way to
+      // answer that from the screen.
+      //
+      // The client is captured, tiered as `client`, and kept OUT of every
+      // competitor count, chip, denominator and funnel step. It is a third
+      // population beside regional and national, never a member of either.
+      targets: [
+        { label: String(body.clientLabel || "").trim() || clientDomain, domain: clientDomain, isClient: true, tier: "client" },
+        ...competitors.map((c) => ({ ...c, isClient: false })),
+      ],
       progress: {},
       ads: [],
       messages: [],
@@ -286,7 +545,7 @@ app.post("/api/capture", (req, res) => {
       requests: 0,
     };
     for (const t of run.targets) run.progress[t.domain] = { status: "queued", label: t.label };
-    ACTIVE.set(run.id, run);
+    remember(run);
     return run;
   });
 
@@ -307,11 +566,10 @@ app.post("/api/capture", (req, res) => {
   // throwing, because one competitor with no ads must never take down a capture
   // that succeeded for the other two.
   for (const run of runs) {
-    const exec = isMeta(run.source) ? executeMetaRun : executeRun;
-    exec(run).catch((e) => {
+    executeRun(run).catch((e) => {
       run.status = "error";
       run.error = e?.code === "NO_API_KEY" ? "anthropic_not_configured" : String(e?.message || e);
-      saveRun(run);
+      persist(run);
     });
   }
 });
@@ -333,7 +591,31 @@ async function executeRun(run) {
       const opts = captureOptionsFor(target.domain, {});
       const ck = { source: run.source, domain: target.domain, days: run.days };
       const cached = captureCache.get({ ...ck, force: run.force, ttlDays: opts.ttlDays });
-      if (cached) {
+
+      // A CACHE ENTRY STORES THE ADS IT READ, NOT THE LISTING IT READ THEM FROM.
+      //
+      // So a raised read cap is invisible to it. Chase's entry held the 30 its
+      // capture was capped at, and every later run replayed those 30 out of 92
+      // renderable — the new ceiling silently did nothing, and the board went
+      // on saying "30 of about 4,000 listed ads were sampled" as though that
+      // were a fact about Chase rather than about our own cap.
+      //
+      // An entry is short when it was captured under a LOWER cap than the one
+      // in force now. Comparing read-count against renderable instead looks
+      // more direct and is wrong: dedupe collapses identical artwork and some
+      // reads fail, so held is routinely below renderable through no fault of
+      // the cap. That version re-fetched three of seven advertisers on every
+      // single run and could never catch up.
+      //
+      // Entries captured before readCap existed are treated as current. They
+      // expire on their own TTL, and refusing to guess is cheaper than
+      // re-fetching the whole directory on a hunch.
+      const capNow = opts.max || MAX_READ_PER_ADVERTISER;
+      const held = (cached?.ads || []).length;
+      const capThen = cached?.run?.readCap;
+      const shortRead = !!cached && Number.isFinite(capThen) && capThen < capNow;
+
+      if (cached && !shortRead) {
         p.status = "done";
         p.fromCaptureCache = true;
         p.captureAgeDays = cached._cache.ageDays;
@@ -352,6 +634,7 @@ async function executeRun(run) {
       }
 
       p.status = "fetching";
+      if (shortRead) p.reReadReason = `cap raised to ${capNow}; cached entry held ${held} of ${cached.run?.renderable} renderable`;
       const cap = await capture(target.domain, { format: run.format, days: run.days, max: opts.max });
       run.requests += 1;
 
@@ -363,6 +646,10 @@ async function executeRun(run) {
 
       run.runs.push(cap.run);
       p.found = cap.run.providerTotal;
+      // coverage.js distinguishes "not advertising" from "nothing on this product"
+      // by comparing what the provider LISTED against what we READ. Same number
+      // as p.found, named for the consumer that has to reason about it.
+      p.listed = cap.run.providerTotal;
       p.renderable = cap.run.renderable;
       p.previewOnly = cap.run.previewOnly;
       p.advertisers = cap.run.advertisers;
@@ -379,10 +666,15 @@ async function executeRun(run) {
       p.downloading = cap.images.length;
 
       // Extraction cache: a creative's transcription never changes, so it is
-      // bought once and reused for every future run and refresh.
+      // bought once and reused for every future run and refresh — but only
+      // within the reader that produced it. A banner record has no description
+      // and no sitelinks, so serving one to a benchmark run would drop the
+      // fields the board counts without any of them registering as a miss.
+      // Versioned, so a prompt change retires old readings on its own.
+      const reader = readerKey(readerFor({ format: run.format }, cap.images));
       const cachedExtractions = [], fresh = [];
       for (const img of cap.images) {
-        const hit = getCachedExtraction(img.creativeId);
+        const hit = getCachedExtraction(img.creativeId, reader);
         // The cache stores a TRANSCRIPTION, which never changes. Attribution is
         // not part of it: the same creative retrieved under a different entered
         // domain belongs to that domain now, so provider-side fields are always
@@ -403,11 +695,34 @@ async function executeRun(run) {
         } else fresh.push(img);
       }
 
+      // FORMAT-BRANCHED. Benchmark runs are creative_format=text — rendered
+      // SEARCH ads with a description and sitelinks — and were previously read
+      // with the banner prompt, which explicitly told the model those fields do
+      // not exist. Every rate living in a description was discarded before
+      // anything downstream could count it.
       const { ads, extractionFailed } = fresh.length
-        ? await extractCreatives(fresh)
+        ? await extractByFormat(fresh, { format: run.format })
         : { ads: [], extractionFailed: 0 };
 
-      for (const ad of ads) putCachedExtraction(ad.creativeId, ad);
+      // EVIDENCE IS WRITTEN NOW OR NEVER. The base64 is discarded a few lines
+      // below and Transparency Center creatives disappear from Google without
+      // notice. If a figure from this run lands in a client report and is
+      // disputed in three months, this archive is the only way to answer.
+      for (const ad of ads) {
+        const img = fresh.find((f) => f.creativeId === ad.creativeId);
+        putEvidence({
+          creativeId: ad.creativeId,
+          source: run.source,
+          brandDomain: target.domain,
+          capturedAt: new Date().toISOString(),
+          providerRaw: img ? { ...img, data: undefined } : null,
+          mediaType: img?.mediaType,
+          data: img?.data,
+          extraction: ad,
+        });
+      }
+
+      for (const ad of ads) putCachedExtraction(ad.creativeId, ad, reader);
 
       const all = [...cachedExtractions, ...ads].map((a) => ({
         ...a, isClient: !!target.isClient, institutionLabel: target.label, tier: target.tier || "local",
@@ -451,7 +766,13 @@ async function executeRun(run) {
     targetsOk: Object.values(run.progress).filter((p) => p.status === "done").length,
     targetsTotal: run.targets.length,
   };
-  run.sampling = samplingNote(run.runs);
+  // THE WALL'S NUMBERS DESCRIBE THE COMPETITOR SET. The client is captured
+  // beside it, not inside it, so its listing counts never enter the sampling
+  // note or the funnel — "98 of about 696 listed" has to reconcile against the
+  // creatives actually on the wall.
+  run.sampling = samplingNote(run.mode === "creative"
+    ? run.runs.filter((r) => r.domain !== run.client?.domain)
+    : run.runs);
 
   // ---- what changed since the last comparable capture ----------------------
   // The provider returns a rotating SAMPLE, not an inventory: the same query
@@ -466,147 +787,64 @@ async function executeRun(run) {
     run.diff = { ...diffRuns(prev, run), previousRunId: prev.id, previousAt: prev.createdAt };
   }
 
-  saveRun(run);
-}
-
-// ---------------------------------------------------------------------------
-// META EXECUTION — its own path, on purpose.
-//
-// Shares no state with executeRun above. The two produce different record types
-// with different grains and different temporal semantics, and a shared function
-// with `if (isMeta)` branches is how those differences leak into each other.
-// ---------------------------------------------------------------------------
-async function executeMetaRun(run) {
-  await Promise.all(run.targets.map(async (target) => {
-    const p = run.progress[target.domain];
-    const ck = { source: run.source, domain: target.domain, days: run.days };
+  // ---- BENCHMARK SNAPSHOT --------------------------------------------------
+  // Written every run from day one, read months later. Month-over-month change
+  // is the most diagnostically valuable thing this tool can produce and it
+  // cannot be reconstructed after the fact — the delta UI can wait, the storage
+  // cannot. This also records the competitor set as part of the measurement:
+  // "4 of 5" in July and "3 of 7" in August are not the same number, and
+  // nothing else on the page would tell the reader that.
+  if (run.mode === "benchmark") {
     try {
-      const cached = captureCache.get({ ...ck, force: run.force });
-      if (cached) {
-        p.status = "done";
-        p.fromCaptureCache = true;
-        p.captureAgeDays = cached._cache.ageDays;
-        applyMetaCapture(run, target, p, cached);
-        return;
-      }
+      const board = boardFor(run);
 
-      p.status = "resolving";
-      const cap = await captureMeta({
-        domain: target.domain, label: target.label,
-        days: run.days, maxPages: MAX_META_PAGES,
+      // Runs AFTER findings are final and receives them read-only, anonymised.
+      putSnapshot({
+        clientDomain: run.client.domain,
+        product: run.product,
+        source: run.source,
+        runId: run.id,
+        brands: board.brands,
+        // THE BOARD'S OWN SET VERSION — never a second computation of it.
+        // Recomputing from run.competitors silently included the national
+        // reference tier, which buildBoard deliberately excludes. Every
+        // snapshot stored 6 domains, every board compared 4, and every run
+        // reported a phantom "competitor set changed: −2, Chase and Capital
+        // One removed" that no user action could clear. A national cannot move
+        // a finding, so it must not move set identity either.
+        competitorSet: board.competitorSet,
+        windowStart: run.days ? new Date(Date.now() - run.days * 864e5).toISOString().slice(0, 10) : null,
+        windowEnd: new Date().toISOString().slice(0, 10),
+        // Recorded as a number too, so comparability never has to be inferred
+        // from two dates that a daylight-saving boundary can shift.
+        days: run.days,
       });
-      run.requests += cap.requests || 0;
-      p.requests = cap.requests || 0;
-
-      if (!cap.ok) {
-        // A Page we could not resolve and a Page with no ads are DIFFERENT
-        // facts, and the UI renders them differently. Collapsing them turns a
-        // lookup failure into a claim about a competitor's advertising.
-        p.status = cap.reason === "needs_confirmation" ? "needs_confirmation" : "failed";
-        p.reason = cap.reason;
-        p.pageResolved = !!cap.pageResolved;
-        p.candidates = cap.candidates || null;
-        return;
-      }
-
-      p.pageResolved = true;
-      p.pageId = cap.run.pageId;
-      p.pageName = cap.run.pageName;
-      p.pageGrade = cap.run.pageGrade;
-      p.found = cap.run.providerTotal;
-      p.retrieved = cap.run.retrieved;
-      p.pagesFetched = cap.run.pagesFetched;
-      p.moreAvailable = cap.run.moreAvailable;
-
-      if (!cap.units.length) {
-        p.status = "empty";
-        p.reason = "no_ads";
-        p.read = 0;
-        run.runs.push(cap.run);
-        return;
-      }
-
-      p.status = "reading";
-
-      // ---- dedupe BEFORE anything is paid for ------------------------------
-      // 420 cards behind 111 probed ads, most of them the same copy rendered at
-      // different sizes. Reading every asset would buy the same answer several
-      // times over.
-      const messages = dedupeMessages(cap.units);
-      p.rawUnits = cap.units.length;
-      p.messages = messages.length;
-
-      // ---- tiers 1 and 2: free -------------------------------------------
-      const det = enrichDeterministic(messages);
-      p.fromUrl = det.fromUrl;
-      p.fromText = det.fromText;
-
-      // ---- media: download now, because these URLs expire -----------------
-      const media = await storeMessageMedia(messages);
-      p.mediaStored = media.stored;
-      p.mediaFailed = media.failed;
-
-      // ---- tier 3: vision, only on what is still unresolved ---------------
-      const needing = det.needsVision.filter((m) => m.mediaStored).slice(0, MAX_META_READ);
-      for (const m of needing) {
-        const stored = readMedia(m.mediaHash);
-        if (stored) { m._mediaData = stored.buffer.toString("base64"); m._mediaType = stored.contentType; }
-      }
-      const vision = needing.length ? await extractMetaMessages(needing) : { read: 0, failed: 0 };
-      for (const m of messages) { delete m._mediaData; delete m._mediaType; }
-
-      p.visionRead = vision.read;
-      p.visionFailed = vision.failed;
-      p.read = messages.length;
-      p.rainManaged = messages.filter((m) => m.rainManaged).length;
-
-      run.runs.push({ ...cap.run, visionRead: vision.read });
-      run.messages.push(...messages.map((m) => ({
-        ...m, isClient: !!target.isClient, institutionLabel: target.label,
-      })));
-      p.status = "done";
-
-      captureCache.put(ck, {
-        run: { ...cap.run, visionRead: vision.read },
-        messages: messages.map(({ isClient, institutionLabel, ...m }) => m),
-      });
+      // The watched set is the DEFAULT for next month, never a restriction.
+      // Fulfillment may pick anyone; prefilling last month's set just makes
+      // stability the path of least resistance and drift deliberate.
+      putWatchedSet(run.client.domain, run.product, run.competitors);
     } catch (e) {
-      if (e?.code === "NO_API_KEY") throw e;
-      p.status = "failed";
-      p.reason = "unexpected";
-      p.detail = String(e?.message || e).slice(0, 200);
+      // A snapshot that failed to write must never take a completed run down.
+      console.error("[snapshot] post-run write failed:", e.message);
     }
-  }));
+  }
 
-  run.status = "done";
-  run.completedAt = new Date().toISOString();
-  run.stats = {
-    messagesRead: run.messages.length,
-    targetsOk: Object.values(run.progress).filter((x) => x.status === "done").length,
-    targetsTotal: run.targets.length,
-    requests: run.requests,
+  // WHAT THE CEILING ACTUALLY DID. The limit is a setting; the peak is what
+  // happened. Recorded together so the two can be read against each other
+  // instead of the ceiling being trusted on its own.
+  //
+  // The peak is PROCESS-WIDE — two source runs execute at once, and the panel
+  // and rate-page reads share the same pool — so for a single run it is an
+  // upper bound rather than a measurement of that run alone. Saying which it is
+  // costs one line and stops it being read as the other.
+  run.modelConcurrency = {
+    limit: modelConcurrencyLimit(),
+    observedPeakProcessWide: modelCallPeak(),
   };
-  run.sampling = metaSamplingNote(run.runs);
-  saveRun(run);
-}
 
-function applyMetaCapture(run, target, p, cached) {
-  const messages = cached.messages || [];
-  p.found = cached.run?.providerTotal;
-  p.retrieved = cached.run?.retrieved;
-  p.rawUnits = cached.run?.rawUnits;
-  p.messages = messages.length;
-  p.read = messages.length;
-  p.pageResolved = true;
-  p.pageId = cached.run?.pageId;
-  p.pageName = cached.run?.pageName;
-  p.pageGrade = cached.run?.pageGrade;
-  p.moreAvailable = cached.run?.moreAvailable;
-  p.rainManaged = messages.filter((m) => m.rainManaged).length;
-  if (cached.run) run.runs.push(cached.run);
-  run.messages.push(...messages.map((m) => ({
-    ...m, isClient: !!target.isClient, institutionLabel: target.label,
-  })));
+  // The whole capture is paid for by the time this line runs. If it does not
+  // reach disk the user must be told so, not congratulated.
+  persist(run);
 }
 
 /**
@@ -616,8 +854,9 @@ function applyMetaCapture(run, target, p, cached) {
  * strategy generated from a differently-assembled benchmark is a strategy about
  * numbers the client never saw.
  */
-function benchmarkFor(run) {
-  return buildBenchmark({
+function benchmarkFor(run, brands = null) {
+  const bm = buildBenchmark({
+    brands,
     client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },
     competitors: run.competitors.map((c) => ({
       ...c, ads: run.ads.filter((a) => !a.isClient && a.institution === c.domain),
@@ -625,13 +864,75 @@ function benchmarkFor(run) {
     product: run.product,
     runs: run.runs,
   });
+
+  // The national age caveat used to be appended HERE, to bm.referenceNote —
+  // a field buildBenchmark() has never produced. It was dead code: the
+  // condition read undefined every time, so the caveat could not fire on any
+  // run in the product's history. It now lives in boardFor(), on the note the
+  // snapshot actually carries and the UI actually renders. See F-022.
+  return bm;
+}
+
+/**
+ * Assemble the FINDINGS BOARD — the deliverable.
+ *
+ * benchmarkFor() above still runs and its table is still sent, but it renders
+ * BELOW this as the audit trail: the thing you open when someone asks where a
+ * number came from, not the thing you read to answer the question.
+ *
+ * One definition, used by the payload and by the snapshot writer, so the
+ * snapshot a future delta compares against is the same board the user saw.
+ */
+function boardFor(run) {
+  const previous = previousSnapshot({
+    clientDomain: run.client.domain, product: run.product, source: run.source,
+    excludeRunId: run.id,
+    // A 30-day capture and a 90-day capture are different questions. Diffing
+    // them reports the extra window as "newly observed". See F-020.
+    days: run.days,
+  });
+  const board = buildBoard({
+    client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },
+    competitors: run.competitors.map((c) => ({
+      ...c, ads: run.ads.filter((a) => !a.isClient && a.institution === c.domain),
+    })),
+    product: run.product,
+    progress: run.progress,
+    previous,
+    ratePages: run.ratePages || null,
+  });
+
+  // A NATIONAL CAPTURE CAN BE OLDER THAN THE WINDOW IT SITS BESIDE.
+  //
+  // Nationals are cached for a quarter because that is how often their creative
+  // turns over, and that is the right trade — but it means the ads in the
+  // reference rows may have been captured over a stretch of time months away
+  // from the one the client is being read over. The note already explains why
+  // nationals are in no local count; it has to say this too, or the reader
+  // reasonably assumes every row on the page describes the same window.
+  //
+  // It goes on the SNAPSHOT's note, because that is the one the reference block
+  // carries and the one snapshotHtml() renders. It was previously appended to
+  // the audit table's referenceNote, which buildBenchmark() does not produce —
+  // so the caveat has never once appeared. Said as "may fall outside": the
+  // capture is old, and whether the creative changed is not something this
+  // tool can see.
+  const ages = (run.competitors || [])
+    .filter((c) => c.tier === "national")
+    .map((c) => run.progress?.[c.domain]?.captureAgeDays)
+    .filter((n) => Number.isFinite(n));
+  const oldest = ages.length ? Math.max(...ages) : 0;
+  if (board.snapshot?.referenceNote && oldest > run.days) {
+    board.snapshot.referenceNote += ` Their creative was captured ${Math.round(oldest)} days ago and is refreshed quarterly, so it may fall outside the ${run.days}-day window the local rows describe.`;
+  }
+  return board;
 }
 
 // ---------------------------------------------------------------------------
 // GET /api/run/:id — poll a run, or read a finished one.
 // ---------------------------------------------------------------------------
 app.get("/api/run/:id", (req, res) => {
-  const run = ACTIVE.get(req.params.id) || loadRun(req.params.id);
+  const run = getRun(req.params.id);
   if (!run) return res.status(404).json({ ok: false, reason: "not_found" });
 
   const payload = {
@@ -646,42 +947,15 @@ app.get("/api/run/:id", (req, res) => {
     stats: run.stats || null,
     requests: run.requests || 0,
     createdAt: run.createdAt,
+    // DEGRADED, NOT DONE. A run that finished but never reached disk is a run
+    // the user must not be told to come back to. Absent means a run from before
+    // the flag existed, which is a run that was saved.
+    persisted: run.persisted !== false,
+    // The ceiling, and what was actually in flight underneath it (F-008).
+    modelConcurrency: run.modelConcurrency || null,
   };
 
   if (run.status !== "done") return res.json(payload);
-
-  // ---- META ---------------------------------------------------------------
-  // Its own branch, its own payload shape, its own counts. Nothing here is ever
-  // merged with, compared to, or summed alongside a Google run.
-  if (isMeta(run.source)) {
-    const all = run.messages.filter((m) => !m.isClient);
-    // RAIN-managed work stays IN the wall, badged. Most RAIN clients compete in
-    // different markets, so a client's own agency-run creative appearing as a
-    // "competitor" is rare — and the creative team gains from seeing prior work.
-    // Flagged, never hidden, and never silently counted as an external
-    // competitor's strategy.
-    const scoped = filterMetaByProduct(all, run.product);
-
-    payload.meta = {
-      productScope: run.product,
-      defaultProductFilter: scoped.length ? run.product : "all",
-      scopedCount: scoped.length,
-      capturedCount: all.length,
-      messages: all,
-      summary: metaCreativeSummary(all),
-      scopedSummary: metaCreativeSummary(scoped),
-      byProduct: metaProductBreakdown(all),
-      byCompetitor: run.competitors.map((c) => ({
-        ...c,
-        count: all.filter((m) => m.institution === c.domain).length,
-        rainManaged: all.filter((m) => m.institution === c.domain && m.rainManaged).length,
-      })),
-      rainManaged: all.filter((m) => m.rainManaged).length,
-      funnel: metaFunnel(run.runs, all, scoped.length,
-        run.runs.reduce((n, r) => n + (Number(r?.visionRead) || 0), 0)),
-    };
-    return res.json(payload);
-  }
 
   const competitorAds = run.ads.filter((a) => !a.isClient);
   payload.breakdown = productBreakdown(competitorAds);
@@ -701,24 +975,55 @@ app.get("/api/run/:id", (req, res) => {
     // to 2 rendered a chip saying "All products 2" and the other 10 were
     // unreachable from the UI. The counts a filter offers have to describe what
     // is actually in hand.
+    // A creative the reader could find no copy in — or found only the
+    // Transparency Center's own buttons in — is not competitor creative. It is
+    // dropped from the wall and COUNTED, so the funnel still reconciles and
+    // nobody has to wonder where a card went.
+    const showable = competitorAds.filter(isShowable);
+    const unreadable = competitorAds.length - showable.length;
+    const scopedShowable = scoped.filter(isShowable);
+
+    // THE CLIENT'S OWN WALL, kept as its own block rather than merged in.
+    // Merging would corrupt every count on the screen — the tier totals, the
+    // advertiser chips, the "no local creatives were read" note — and it would
+    // also be the wrong reading: the question is what the client runs AGAINST
+    // this set, which is a comparison between two populations, not one bigger
+    // population.
+    const clientAds = run.ads.filter((a) => a.isClient).filter(isShowable);
+    const clientScoped = filterByProduct(clientAds, run.product);
+
+    payload.client = {
+      ...run.client,
+      captured: clientAds.length,
+      onProduct: clientScoped.length,
+      // Scoped when there is anything in scope, everything otherwise — the same
+      // rule the wall uses, for the same reason: an empty panel behind a button
+      // that says there are ads is worse than a wider one.
+      ads: clientScoped.length ? clientScoped : clientAds,
+      productScoped: clientScoped.length > 0,
+      designs: clusterAds(clientScoped.length ? clientScoped : clientAds).length,
+      status: run.progress?.[run.client.domain] || null,
+    };
+
     payload.creative = {
       productScope: run.product,
+      unreadable,
       // Pre-select the scope only when it has something in it. Landing on an
       // empty wall is the failure this whole path exists to avoid.
-      defaultProductFilter: scoped.length ? run.product : "all",
-      scopedCount: scoped.length,
-      capturedCount: competitorAds.length,
-      summary: creativeSummary(competitorAds),
-      scopedSummary: creativeSummary(scoped),
+      defaultProductFilter: scopedShowable.length ? run.product : "all",
+      scopedCount: scopedShowable.length,
+      capturedCount: showable.length,
+      summary: creativeSummary(showable),
+      scopedSummary: creativeSummary(scopedShowable),
       // The wall shows IDEAS, not every execution. Three near-identical rate
       // banners are one idea with three pieces of evidence, and presenting them
       // as three findings produces a wall nobody reads.
-      clusters: clusterAds(competitorAds),
-      byProduct: productBreakdown(competitorAds),
+      clusters: clusterAds(showable),
+      byProduct: productBreakdown(showable),
       byCompetitor: run.competitors.map((c) => ({
         ...c,
         tier: c.tier || "local",
-        count: competitorAds.filter((a) => a.institution === c.domain).length,
+        count: showable.filter((a) => a.institution === c.domain).length,
       })),
       // The wall renders these as two groups. Volume asymmetry is the reason:
       // a community bank might contribute four cards while Chase contributes
@@ -740,13 +1045,39 @@ app.get("/api/run/:id", (req, res) => {
         },
       },
       // Where every creative went, listed -> on-product. See captureFunnel().
-      funnel: captureFunnel(run.runs, competitorAds, scoped.length),
+      funnel: captureFunnel(run.runs.filter((r) => r.domain !== run.client?.domain), competitorAds, scoped.length),
     };
+
+    // Key insights, if this run has already paid for them. They were saved on
+    // the run and then never handed back, so every reopened run read as a run
+    // that had never been analysed: the client refetched, the model was billed
+    // again for an answer already on disk, and the reader waited out a model
+    // call to see a page that was sitting in the file all along.
+    payload.themes = run.themes || null;
   } else {
-    payload.benchmark = benchmarkFor(run);
-    payload.funnel = captureFunnel(run.runs, run.ads,
+    // THE BOARD IS THE ANSWER. The table is the audit trail.
+    payload.board = boardFor(run);
+    // The table AUDITS the board, so it is handed the board's own rollup. Two
+    // aggregations over the same ads is how one screen showed 4.84% APR in a
+    // finding and 6.74% in the table below it.
+    payload.benchmark = benchmarkFor(run, payload.board.brands);
+    // TWO NUMBERS, NOT ONE. "on the product in scope" is every ad classified as
+    // this product, at any confidence — it is what was captured. "counted in the
+    // comparison" is the subset the reader placed firmly enough to compare, and
+    // it is what the board and the table are built from. Collapsing them would
+    // report a creative the reader was unsure about as one "classified as a
+    // different product", which is not what happened to it. See F-002.
+    const onProduct = filterByProduct(run.ads, run.product).length;
+    payload.funnel = captureFunnel(run.runs, run.ads, onProduct,
       payload.benchmark.columns.reduce((n, c) => n + c.adCount, 0));
-    payload.strategies = run.strategies || null;
+    // Recommended strategies are a Creative/Sales deliverable. Han asked
+    // Fulfillment for quasi-analysis — counted facts the client draws their own
+    // conclusion from — so the benchmark no longer offers a strategy pass.
+    // The generator, its route and its client code are gone as of F-004; the
+    // field stays null so an older saved run rendering through this payload
+    // does not suddenly grow an undefined where a null used to be.
+    payload.strategies = null;
+    payload.ratePages = run.ratePages || null;
   }
 
   // The evidence itself, keyed for the drawer. Base64 was discarded after
@@ -768,6 +1099,92 @@ app.get("/api/run/:id", (req, res) => {
 });
 
 app.get("/api/runs", (_req, res) => res.json({ runs: listRuns({ limit: 25 }) }));
+
+// ---------------------------------------------------------------------------
+// GET /api/watched — last month's competitor set for this client and product.
+//
+// The stability problem is solved by the DEFAULT, not by permission. Fulfillment
+// can pick literally anyone; this just means they do not have to re-pick the
+// same five every month, which is what keeps month-over-month deltas meaningful.
+// ---------------------------------------------------------------------------
+app.get("/api/watched", (req, res) => {
+  const domain = normDomain(req.query.clientDomain);
+  const product = normalizeProduct(req.query.product || "");
+  if (!domain) return res.status(400).json({ ok: false, reason: "bad_client_domain" });
+  const watched = getWatchedSet(domain, product);
+  res.json({ ok: true, watched: watched?.competitors || [], updatedAt: watched?.updatedAt || null });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/evidence/:creativeId — reproduce one creative exactly as RAIN saw it.
+//
+// This is what answers "that competitor never advertised 4.50%, show me". The
+// creative may be gone from Google by then; this bundle is dated, carries the
+// raw provider record and the verbatim transcription, and is never rewritten.
+// ---------------------------------------------------------------------------
+app.get("/api/evidence/:creativeId", (req, res) => {
+  const bundle = getEvidence(req.params.creativeId);
+  if (!bundle) return res.status(404).json({ ok: false, reason: "not_found" });
+  res.json({ ok: true, evidence: bundle });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/extraction/:creativeId/reread — forget ONE transcription.
+//
+// A wrong reading used to be permanent until the reader version moved, and
+// moving it retires every extraction in the cache: hundreds of correct
+// readings re-bought to fix one. So wrong readings stayed, in the evidence
+// drawer where somebody had already spotted them.
+//
+// This does not re-read anything by itself, and it deliberately costs nothing
+// when it is called. It forgets the record, so the next capture that meets
+// this creative pays for exactly one vision call. Spending money is what the
+// capture screen is for, and it quotes the bill first (F-009).
+// ---------------------------------------------------------------------------
+app.post("/api/extraction/:creativeId/reread", (req, res) => {
+  const creativeId = String(req.params.creativeId || "");
+  if (!/^[A-Za-z0-9_-]{4,80}$/.test(creativeId)) {
+    return res.status(400).json({ ok: false, reason: "bad_creative_id" });
+  }
+  // An optional reader narrows it to one reading of the creative. Without one,
+  // every reader's reading goes — which is what "re-read this creative" means
+  // to the person asking, and the search and banner readings of one creative
+  // are equally likely to be the wrong one.
+  const reader = req.body?.reader ? String(req.body.reader) : null;
+  const { dropped, readers } = forgetCachedExtraction(creativeId, reader);
+  // Not a 404 when nothing was cached: "there is no stored reading of this
+  // creative" is the state the caller asked for, and reporting it as a failure
+  // would make a second click look broken.
+  res.json({ ok: true, creativeId, dropped, readers, nextCaptureWillReRead: true });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/rate-pages — read current product pages for a finished run.
+//
+// Ads are historical; the page is current. Deliberately a SEPARATE, opt-in call
+// rather than part of capture: rate-page coverage is inconsistent, so these
+// figures are display-only and never enter a denominator. See rate-page.js.
+// ---------------------------------------------------------------------------
+app.post("/api/rate-pages", async (req, res) => {
+  const run = getRun(req.body?.runId);
+  if (!run) return res.status(404).json({ ok: false, reason: "not_found" });
+  if (run.mode !== "benchmark") return res.status(400).json({ ok: false, reason: "wrong_mode" });
+
+  const targets = (Array.isArray(req.body?.pages) ? req.body.pages : [])
+    .map((t) => ({ domain: normDomain(t.domain), url: String(t.url || "").trim() }))
+    .filter((t) => t.domain && t.url)
+    .slice(0, 8);
+  if (!targets.length) return res.status(400).json({ ok: false, reason: "no_pages" });
+
+  try {
+    run.ratePages = { ...(run.ratePages || {}),
+      ...(await readRatePages(targets, { product: run.product, productLabel: run.productLabel })) };
+    const persisted = persist(run);
+    res.json({ ok: true, ratePages: run.ratePages, board: boardFor(run), persisted });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e?.code === "NO_API_KEY" ? "anthropic_not_configured" : "read_failed" });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // GET /api/img?u= — creative image proxy.
@@ -820,79 +1237,193 @@ app.get("/api/img", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/media/:hash — locally stored Meta creative.
+// POST /api/run/:id/themes — the recurring ideas on the Wall.
 //
-// Not a proxy. The bytes were downloaded during capture, while the signed
-// fbcdn.net URL was still valid, and stored by content hash. This serves what
-// we own — which is the only reason a Meta wall still renders a week later.
-// ---------------------------------------------------------------------------
-app.get("/api/media/:hash", (req, res) => {
-  const stored = readMedia(req.params.hash);
-  if (!stored) return res.status(404).end();
-  res.set("content-type", stored.contentType || "image/jpeg");
-  res.set("cache-control", "public, max-age=604800, immutable");
-  res.send(stored.buffer);
-});
-
-// ---------------------------------------------------------------------------
-// POST /api/meta/confirm-page — a human settles an ambiguous Page match.
+// Gated behind a click for the same reason the strategy pass was: it is the one
+// model call on that screen, and a strategist scrolling a wall should not be
+// billed for an analysis they did not ask for.
 //
-// The Chase case: a name score of 1.0 with a margin of 0.0033 over the next
-// candidate means many Pages share that name, so the resolver refuses to guess
-// and asks. Once confirmed the mapping is persisted and nobody is asked again.
+// Wall only. Competitive Intelligence answers a different question with counted
+// facts, and a model-written summary sitting beside a counted board invites the
+// reader to trust them equally.
 // ---------------------------------------------------------------------------
-app.post("/api/meta/confirm-page", (req, res) => {
-  const domain = normDomain(req.body?.domain);
-  const pageId = String(req.body?.pageId || "").trim();
-  if (!domain || !pageId) return res.status(400).json({ ok: false, reason: "bad_request" });
-
-  const saved = saveIdentity(domain, {
-    metaPageId: pageId,
-    metaPageName: String(req.body?.pageName || "").trim(),
-    resolvedBy: "manual",
-    confidence: "high",
-    note: "confirmed by a strategist in the capture flow",
-  });
-  res.json({ ok: saved, domain, pageId });
-});
-
-// ---------------------------------------------------------------------------
-// POST /api/run/:id/strategies — the GATE.
-//
-// Interpretation happens here and only here, on an explicit click. The
-// benchmark table is the deliverable; this is the optional second screen.
-// ---------------------------------------------------------------------------
-app.post("/api/run/:id/strategies", async (req, res) => {
-  const run = ACTIVE.get(req.params.id) || loadRun(req.params.id);
+app.post("/api/run/:id/themes", async (req, res) => {
+  const run = getRun(req.params.id);
   if (!run) return res.status(404).json({ ok: false, reason: "not_found" });
   if (run.status !== "done") return res.status(409).json({ ok: false, reason: "run_not_finished" });
-  if (run.mode !== "benchmark") return res.status(400).json({ ok: false, reason: "wrong_mode" });
+  if (run.mode !== "creative") return res.status(400).json({ ok: false, reason: "wrong_mode" });
+
+  // ONE SCOPE PER REQUEST, and the scope is named by the caller.
+  //
+  //   "all"        every product captured — the general read of the wall
+  //   "<product>"  that product alone
+  //
+  // The panel asks for the general read AND the run's own product, always, and
+  // for any further product only when someone picks one. There is no silent
+  // widening any more: a thin product says it is thin, and the general read is
+  // already on the same screen to fall back to. A fallback you can see is a
+  // section; one you cannot is a false heading.
+  const requested = String(req.body?.scope || run.product || "all");
+  const scope = requested === "all" || PRODUCT_LABELS[requested] ? requested : run.product;
+  const isAll = scope === "all";
+  const scopeLabel = isAll ? "Every product captured" : PRODUCT_LABELS[scope];
+
+  // MIGRATION. Runs read before this endpoint took a scope hold a single
+  // `themes`; it was always the run's own product unless it said otherwise.
+  if (!run.themesByScope) {
+    run.themesByScope = run.themes
+      ? { [run.themes.readScope === "all_products" ? "all" : run.product]: run.themes }
+      : {};
+  }
+
+  // Already read, and reading is the one billable act on that screen. The wall
+  // cannot change under a finished run, so the saved answer IS the answer.
+  if (run.themesByScope[scope] && !req.body?.force) {
+    return res.json({ ok: true, scope, scopeLabel, themes: run.themesByScope[scope], cached: true });
+  }
+
+  // SINGLE-FLIGHT PER RUN AND SCOPE. Two requests for the same scope are one
+  // question and must cost one model call — a double-clicked button, or the
+  // panel reopened in a second tab, otherwise buys the same read twice. Two
+  // requests for DIFFERENT scopes are two questions and still run side by side;
+  // only their merge into the run file is serialised, below.
+  const key = `${run.id}::${scope}`;
+  let job = THEMES_INFLIGHT.get(key);
+  if (!job) {
+    job = readThemesForScope({ run, scope, isAll, scopeLabel })
+      .finally(() => { if (THEMES_INFLIGHT.get(key) === job) THEMES_INFLIGHT.delete(key); });
+    THEMES_INFLIGHT.set(key, job);
+  }
+  const { status, body } = await job;
+  res.status(status).json(body);
+});
+
+/**
+ * Read one scope of the wall. Always RESOLVES — to the status and body the
+ * endpoint should return — so that every caller sharing one in-flight read gets
+ * the same answer, including the same failure.
+ */
+async function readThemesForScope({ run, scope, isAll, scopeLabel }) {
+  // The filter chips on the results screen are a VIEW and never reach this
+  // endpoint: clicking an advertiser narrows what is drawn, not what is read.
+  const showable = (run.ads || []).filter((a) => !a.isClient).filter(isShowable);
+  const pool = isAll ? showable : filterByProduct(showable, scope);
+
+  // CLUSTERED FIRST, and this is evidence, not tidying. Handed raw ads, the
+  // model saw one design cut into five banner sizes as five independent
+  // confirmations of a theme, so the most heavily resized creative always
+  // looked like the strongest pattern in the set.
+  const families = clusterAds(pool);
+  const designs = usableFamilies(families).length;
+
+  const counts = {
+    product: scopeLabel, productKey: scope,
+    designs, allDesigns: usableFamilies(clusterAds(showable)).length, needed: MIN_FAMILIES,
+  };
+
+  // THE COUNTED OBSERVATIONS DO NOT DEPEND ON THE MODEL, so they are computed
+  // before it is called and returned whatever it does. A panel that threw these
+  // away because the themes pass came back empty was discarding the most
+  // defensible thing on it.
+  const advertisers = (run.competitors || []).map((c) => ({
+    domain: c.domain, label: c.label, tier: c.tier || "local",
+  }));
+  const clientShowable = (run.ads || []).filter((a) => a.isClient).filter(isShowable);
+  const clientFamilies = clusterAds(isAll ? clientShowable : filterByProduct(clientShowable, scope));
+  const counted = {
+    channel: channelShape({
+      advertisers, days: run.days,
+      peek: (q) => captureCache.peek({ ...q, ttlDays: Number.MAX_SAFE_INTEGER }),
+    }),
+    cohort: cohortShape({
+      families: usableFamilies(families), advertisers, days: run.days,
+      productLabel: isAll ? "" : scopeLabel,
+      client: { label: run.client?.label, designs: usableFamilies(clientFamilies).length },
+    }),
+  };
+
+  // NOT AN ERROR, AND NOT RED. A product too thin to generalise over is a fact
+  // about what Google listed, and the wall below it is unaffected. Decided
+  // before the model call, so it also costs nothing.
+  if (designs < MIN_FAMILIES) {
+    return { status: 200, body: { ok: true, scope, scopeLabel, themes: null, reason: "too_little_captured", counted, ...counts } };
+  }
 
   try {
-    // Built from the same function that produced the table the user is looking
-    // at. Two call sites that assemble the benchmark separately is how the
-    // strategy pass ends up reasoning over numbers nobody was shown.
-    const benchmark = benchmarkFor(run);
+    // The framing line names the product only when a product is what was read.
+    //
+    // The client's designs go INTO the read — the cohort contrast cannot be
+    // read without them — and the counts go in beside them so the sentence
+    // that comes back names the competitor figure and says the client's work
+    // was read alongside it, instead of quietly counting the two together.
+    const { themes, audit } = await readThemes(
+      [...families, ...clientFamilies], isAll ? "" : scopeLabel,
+      {
+        competitorDesigns: designs,
+        clientDesigns: usableFamilies(clientFamilies).length,
+        clientLabel: run.client?.label,
+      });
 
-    const strategies = await generateStrategies({
-      benchmark,
-      product: run.product,
-      clientLabel: run.client.label,
-      sampling: run.sampling,
+    // Reached, answered, and nothing it proposed held up. Not an error — and
+    // not the end of the panel either: the counted observations go back
+    // regardless, and the audit says whether the set was quiet or the answer
+    // was refused, which look identical from outside.
+    if (!themes) {
+      return { status: 200, body: { ok: true, scope, scopeLabel, themes: null, reason: "nothing_recurring", audit, counted, ...counts } };
+    }
+
+    // Carried ON the themes so a re-open — served from the saved copy, never
+    // re-read — labels itself exactly as the first open did.
+    themes.readScope = isAll ? "all_products" : "product";
+    themes.scopeKey = scope;
+    themes.scopeLabel = scopeLabel;
+    themes.readOver = counts;
+    themes.channel = counted.channel;
+    themes.cohort = counted.cohort;
+    themes.audit = audit;
+
+    // READ-MODIFY-WRITE UNDER THE LOCK, against a record re-read inside it. The
+    // copy captured at the top of the request is stale the moment a sibling
+    // scope finishes first, and writing it back is what silently dropped that
+    // sibling's scope from disk and re-billed it on the next open.
+    const { persisted } = await updateRun(run.id, (current) => {
+      if (!current.themesByScope) current.themesByScope = {};
+      current.themesByScope[scope] = themes;
+      // Back-compat: anything still reading `run.themes` gets the run's own
+      // product, which is what that field always meant.
+      if (scope === current.product || !current.themes) current.themes = themes;
     });
+    // Keep the caller's in-memory copy in step for the cached-answer check.
+    run.themesByScope[scope] = themes;
 
-    run.strategies = strategies;
-    ACTIVE.set(run.id, run);
-    saveRun(run);
-    res.json({ ok: true, strategies });
+    return { status: 200, body: { ok: true, scope, scopeLabel, themes, counted, persisted, ...counts } };
   } catch (e) {
-    res.status(500).json({ ok: false, reason: e?.code === "NO_API_KEY" ? "anthropic_not_configured" : "generation_failed" });
+    const reason = e?.code === "NO_API_KEY" ? "anthropic_not_configured"
+      : e?.code === "MODEL_UNAVAILABLE" ? "model_unavailable"
+        : "generation_failed";
+    // The status stays 500 — something really did fail server-side — but the
+    // counts travel with it so the panel can still name the product it was
+    // reading, and say plainly that nothing was spent.
+    return { status: 500, body: { ok: false, scope, scopeLabel, reason, counted, ...counts } };
   }
-});
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`RAIN Intelligence on :${PORT}`);
+
+  // Say what cache this process is sitting on. When a directory has been copied
+  // between environments — which is the supported way to move it — this is the
+  // line that tells you whether it came from this build or an older one.
+  const man = readManifest();
+  if (man && man.schema !== CACHE_SCHEMA) {
+    console.log(`  Cache: schema ${man.schema}, this build expects ${CACHE_SCHEMA}`);
+    console.log("         Entries written by the older build are keyed differently and will");
+    console.log("         simply miss. Nothing is served stale; the first run re-reads them.");
+  } else if (man) {
+    console.log(`  Cache: schema ${man.schema}, first written ${String(man.createdAt).slice(0, 10)}`);
+  }
+  writeManifest({ lastBuild: CACHE_SCHEMA });
   console.log(`  SerpApi: ${hasKey() ? "configured" : "NOT CONFIGURED"}`);
   console.log(`  Anthropic: ${hasAnthropicKey() ? "configured" : "NOT CONFIGURED"}`);
   console.log(`  Directory: ${DIRECTORY_SIZE} clients`);

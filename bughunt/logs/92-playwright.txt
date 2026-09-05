@@ -1,0 +1,127 @@
+# Phase 2 — the browser suite.
+
+
+> rain-intelligence@0.1.0 test:ui
+> node test/ui.test.js
+
+
+── landing screen
+  ok  the document title is the product name
+  ok  the headline is the product name
+  ok  the tagline states what the product is
+  ok  the client picker is the primary action, the URL is not
+  ok  typing a partial name finds the client by substring
+  ok  a name that matches nothing points at the URL path
+  ok  the URL path is one click away for anyone not in the directory
+  ok  opening the URL path closes the client picker
+  ok  the way back restores the picker and drops the URL
+  ok  the landing screen carries nothing it was not asked
+  ok  a missing key is stated on the landing page, not after Analyze
+  ok  the palette uses blue, orange and green — not blue alone
+  ok  no CSS variable referenced by the page is undefined
+  ok  nothing on the landing screen overflows horizontally
+
+── creative flow — landing to wall
+  ok  the mode screen names the resolved client
+  ok  the mode screen offers exactly the modes that exist
+  ok  the product scope was picked up from the URL path
+  ok  the national tier is on by default and says who it adds
+  ok  switching the tier off re-quotes the cost downward
+  ok  the cost line states what will be spent before anything is spent
+  ok  capture advances to the progress screen
+  ok  THE RESULTS SCREEN BECOMES VISIBLE WHEN THE CAPTURE FINISHES
+  ok  the wall renders cards, not an empty state
+  ok  the headline stats are populated
+  ok  the capture funnel is shown and reconciles to the wall
+  ok  the funnel explains every drop when asked
+  ok  the wall opens on the scoped product but says how to see the rest
+  ok  SHOWING ALL PRODUCTS REACHES EVERY CAPTURED CREATIVE
+  ok  the sampling note is shown on the results screen
+  ok  creative images load — none fell through to the broken state
+  ok  a multi-execution idea is badged as such
+  ok  longevity reads as days shown, never as a continuous run
+  ok  no performance language leaks onto the wall
+  ok  no card rendered undefined, NaN or [object Object]
+
+── creative filters
+  ok  product filter chips are rendered
+  ok  filtering by advertiser narrows the wall
+  ok  the filtered wall shows only the chosen advertiser
+  ok  clearing the filter restores every card
+  ok  a filter combination with no matches offers a way out
+
+── evidence drawer
+  ok  clicking a creative opens the drawer with its executions
+  ok  the drawer links back to the Transparency Center
+  ok  the drawer contains no rendering artifacts
+  ok  Escape closes the drawer
+
+── benchmark flow — the board, and the table that audits it
+  ok  the client appears as a captured column, not an assumption
+  ok  the findings board is on screen without opening anything
+  ok  every finding on screen declares the population it was counted over
+  ok  nothing on the board reads as a claim about a product
+  ok  no rendered panel contains undefined, NaN or [object Object]
+  ok  every block of findings carries its own heading
+  ok  the full table is behind a disclosure, not on the page by default
+  ok  the client is the first column in the table
+  ok  the advertised bonus row is populated from captured ads
+  ok  the client's absent bonus renders as an absence, not a zero
+  ok  no cell rendered undefined, NaN or [object Object]
+  ok  every evidence link in the table opens real ads
+  ok  the strategy gate is gone from the screen, not merely unstyled
+
+── a capture that finds nothing still renders a result
+  ok  an empty capture still reaches the results screen
+  ok  it explains what each advertiser returned rather than showing a blank page
+  ok  national benchmarks never stand in for an empty local market
+
+── errors are shown on the page, never in an alert
+  ok  a bad URL is explained inline, not in a blocking dialog
+
+── journey — a second capture does not inherit the first one's filters
+  ok  the advertiser filter narrowed the first wall
+  ok  the second wall is not empty
+  ok  no advertiser chip from the previous run is still applied
+  ok  the product chip re-adopts the new run's own scope
+  ok  the results header names the run on screen
+
+── journey — three products back to back under one context
+  ok  the checking run carries its own scope into the competitor screen
+  ok  the checking results name the checking scope
+  ok  the auto-loan run carries its own scope into the competitor screen
+  ok  the auto-loan results name the auto-loan scope
+  ok  the credit-card run carries its own scope into the competitor screen
+  ok  the credit-card results name the credit-card scope
+
+── journey — drawer over panel, and Escape closing the right one
+  ok  the drawer opens over the wall with its evidence
+  ok  the drawer is painted above whatever it opened over
+  ok  Escape closes the drawer and leaves the wall behind it intact
+  ok  closing the drawer did not scroll the wall away
+
+── journey — a double-click never buys anything twice
+  ok  double-clicking Capture starts one capture, not two
+
+── journey — the server is unreachable when Capture is pressed
+  ok  the failure is explained on the page
+  ok  the Capture button comes back so the user can retry
+  ok  and it stayed on the competitor screen rather than half-navigating
+  ok  retrying after the failure works
+
+── journey — the client picker never covers the only other way in
+  ok  clearing the search box does not leave a menu over the page
+  ok  and the landing-page button underneath it is clickable
+
+── journey — the sizes this gets demonstrated at
+  ok  at 1366×768 nothing scrolls sideways
+  ok  at 1366×768 the findings board is reachable by scrolling, not lost below the page
+  ok  at 1280×720 nothing scrolls sideways
+  ok  at 1280×720 the findings board is reachable by scrolling, not lost below the page
+
+── console
+  ok  no uncaught JavaScript exception anywhere in the flow
+  ok  nothing logged an application error to the console
+
+88 passed, 0 failed
+EXIT_CODE=0

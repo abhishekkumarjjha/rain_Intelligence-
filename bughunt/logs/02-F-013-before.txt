@@ -1,0 +1,19 @@
+# F-013 BEFORE — no way to re-read one creative.
+
+── one creative can be re-read without retiring the whole cache
+  ok  the capture cached a transcription for every creative it read
+<anonymous_script>:1
+<!DOCTYPE html>
+^
+
+SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:5880:19)
+    at successSteps (node:internal/deps/undici/undici:5861:27)
+    at fullyReadBody (node:internal/deps/undici/undici:4753:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async consumeBody (node:internal/deps/undici/undici:5870:7)
+    at async Object.post (file:///home/user/rain_Intelligence-/test/harness.js:85:40)
+    at async file:///home/user/rain_Intelligence-/test/degraded.test.js:430:31
+
+Node.js v22.22.2

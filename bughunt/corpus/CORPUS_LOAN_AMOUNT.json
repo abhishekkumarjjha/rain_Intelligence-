@@ -1,0 +1,63 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_LOAN_AMOUNT",
+  "advertiser": "example.org",
+  "adText": {
+    "headlines": [
+      "Borrow Up To $30,000"
+    ],
+    "description": "Borrow up to $30,000 with a personal loan. No collateral required.",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "example.org",
+    "displayUrl": "",
+    "headlines": [
+      "Borrow Up To $30,000"
+    ],
+    "description": "Borrow up to $30,000 with a personal loan. No collateral required.",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [
+      {
+        "metric": "cash_bonus",
+        "raw": "$30,000",
+        "qualifiers": {},
+        "sourceField": "headline"
+      }
+    ],
+    "claims": [],
+    "unclassified": [],
+    "leadEmphasis": "other",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "personal-loan",
+    "productConfidence": 0.9,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "personal-loan",
+    "productConfidenceAtLeast": 0.7,
+    "facts": [
+      {
+        "metric": "loan_amount",
+        "raw": "$30,000",
+        "value": 30000,
+        "complete": true,
+        "grounded": true,
+        "retypedFrom": "cash_bonus"
+      }
+    ],
+    "claims": [],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "AN AMOUNT YOU CAN BORROW IS NOT A PAYMENT TO YOU. Read as a cash bonus it says this lender pays a $30,000 switching bonus."
+}

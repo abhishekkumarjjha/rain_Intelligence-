@@ -1,0 +1,211 @@
+# Every command run during the bug hunt, in order, with the exit code that mattered.
+# Repetitive per-finding cycles (edit -> node --check -> npm test) are collapsed to
+# one line each where they were identical; every command that produced a log file or
+# a commit is listed individually.
+
+## SETUP
+git status --short                                                        # 0
+git branch -a                                                             # 0
+git log --oneline -5                                                      # 0
+node --version                                                            # 0  v22.22.2
+npm --version                                                             # 0  10.9.7
+git checkout -b bughunt/phase-0                                           # 0
+mkdir -p bughunt/logs bughunt/corpus                                      # 0
+npm install                                                               # 0
+npm test                    > bughunt/logs/00-baseline-test.txt            # 0  273 assertions
+npm audit                   > bughunt/logs/01-npm-audit-before.txt         # 1  3 moderate
+
+## F-001 — grounding
+node --check lib/observations.js                                          # 0
+node --check lib/extract.js                                               # 0
+node --check lib/findings.js                                              # 0
+npm test                                                                  # 1  2 fixture failures, investigated
+npm test                                                                  # 0  after fixture correction
+node test/benchmark.test.js > bughunt/logs/02-F-001-before.txt  (lib stashed)  # 1  7 failing
+node test/benchmark.test.js > bughunt/logs/03-F-001-after.txt              # 0
+git commit -F -                                                           # 0  e16e763
+
+## F-007 — one writer per run
+node --check server.js                                                    # 0
+node --check test/harness.js                                              # 0
+node test/flow.test.js      > bughunt/logs/02-F-007-before.txt (server stashed)  # 1  "all" lost from disk
+node test/flow.test.js      > bughunt/logs/03-F-007-after.txt              # 0
+npm test                                                                  # 0
+git commit -F -                                                           # 0  099a0d9
+
+## F-003 — SSRF guard
+node --check lib/rate-page.js                                             # 0
+node test/degraded.test.js                                                # 1  IPv4-mapped IPv6 slipped through; guard fixed
+node scratch/ssrf-probe.mjs > bughunt/logs/02-F-003-before.txt (lib stashed)  # 0  loopback hits: 1
+node scratch/ssrf-probe.mjs > bughunt/logs/03-F-003-after.txt              # 0  loopback hits: 0
+npm test                                                                  # 0
+git commit -F -                                                           # 0  e956178
+
+## F-004 — the dead paid endpoint
+git rm lib/strategies.js                                                  # 0
+node --check server.js public/app.js test/flow.test.js test/shots.js      # 0
+node test/flow.test.js                                                    # 0
+npm test                                                                  # 0
+git commit -F -                                                           # 0  01e4868
+
+## F-002 — productConfidence
+node --check lib/analyze.js                                               # 0
+node test/flow.test.js      > bughunt/logs/02-F-002-before.txt (libs stashed)  # 1  1.99% APR reached the snapshot
+node test/flow.test.js      > bughunt/logs/03-F-002-after.txt              # 0
+npm test                                                                  # 0
+git commit -F -                                                           # 0  d85b3f7
+
+## F-005 — durable, checked persistence
+node --check lib/store.js server.js public/app.js                         # 0
+node test/degraded.test.js  > bughunt/logs/02-F-005-before.txt (libs stashed)  # 1  persisted: undefined
+node test/degraded.test.js  > bughunt/logs/03-F-005-after.txt              # 0
+npm test                                                                  # 0
+git commit -F -                                                           # 0  ad581d1
+
+## F-006 — ACTIVE eviction
+node test/flow.test.js      > bughunt/logs/02-F-006-before.txt (server stashed)  # 1
+node test/flow.test.js      > bughunt/logs/03-F-006-after.txt              # 0
+npm test                                                                  # 0
+git commit -F -                                                           # 0  7751e59
+
+## F-011 — real readiness
+node -e 'import("./lib/store.js").then(m=>console.log(m.storageHealth()))' # 0
+node test/degraded.test.js  > bughunt/logs/02-F-011-before.txt (libs stashed)  # 1
+node test/degraded.test.js  > bughunt/logs/03-F-011-after.txt              # 0
+npm test                                                                  # 0
+git commit -F -                                                           # 0  55d091a
+
+## PHASE 2 — the browser suite (F-010, F-015, F-016)
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --save-dev playwright      # 0
+npm run test:ui                                                           # 1  crashed on a stale selector
+npm run test:ui                                                           # 1  6 failures — 3 app, 3 stale tests
+npm run test:ui                                                           # 0  88 assertions
+node test/ui.test.js        (node_modules/playwright moved aside)          # 1  fails loudly, as required
+RI_SKIP_UI=1 npm run test:ui                                              # 0  the deliberate opt-out
+npm test                                                                  # 0
+git commit -F -                                                           # 0  8e338cf
+
+## F-012 — npm audit
+npm audit fix                                                             # 0  no-op: no reachable fix
+npm view qs versions --json                                               # 0  6.16.0 exists
+npm install                 (with overrides: { qs: "^6.16.0" })            # 0
+npm audit                   > bughunt/logs/91-npm-audit-after.txt          # 0  0 vulnerabilities
+npm test && npm run test:ui                                               # 0
+git commit -F -                                                           # 0  9ee0121
+
+## F-008 — the model-call ceiling
+node scratch/concurrency-probe.mjs > bughunt/logs/02-F-008-before.txt (lib stashed)  # 0  peak 40
+node scratch/concurrency-probe.mjs > bughunt/logs/03-F-008-after.txt       # 0  peak 8; peak 3 at RI_MODEL_CONCURRENCY=3
+node test/degraded.test.js                                                # 0
+npm test                                                                  # 0
+git commit -F -                                                           # 0  0afbb46
+
+## F-009 — the cost quote
+node test/flow.test.js      > bughunt/logs/02-F-009-before.txt (libs stashed)  # 1
+node test/flow.test.js      > bughunt/logs/03-F-009-after.txt              # 0
+npm test                                                                  # 0
+npm run test:ui                                                           # 1  two assertions matched the old wording
+npm run test:ui                                                           # 0
+git commit -F - ; git commit -F -                                         # 0  3c46e4a, 00727ec
+
+## F-013 — single-creative re-read
+node test/degraded.test.js  > bughunt/logs/02-F-013-before.txt (libs stashed)  # 1
+node test/degraded.test.js  > bughunt/logs/03-F-013-after.txt              # 0
+npm test                                                                  # 0
+git commit -F -                                                           # 0  2b05458
+
+## F-014 — "display ads" vs "image creatives"
+WebFetch https://serpapi.com/google-ads-transparency-center-api            # blocked by egress proxy
+WebSearch "SerpApi ... creative_format ... platform"                       # 0  documentation quoted in the log
+npm test && npm run test:ui                                               # 0  (one UI assertion updated)
+git commit -F -                                                           # 0  e2c3749
+
+## PHASE 3 — sweeps and hypotheses
+node test/flow.test.js       (cross-cutting sweeps)                        # 1 -> 0  one wrong field name in my own test
+node test/benchmark.test.js  (STAGE 11, H4/H5)                             # 1  found F-017
+node scratch/pr-probe.mjs   > bughunt/logs/02-F-017-before.txt (libs stashed)  # 0
+node scratch/pr-probe.mjs   > bughunt/logs/03-F-017-after.txt              # 0
+node test/benchmark.test.js  (STAGE 12, adversarial + H3)                  # 0  all negative results
+npm test && npm run test:ui                                               # 0
+git commit -F -                                                           # 0  6fd3ad7
+
+## PHASE 1 — the corpus (F-018)
+node test/corpus-runner.js                                                # 1  11/14 — one engine bug, two bad labels
+node test/corpus-runner.js  > bughunt/logs/03-F-018-after.txt              # 0  14/14
+node test/corpus-runner.js --dry-run                                      # 0  0 vision calls: no evidence in a clone
+node test/corpus-runner.js --read                                         # 1  refuses without RI_CORPUS_APPROVED=1
+npm test && npm run test:ui                                               # 0
+git commit -F -                                                           # 0  b0bb18d
+
+## F-019 (H15) and H16
+node test/flow.test.js      > bughunt/logs/02-F-019-before.txt (libs stashed)  # 1  "18 designs" vs readOver 16
+node test/flow.test.js      > bughunt/logs/03-F-019-after.txt              # 0
+node test/nationals.test.js  (H16)                                        # 0  already correct, now guarded
+npm test && npm run test:ui                                               # 0
+git commit -F - ; git commit -F -                                         # 0  100dcad, 1a6bc18
+
+## HAND-BACK
+npm test                    > bughunt/logs/90-final-test.txt               # 0  411 assertions + 142 corpus fields
+npm run test:ui             > bughunt/logs/92-playwright.txt               # 0  88 assertions
+npm audit                   > bughunt/logs/91-npm-audit-after.txt          # 0  0 vulnerabilities
+git log --oneline 7010b4e..HEAD                                           # 0
+git diff --stat 7010b4e..HEAD                                             # 0
+git push -u origin bughunt/phase-0                                        # see REPORT.md
+
+# ===========================================================================
+# SECOND SESSION — the seven pending hypotheses, run on request.
+# ===========================================================================
+
+## Branch verification (asked: is this on the benchmark branch, not main?)
+git merge-base --is-ancestor origin/benchmark-v4-truncation-and-set-shape HEAD  # 0  yes
+git branch -r                                                             # 0  origin/main was never fetched
+git log --oneline -1 origin/benchmark-v4-truncation-and-set-shape         # 0  7010b4e — my base commit
+
+## H6 — comparability refusals
+node test/benchmark.test.js  (STAGE 13)                                   # 1 -> 0  my fixture was scoped to the wrong product
+node test/benchmark.test.js                                               # 0  10 assertions, all clean
+
+## H7 + H9 — snapshot deltas, clustering
+node test/benchmark.test.js  (STAGE 14, STAGE 15)                         # 0  11 assertions, all clean
+# ...but the window question inside H7 pointed at something:
+sed -n '/export function previousSnapshot/,/^}/p' lib/snapshot.js         # 0  gates on client+product+source only
+
+## F-020 — the window is part of comparability
+node --check lib/snapshot.js server.js                                    # 0
+node test/flow.test.js                                                    # 0  ...but the before-log showed the test proved nothing
+grep -n "days" test/mock-net.js                                           # 0  no matches: the mock ignored the window entirely
+node scratch/dbg.mjs                                                      # 0  30d and 90d returned identical listings
+node --check test/fixture-lab.js                                          # 0  after adding the served-window filter + PEL3
+node scratch/dbg2.mjs                                                     # 0  STILL identical — ago() is epoch SECONDS
+node scratch/dbg2.mjs                                                     # 0  STILL identical — dateRange() sends YYYYMMDD, Date.parse -> NaN
+node scratch/dbg2.mjs                                                     # 0  30d: PEL1,PEL2   90d: PEL1,PEL2,PEL3
+node test/flow.test.js > bughunt/logs/02-F-020-before.txt (libs stashed)  # 1  "$750 is newly observed since the September 2026 benchmark"
+node test/flow.test.js > bughunt/logs/03-F-020-after.txt                  # 0
+npm test && npm run test:ui                                              # 0
+git commit -F -                                                           # 0  302f736
+
+## H10 + H11 — funnel reconciliation, combined losses
+node test/flow.test.js                                                    # 1  15 of 16 clean; one real gap
+
+## F-021 — an empty capture must say which kind of empty
+sed -n '/^export async function capture/,/^}/p' lib/atc-provider.js       # 0  ok:true, images:[], no reason
+node --check lib/atc-provider.js public/app.js                            # 0
+node test/flow.test.js > bughunt/logs/02-F-021-before.txt (libs stashed)  # 1  reason undefined
+node test/flow.test.js > bughunt/logs/03-F-021-after.txt                  # 0
+
+## H19 — the national age caveat
+node test/flow.test.js                                                    # 1  "the note does not state the age: undefined"
+grep -n "referenceNote" lib/analyze.js                                    # 1  NO MATCHES — the field never existed
+
+## F-022 — the caveat was appended to a field that is never produced
+grep -c referenceNote lib/analyze.js                                      # 0  prints 0
+node --check server.js                                                    # 0
+node test/flow.test.js > bughunt/logs/02-F-022-before.txt (server stashed) # 1  caveat absent on a 60-day-old capture
+node test/flow.test.js > bughunt/logs/03-F-022-after.txt                   # 0
+npm test && npm run test:ui                                              # 0
+git commit -F -                                                           # 0  7523411
+
+## HAND-BACK
+npm test          > bughunt/logs/90-final-test.txt                        # 0  466 assertions + 142 corpus fields
+npm run test:ui   > bughunt/logs/92-playwright.txt                        # 0  88 assertions
+git push origin bughunt/phase-0                                           # see REPORT.md

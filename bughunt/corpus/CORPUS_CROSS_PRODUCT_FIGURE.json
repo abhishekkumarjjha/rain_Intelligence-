@@ -1,0 +1,54 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_CROSS_PRODUCT_FIGURE",
+  "advertiser": "example.org",
+  "adText": {
+    "headlines": [
+      "Open Checking Today"
+    ],
+    "description": "Open Choice Checking. Ask about our 4.75% APY savings account.",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "example.org",
+    "displayUrl": "",
+    "headlines": [
+      "Open Checking Today"
+    ],
+    "description": "Open Choice Checking. Ask about our 4.75% APY savings account.",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [
+      {
+        "metric": "points",
+        "raw": "4.75% APY",
+        "qualifiers": {},
+        "sourceField": "description"
+      }
+    ],
+    "claims": [],
+    "unclassified": [],
+    "leadEmphasis": "brand",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "checking",
+    "productConfidence": 0.9,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "checking",
+    "productConfidenceAtLeast": 0.7,
+    "facts": [],
+    "claims": [],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "A SAVINGS APY INSIDE A CHECKING AD IS EVIDENCE, NOT A CHECKING RATE POSITION. It is kept in droppedFacts with a reason and never counted — a wrong rank built from a correct read is the failure mode."
+}

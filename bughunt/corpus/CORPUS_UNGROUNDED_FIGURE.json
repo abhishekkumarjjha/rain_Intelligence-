@@ -1,0 +1,70 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_UNGROUNDED_FIGURE",
+  "advertiser": "example.org",
+  "adText": {
+    "headlines": [
+      "G Bank Checking"
+    ],
+    "description": "Open Choice Checking today. No monthly fee.",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "example.org",
+    "displayUrl": "",
+    "headlines": [
+      "G Bank Checking"
+    ],
+    "description": "Open Choice Checking today. No monthly fee.",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [
+      {
+        "metric": "apy",
+        "raw": "6.75% APY",
+        "qualifiers": {},
+        "sourceField": "description"
+      }
+    ],
+    "claims": [
+      {
+        "claim": "no_monthly_fee",
+        "verbatim": "No monthly fee",
+        "sourceField": "description"
+      }
+    ],
+    "unclassified": [],
+    "leadEmphasis": "rate",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "checking",
+    "productConfidence": 0.9,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "checking",
+    "productConfidenceAtLeast": 0.7,
+    "facts": [
+      {
+        "metric": "apy",
+        "raw": "6.75% APY",
+        "value": 6.75,
+        "grounded": false,
+        "rankable": false
+      }
+    ],
+    "claims": [
+      "no_monthly_fee"
+    ],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "F-001. The reader transcribed an ad with no rate in it and returned a rate anyway. Kept as evidence of a bad read, marked grounded:false, and never a position, a rank or a denominator."
+}

@@ -1,0 +1,11 @@
+# F-013 AFTER
+
+── one creative can be re-read without retiring the whole cache
+  ok  the capture cached a transcription for every creative it read
+  ok  re-reading one creative forgets exactly that creative
+  ok  and every other transcription is untouched
+  ok  the evidence bundle is NOT rewritten — that archive answers disputes
+  ok  asking twice is not an error — it is the state that was requested
+  ok  a creative id shaped like a path is refused, not walked
+
+61 passed, 0 failed

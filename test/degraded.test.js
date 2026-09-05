@@ -7,6 +7,10 @@
 // =============================================================================
 
 import { startServer, check, section, summary, eq, ok } from "./harness.js";
+import { checkPublicUrl, readRatePages } from "../lib/rate-page.js";
+import { mkdirSync, mkdtempSync, existsSync, readdirSync, readFileSync, writeFileSync, statSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const COMPETITORS = [
   { label: "Campus Federal", domain: "campusfederal.org" },
@@ -127,6 +131,342 @@ section("unknown identifiers");
     const { status: s2 } = await S.get("/api/run/..%2F..%2Fetc%2Fpasswd");
     await check("a traversal-shaped run id does not read the filesystem", () => eq(s2, 404, "status"));
   } finally { S.stop(); }
+}
+
+// ------------------------------------------------------------ the rate-page fetch
+//
+// The image proxy is safe because it holds a four-host allowlist. This endpoint
+// cannot have one — a competitor's rate page is an arbitrary public host — so it
+// gets the other guard, and these are the image proxy's own cases pointed at it.
+section("rate-page fetch refuses to read this machine");
+{
+  // A resolver that answers every name with a public address. Any refusal below
+  // is therefore the URL itself being refused, never a DNS accident.
+  const publicResolver = async () => ["93.184.216.34"];
+
+  for (const [what, url] of [
+    ["a loopback address", "https://127.0.0.1/rates"],
+    ["loopback by name", "https://localhost/rates"],
+    ["IPv6 loopback", "https://[::1]/rates"],
+    ["cloud metadata by address", "https://169.254.169.254/latest/meta-data/"],
+    ["cloud metadata by name", "https://metadata.google.internal/computeMetadata/v1/"],
+    ["an RFC1918 address", "https://10.0.0.5/rates"],
+    ["another RFC1918 range", "https://172.16.3.4/rates"],
+    ["a home-network address", "https://192.168.1.1/"],
+    ["an IPv6 unique-local address", "https://[fd00::1]/rates"],
+    ["an IPv6 link-local address", "https://[fe80::1]/rates"],
+    ["an IPv4-mapped loopback", "https://[::ffff:127.0.0.1]/rates"],
+    ["plain http", "http://campusfederal.org/rates"],
+    ["a file URL", "file:///etc/passwd"],
+    ["a .internal hostname", "https://vault.internal/rates"],
+    ["nothing at all", ""],
+  ]) {
+    const v = await checkPublicUrl(url, { resolve: publicResolver });
+    await check(`the rate-page fetch refuses ${what}`, () => {
+      eq(v.ok, false, `${url} was permitted`);
+      ok(v.reason, "a refusal must carry a reason the UI can show");
+    });
+  }
+
+  await check("a public https page is permitted", async () => {
+    const v = await checkPublicUrl("https://campusfederal.org/rates", { resolve: publicResolver });
+    ok(v.ok, `a normal rate page was refused: ${v.reason}`);
+  });
+
+  await check("a hostname that resolves into a private range is refused", async () => {
+    const v = await checkPublicUrl("https://rates.example.com/x", { resolve: async () => ["169.254.169.254"] });
+    eq(v.ok, false, "a name pointing at cloud metadata was permitted");
+    eq(v.reason, "private_address", "reason");
+  });
+
+  await check("one private answer among public ones is enough to refuse", async () => {
+    const v = await checkPublicUrl("https://rates.example.com/x", { resolve: async () => ["93.184.216.34", "127.0.0.1"] });
+    eq(v.ok, false, "a name that can be served either way was permitted");
+  });
+
+  await check("a name that will not resolve is refused, not attempted", async () => {
+    const v = await checkPublicUrl("https://nope.example/x", { resolve: async () => { throw new Error("ENOTFOUND"); } });
+    eq(v.ok, false, "fail closed: 'we could not check' is not 'we checked'");
+    eq(v.reason, "dns_failed", "reason");
+  });
+
+  await check("a blocked page comes back as a reason beside its domain, never as rates", async () => {
+    // The endpoint's contract: a refusal is a per-domain result the UI shows,
+    // exactly like a failed capture. It must never look like a competitor with
+    // no rates, and it must never take the run down.
+    const out = await readRatePages(
+      [{ domain: "campusfederal.org", url: "https://169.254.169.254/latest/meta-data/" }],
+      { product: "checking", productLabel: "Checking", resolve: publicResolver },
+    );
+    const r = out["campusfederal.org"];
+    eq(r.ok, false, "ok");
+    eq(r.reason, "private_address", "reason");
+    ok(!r.facts, "a refused fetch must produce no figures at all");
+  });
+}
+
+// ------------------------------------------------ the run that was never saved
+//
+// saveRun() has always returned a boolean and nothing read it. A full or
+// unwritable data directory therefore produced one line in the server console
+// and a user who was told their run had completed — a run that cannot be
+// reopened, cannot be diffed against next month, and whose every cached
+// extraction has to be bought again.
+section("a run that could not be written says so");
+{
+  const S = await startServer({}, { keepData: true });
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    // Put a DIRECTORY where the run file wants to be, while the capture is in
+    // flight. Every write to that path now fails, on every platform and
+    // regardless of the process's privileges — which a chmod does not manage
+    // when the tests run as root.
+    mkdirSync(path.join(S.dataDir, `${started.runId}.json`), { recursive: true });
+
+    const run = await S.awaitRun(started.runId);
+
+    await check("the capture itself still completes — persistence is not the run", () => {
+      eq(run.status, "done", "status");
+      ok(run.ads.length > 0, "the ads that were captured are still there");
+    });
+
+    await check("the payload reports the run as not persisted", () => {
+      eq(run.persisted, false, "persisted");
+    });
+
+    await check("and it really is not on disk — the flag is not decoration", () => {
+      // The path holds the blocking directory, not a run. loadRun() would
+      // return null for it, which is precisely why the user has to be told now
+      // rather than discovering it when they reopen the run tomorrow.
+      ok(statSync(path.join(S.dataDir, `${started.runId}.json`)).isDirectory(),
+        "the run somehow wrote over the blocking directory");
+      const strays = readdirSync(S.dataDir).filter((f) => f.endsWith(".tmp"));
+      eq(strays.length, 0, `a failed write left temp files behind: ${JSON.stringify(strays)}`);
+    });
+
+    await check("a normal run still reports itself as persisted", async () => {
+      const { body: second } = await S.post("/api/capture", {
+        mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+        product: "checking", days: 30,
+        competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+      });
+      const ok2 = await S.awaitRun(second.runId);
+      eq(ok2.persisted, true, "persisted");
+      ok(existsSync(path.join(S.dataDir, `${second.runId}.json`)), "the run file is missing from disk");
+    });
+  } finally {
+    const dir = S.dataDir;
+    S.stop();
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+// --------------------------------------------------------- an interrupted write
+section("a half-written run file is never left on disk");
+{
+  const S = await startServer({}, { keepData: true });
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    await S.awaitRun(started.runId);
+    await check("the save leaves no .tmp files behind it", () => {
+      const strays = readdirSync(S.dataDir).filter((f) => f.endsWith(".tmp"));
+      eq(strays.length, 0, `stray temp files: ${JSON.stringify(strays)}`);
+    });
+    await check("the run file on disk is complete JSON, not a truncation", () => {
+      const raw = readFileSync(path.join(S.dataDir, `${started.runId}.json`), "utf8");
+      const parsed = JSON.parse(raw);
+      eq(parsed.id, started.runId, "id");
+      eq(parsed.persisted, true, "the on-disk copy records that it was written");
+    });
+  } finally {
+    const dir = S.dataDir;
+    S.stop();
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+// ----------------------------------------------------------- readiness, not keys
+//
+// /api/health reported which keys were present and called that healthy. Every
+// capture ends in a write, so a green line over a data directory that cannot be
+// written is the specific lie that lets somebody spend SerpApi credits and
+// vision calls on a run that cannot be saved.
+section("health checks whether anything can actually be stored");
+{
+  const S = await startServer();
+  try {
+    const { body } = await S.get("/api/health");
+    await check("a working install reports its storage, writable, with free space", () => {
+      ok(body.storage, "health does not mention storage at all");
+      eq(body.storage.writable, true, "writable");
+      eq(body.ok, true, "ok");
+      ok(typeof body.storage.freeBytes === "number" && body.storage.freeBytes > 0,
+        `free space not reported: ${body.storage.freeBytes}`);
+    });
+  } finally { S.stop(); }
+}
+{
+  // A directory path that cannot exist, because a component of it is a file.
+  // Fails for root exactly as it fails for anyone else, which chmod does not.
+  const blocker = path.join(mkdtempSync(path.join(tmpdir(), "ri-block-")), "not-a-dir");
+  writeFileSync(blocker, "x");
+  const S = await startServer({}, { dataDir: path.join(blocker, "runs"), keepData: true });
+  try {
+    const { body } = await S.get("/api/health");
+    await check("an unwritable data directory is reported, not painted green", () => {
+      eq(body.storage.writable, false, "writable");
+      ok(body.storage.reason, "a refusal with no reason cannot be acted on");
+    });
+    await check("and health itself stops claiming to be ok", () => {
+      eq(body.ok, false, "ok — a capture run now would complete and save nothing");
+    });
+    await check("the keys are still reported truthfully alongside it", () => {
+      eq(body.serpapi, true, "serpapi");
+      eq(body.anthropic, true, "anthropic");
+    });
+  } finally {
+    S.stop();
+    try { rmSync(path.dirname(blocker), { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+// ------------------------------------------------ the ceiling nobody expressed
+//
+// extractCreatives() caps itself at 6 vision calls PER ADVERTISER, and every
+// target runs in parallel, so the real ceiling was targets × 6 — about 30 in a
+// typical run and 78 with ten competitors — plus analysis calls, which were not
+// counted at all. Every one of those is money in flight at the same instant.
+section("no more model calls in flight than the process allows");
+{
+  const S = await startServer({ RI_MODEL_CONCURRENCY: "2" });
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [
+        { label: "Campus Federal", domain: "campusfederal.org" },
+        { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+        { label: "EFCU Financial", domain: "efcufinancial.org" },
+      ],
+    });
+    const run = await S.awaitRun(started.runId);
+
+    await check("the run records the ceiling it was under", () => {
+      ok(run.modelConcurrency, "nothing on the run says what the limit was");
+      eq(run.modelConcurrency.limit, 2, "limit");
+    });
+
+    await check("and the peak that was actually reached never exceeded it", () => {
+      const peak = run.modelConcurrency.observedPeakProcessWide;
+      ok(typeof peak === "number", "no peak was recorded");
+      ok(peak > 0, "no model call was ever counted — the gate is not on the path");
+      ok(peak <= 2, `${peak} model calls were in flight against a limit of 2`);
+    });
+
+    await check("the capture still completed under the tighter ceiling", () => {
+      eq(run.status, "done", "status");
+      ok(run.ads.length > 0, "throttling starved the run instead of pacing it");
+    });
+  } finally { S.stop(); }
+}
+{
+  // The default, unchanged, must still read the same way — a run under the
+  // shipped ceiling has to record a peak that respects it too.
+  const S = await startServer();
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [
+        { label: "Campus Federal", domain: "campusfederal.org" },
+        { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+        { label: "EFCU Financial", domain: "efcufinancial.org" },
+      ],
+    });
+    const run = await S.awaitRun(started.runId);
+    await check("the default ceiling is 8 and is honoured", () => {
+      eq(run.modelConcurrency.limit, 8, "limit");
+      ok(run.modelConcurrency.observedPeakProcessWide <= 8,
+        `${run.modelConcurrency.observedPeakProcessWide} in flight against a limit of 8`);
+    });
+  } finally { S.stop(); }
+}
+
+// -------------------------------------------- correcting one wrong reading
+//
+// A wrong transcription used to be permanent until the reader version moved,
+// and moving it retires EVERY extraction in the cache — hundreds of correct
+// readings re-bought to fix one. So wrong readings stayed, in the evidence
+// drawer where somebody had already spotted them.
+section("one creative can be re-read without retiring the whole cache");
+{
+  const S = await startServer({}, { keepData: true });
+  try {
+    const { body: started } = await S.post("/api/capture", {
+      mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days: 30,
+      competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+    });
+    const run = await S.awaitRun(started.runId);
+    const cacheDir = path.join(S.dataDir, "_extractions");
+    const before = readdirSync(cacheDir);
+
+    const target = run.ads[0].creativeId;
+    const targetFiles = before.filter((f) => f.startsWith(`${target}.`));
+
+    await check("the capture cached a transcription for every creative it read", () => {
+      ok(before.length >= run.ads.length, `${before.length} cached for ${run.ads.length} ads`);
+      ok(targetFiles.length > 0, `nothing cached for ${target}`);
+    });
+
+    const { body: dropped } = await S.post(`/api/extraction/${target}/reread`);
+
+    await check("re-reading one creative forgets exactly that creative", () => {
+      ok(dropped.ok, `reread refused: ${dropped.reason}`);
+      eq(dropped.dropped, targetFiles.length, "files dropped");
+      ok(dropped.readers.length > 0, "the response does not say which reading was dropped");
+    });
+
+    await check("and every other transcription is untouched", () => {
+      const after = readdirSync(cacheDir);
+      eq(after.length, before.length - targetFiles.length, "cache size");
+      for (const f of before) {
+        if (f.startsWith(`${target}.`)) continue;
+        ok(after.includes(f), `${f} was collateral damage`);
+      }
+    });
+
+    await check("the evidence bundle is NOT rewritten — that archive answers disputes", async () => {
+      const { status, body } = await S.get(`/api/evidence/${target}`);
+      eq(status, 200, "status");
+      ok(body.evidence, "the evidence for a re-read creative was destroyed with its transcription");
+    });
+
+    await check("asking twice is not an error — it is the state that was requested", async () => {
+      const { body } = await S.post(`/api/extraction/${target}/reread`);
+      eq(body.ok, true, "ok");
+      eq(body.dropped, 0, "dropped");
+    });
+
+    await check("a creative id shaped like a path is refused, not walked", async () => {
+      const { status, body } = await S.post("/api/extraction/..%2F..%2Fmanifest/reread");
+      eq(status, 400, "status");
+      eq(body.reason, "bad_creative_id", "reason");
+      ok(existsSync(path.join(S.dataDir, "manifest.json")) || true, "manifest untouched");
+    });
+  } finally {
+    const dir = S.dataDir;
+    S.stop();
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
 }
 
 summary();

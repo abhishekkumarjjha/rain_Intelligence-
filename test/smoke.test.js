@@ -1,8 +1,10 @@
 // Pure-logic smoke test. No key, no network.
 import assert from "node:assert";
 import { buildListingParams, selectForReading, epochToDate } from "../lib/atc-provider.js";
-import { clusterAds, buildBenchmark, samplingNote, countedFindings } from "../lib/analyze.js";
+import { clusterAds, buildBenchmark, samplingNote, isShowable } from "../lib/analyze.js";
 import { productFromUrl, normalizeProduct } from "../lib/products.js";
+import { buildBoard } from "../lib/benchmark.js";
+import { cohortShape } from "../lib/channel-shape.js";
 
 let n = 0; const t = (name, fn) => { fn(); n++; console.log("  ok  " + name); };
 
@@ -42,21 +44,32 @@ t("same headline+offer collapses into one idea", () => {
 });
 
 // --- benchmark -------------------------------------------------------------
+//
+// The table is now a VIEW over the board's rollup rather than a second
+// aggregation of its own, so these fixtures carry rawEconomicFacts and the
+// board is built first. That is the point of the change: one canonical number,
+// and no way to construct a table that disagrees with the findings above it.
 const ad = (inst, over, days=100) => ({
   creativeId: inst + (over?.value || "n") + days, institution: inst, product: "checking",
-  headline: "h", offer: over ? { type: over.type, value: over.value, term: over.term || "",
-    minimum: over.minimum || "", qualifier: "", numeric: { n: parseFloat(over.value.replace(/[^0-9.]/g,"")), kind: "usd" } } : null,
+  headline: "h",
+  rawEconomicFacts: over ? [{ metric: "cash_bonus", raw: over.value, qualifiers: {}, sourceField: "headline" }] : [],
+  rawClaims: [], allText: over ? `Earn a ${over.value} bonus` : "h",
   totalDaysShown: days, firstShown: "2025-01-01", lastShown: "2026-08-10",
 });
 
-const bench = buildBenchmark({
+const benchArgs = {
   client: { label: "Lookout", domain: "lookout.com", ads: [ad("lookout.com", null)] },
   competitors: [
     { label: "Comp A", domain: "a.com", ads: [ad("a.com", { type: "bonus", value: "$400" })] },
     { label: "Comp B", domain: "b.com", ads: [ad("b.com", { type: "bonus", value: "$300" }, 900)] },
   ],
   product: "checking",
+};
+const smokeBoard = buildBoard({ ...benchArgs, progress: {} });
+const bench = buildBenchmark({
+  ...benchArgs,
   runs: [{ complete: false, providerTotal: 2000, selectedForReading: 18 }],
+  brands: smokeBoard.brands,
 });
 
 t("benchmark shows the client column first and marks it", () => {
@@ -64,20 +77,21 @@ t("benchmark shows the client column first and marks it", () => {
   assert.equal(bench.columns.length, 3);
 });
 t("bonus row exists with an absent client cell", () => {
-  const row = bench.rows.find(r => r.id === "offer_bonus");
+  const row = bench.rows.find(r => r.id === "offer_cash_bonus");
   assert.ok(row);
   assert.equal(row.cells[0].absent, true, "client did not advertise a bonus");
   assert.equal(row.cells[1].value, "$400");
 });
 t("missing terms downgrade comparability, and say so", () => {
-  const row = bench.rows.find(r => r.id === "offer_bonus");
+  const row = bench.rows.find(r => r.id === "offer_cash_bonus");
   assert.equal(row.comparability.level, "advertised-only");
   assert.match(row.comparability.note, /not full product terms/);
 });
-t("gap finding counts competitors, not ads", () => {
-  const f = bench.findings.find(x => x.kind === "gap");
-  assert.match(f.text, /2 of 2 competitors advertised a cash bonus/);
-  assert.match(f.text, /Lookout did not/);
+t("the table carries no findings of its own", () => {
+  // It used to compute a third set, over a DIFFERENT denominator: "1 of 6
+  // competitors" counting nationals, beside a board saying "1 of 3" excluding
+  // them. The board owns findings; this is the metric-by-metric audit trail.
+  assert.equal(bench.findings, undefined);
 });
 t("longevity phrasing is days-shown, never 'continuously'", () => {
   const row = bench.rows.find(r => r.id === "longevity");
@@ -135,6 +149,88 @@ t("the cap still bites when there is more than it admits", () => {
   // and never returns duplicates of the same creative
   const ids = selectForReading(many, 18).map((c) => c.creativeId);
   assert.equal(new Set(ids).size, 18);
+});
+
+
+
+// ===========================================================================
+// A picture of Google's own UI is not competitor creative
+// ===========================================================================
+t("the Transparency Center's own chrome never reaches the wall", () => {
+  // When a creative fails to paint, the screenshot contains the viewer's
+  // collapse/expand controls and overflow menu. The reader transcribes them
+  // faithfully, and because these entries are old and long-running they sort
+  // to the TOP — so the first thing on a wall of competitor creative was a
+  // white card reading "Collapsed ad on mobile ... more_vert".
+  assert.equal(isShowable({ headline: "Collapsed ad on mobile" }), false);
+  assert.equal(isShowable({ headline: "Expanded ad" }), false);
+  assert.equal(isShowable({ headline: "more_vert" }), false);
+  assert.equal(isShowable({ headline: "MORE_VERT" }), false, "case must not matter");
+});
+
+t("a creative with nothing readable in it is not shown", () => {
+  assert.equal(isShowable({ headline: "", subhead: "" }), false);
+  assert.equal(isShowable({}), false);
+  assert.equal(isShowable(null), false);
+});
+
+t("real copy is never dropped, and an offer alone is enough", () => {
+  // The filter must not become a second, quieter way to lose evidence.
+  assert.equal(isShowable({ headline: "360 Performance Savings" }), true);
+  assert.equal(isShowable({ subhead: "Save big with one of the nation's top rates" }), true);
+  // A banner that prints only a figure is still the advertiser saying something.
+  assert.equal(isShowable({ offer: { value: "$300 bonus" } }), true);
+  // "Ad" appearing inside real copy must not trip the chrome test.
+  assert.equal(isShowable({ headline: "Ready to add a car to the family?" }), true);
+  assert.equal(isShowable({ headline: "Adventure starts here" }), true);
+});
+
+
+// --- the counted cohort line ----------------------------------------------
+//
+// This exists because a panel said "No insights available" over a wall whose
+// honest reading was in plain sight: every design captured on the product came
+// from a national advertiser and not one regional competitor had one. That is
+// arithmetic, it does not need a model, and it must survive a themes pass that
+// finds nothing.
+const nat = (k) => Array.from({ length: k }, (_, i) => ({ tier: "national", institution: i % 2 ? "chase.com" : "capitalone.com" }));
+const reg = (k) => Array.from({ length: k }, (_, i) => ({ tier: "local", institution: `local${i}.org` }));
+const ADV = [
+  { domain: "brtelco.org", label: "Baton Rouge Telco", tier: "local" },
+  { domain: "neighborsfcu.org", label: "Neighbors", tier: "local" },
+  { domain: "chase.com", label: "J.P. Morgan Chase", tier: "national" },
+];
+
+t("an all-national set is stated as one, with its denominator", () => {
+  const c = cohortShape({ families: nat(14), advertisers: ADV, productLabel: "Checking", days: 30 });
+  assert.ok(c, "no observation was produced for the case that motivated it");
+  assert.match(c.headline, /national/i);
+  assert.match(c.detail, /14 distinct checking display designs/);
+  assert.match(c.detail, /2 regional advertisers/);
+});
+
+t("the cohort line never claims a competitor is absent from the market", () => {
+  const c = cohortShape({ families: nat(9), advertisers: ADV, productLabel: "Credit Card", days: 30 });
+  // "captured", never "runs none" — the Transparency Center is an index, not
+  // the market, and creative runs never capture the client at all.
+  assert.ok(!/does not run|doesn't run|no regional bank runs/i.test(c.detail), c.detail);
+  assert.match(c.detail, /did not list or this capture did not sample/);
+});
+
+t("a mixed set reports the split and names its window", () => {
+  const c = cohortShape({ families: [...nat(7), ...reg(2)], advertisers: ADV, productLabel: "Checking", days: 30 });
+  assert.equal(c.headline, "2 of the 9 checking designs captured are regional, 7 national.");
+  assert.match(c.detail, /30-day window/);
+});
+
+t("a set carried by one advertiser says so", () => {
+  const one = Array.from({ length: 8 }, () => ({ tier: "national", institution: "chase.com" }));
+  const c = cohortShape({ families: [...one, ...reg(2)], advertisers: ADV, productLabel: "Checking", days: 30 });
+  assert.match(c.detail, /8 of the 10 come from a single advertiser/);
+});
+
+t("a set with no families has no cohort observation", () => {
+  assert.equal(cohortShape({ families: [], advertisers: ADV, productLabel: "Checking" }), null);
 });
 
 console.log(`\n${n} passed`);

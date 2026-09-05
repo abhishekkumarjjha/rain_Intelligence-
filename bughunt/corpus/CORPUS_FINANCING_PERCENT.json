@@ -1,0 +1,63 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_FINANCING_PERCENT",
+  "advertiser": "example.org",
+  "adText": {
+    "headlines": [
+      "Up To 100% Financing"
+    ],
+    "description": "Up to 100% financing available on qualifying vehicles.",
+    "sitelinks": [],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "example.org",
+    "displayUrl": "",
+    "headlines": [
+      "Up To 100% Financing"
+    ],
+    "description": "Up to 100% financing available on qualifying vehicles.",
+    "sitelinks": [],
+    "callouts": [],
+    "economicFacts": [
+      {
+        "metric": "down_payment",
+        "raw": "up to 100% financing",
+        "qualifiers": {},
+        "sourceField": "headline"
+      }
+    ],
+    "claims": [],
+    "unclassified": [],
+    "leadEmphasis": "other",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "auto-loan",
+    "productConfidence": 0.9,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "auto-loan",
+    "productConfidenceAtLeast": 0.7,
+    "facts": [
+      {
+        "metric": "financing_percent",
+        "raw": "up to 100% financing",
+        "value": 100,
+        "complete": true,
+        "grounded": true,
+        "retypedFrom": "down_payment"
+      }
+    ],
+    "claims": [],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "HOW MUCH IS LENT IS NOT A DEPOSIT. As a down_payment it reads as a 100% deposit requirement — the opposite of the offer."
+}

@@ -1,0 +1,91 @@
+{
+  "source": "google_search",
+  "needsEvidence": true,
+  "evidenceRef": null,
+  "creativeId": "CORPUS_TWO_OFFERS_ONE_AD",
+  "advertiser": "campusfederal.org",
+  "adText": {
+    "headlines": [
+      "Campus Federal Checking",
+      "Earn $600 Reward Card"
+    ],
+    "description": "Upgrade your money with Lagniappe Checking. Earn 4.50% APY with Lagniappe Checking by Campus Federal.",
+    "sitelinks": [
+      "No Monthly Fee"
+    ],
+    "callouts": []
+  },
+  "modelAnswer": {
+    "advertiser": "campusfederal.org",
+    "displayUrl": "",
+    "headlines": [
+      "Campus Federal Checking",
+      "Earn $600 Reward Card"
+    ],
+    "description": "Upgrade your money with Lagniappe Checking. Earn 4.50% APY with Lagniappe Checking by Campus Federal.",
+    "sitelinks": [
+      "No Monthly Fee"
+    ],
+    "callouts": [],
+    "economicFacts": [
+      {
+        "metric": "cash_bonus",
+        "raw": "$600",
+        "qualifiers": {},
+        "sourceField": "headline"
+      },
+      {
+        "metric": "apy",
+        "raw": "4.50% APY",
+        "qualifiers": {},
+        "sourceField": "description"
+      }
+    ],
+    "claims": [
+      {
+        "claim": "no_monthly_fee",
+        "verbatim": "No Monthly Fee",
+        "sourceField": "sitelink"
+      }
+    ],
+    "unclassified": [],
+    "leadEmphasis": "brand",
+    "urgency": {
+      "present": false,
+      "phrase": ""
+    },
+    "audience": "",
+    "product": "checking",
+    "productConfidence": 0.95,
+    "truncated": false,
+    "legible": true
+  },
+  "expect": {
+    "product": "checking",
+    "productConfidenceAtLeast": 0.8,
+    "facts": [
+      {
+        "metric": "cash_bonus",
+        "raw": "$600",
+        "value": 600,
+        "complete": true,
+        "rankable": true,
+        "grounded": true
+      },
+      {
+        "metric": "apy",
+        "raw": "4.50% APY",
+        "value": 4.5,
+        "complete": true,
+        "rankable": true,
+        "grounded": true
+      }
+    ],
+    "claims": [
+      "no_monthly_fee"
+    ],
+    "truncated": false,
+    "legible": true
+  },
+  "notes": "BOTH SURVIVE, NEITHER CANNIBALISES THE OTHER. The original bug: read as '$600 bonus, no rate' because the reader stopped at the headline. The APY lives in the description, which for a credit union is where most figures live."
+}

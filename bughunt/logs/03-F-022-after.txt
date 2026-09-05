@@ -1,0 +1,13 @@
+# F-022 AFTER
+
+── H19 — the national age caveat appears exactly when it should
+  ok  the premise holds — the nationals are in the run as reference
+  ok  a national captured today carries NO age caveat
+  ok  the national capture entries were found and aged
+  ok  the aged national is still served from cache, not silently refetched
+  ok  the caveat fires, names the age AND names the window
+  ok  the caveat is about the CAPTURE, never about the advertiser
+  ok  ageing a national never moves a local count
+  ok  a 60-day-old capture read over a 90-day window raises no caveat
+
+172 passed, 0 failed

@@ -13,11 +13,9 @@
 // =============================================================================
 
 import http from "node:http";
-import { listingFor, extractionFor, PNG_BY_ID, ID_BY_B64, MARKET } from "./fixture-lab.js";
-import { pageSearchResponse, adsResponse, jpegish, PAGE_BY_DOMAIN } from "./meta-fixture.js";
+import { listingFor, extractionFor, searchExtractionFor, PNG_BY_ID, ID_BY_B64, MARKET } from "./fixture-lab.js";
 
 process.env.SERPAPI_API_KEY ||= "test-serpapi-key";
-process.env.SEARCHAPI_API_KEY ||= "test-searchapi-key";
 process.env.ANTHROPIC_API_KEY ||= "test-anthropic-key";
 
 // Failure injection, so the unhappy paths are testable without editing code.
@@ -25,14 +23,10 @@ process.env.ANTHROPIC_API_KEY ||= "test-anthropic-key";
 //   RI_MOCK_FAIL_DOMAIN=x.com     that one domain times out
 //   RI_MOCK_VISION_FAIL=1         every vision call returns unparseable prose
 //   RI_MOCK_IMG_403=1             the image CDN hotlink-blocks every request
-//   RI_MOCK_META_FAIL=quota|auth  SearchApi fails that way
-//   RI_MOCK_META_MEDIA_403=1      the Meta CDN refuses the media download
 const FAIL = process.env.RI_MOCK_FAIL || "";
 const FAIL_DOMAIN = process.env.RI_MOCK_FAIL_DOMAIN || "";
 const VISION_FAIL = process.env.RI_MOCK_VISION_FAIL === "1";
 const IMG_403 = process.env.RI_MOCK_IMG_403 === "1";
-const META_FAIL = process.env.RI_MOCK_META_FAIL || "";
-const META_MEDIA_403 = process.env.RI_MOCK_META_MEDIA_403 === "1";
 
 // ---------------------------------------------------------------------------
 // 1. Provider + image CDN, over global fetch.
@@ -54,39 +48,11 @@ globalThis.fetch = async function mockFetch(input, init = {}) {
     if (FAIL === "auth") return json({ error: "Invalid API key." }, 401);
     if (domain === FAIL_DOMAIN) throw Object.assign(new Error("aborted"), { name: "AbortError" });
 
-    return json(listingFor(domain in MARKET ? domain : "__unknown__", { format }));
-  }
-
-  // ---- SearchApi: Meta Ad Library -----------------------------------------
-  if (url.includes("searchapi.io")) {
-    const q = new URL(url).searchParams;
-    const engine = q.get("engine");
-
-    if (META_FAIL === "quota") return json({ error: "Plan limit exceeded." }, 429);
-    if (META_FAIL === "auth") return json({ error: "Invalid api key." }, 401);
-
-    if (engine === "meta_ad_library_page_search") {
-      return json(pageSearchResponse(q.get("q")));
-    }
-    if (engine === "meta_ad_library") {
-      // The union question is settled: `all` is a superset. A credit_ads call
-      // is a doubled bill for no new records, so it is an outright failure here
-      // rather than something a test has to remember to look for.
-      if (q.get("ad_type") !== "all") return json({ error: "test: ad_type must be all" }, 400);
-      return json(adsResponse(q.get("page_id"), q.get("next_page_token")));
-    }
-    return json({ error: "unknown engine" }, 400);
-  }
-
-  // ---- Meta CDN: signed, expiring media ------------------------------------
-  if (url.includes("fbcdn.net")) {
-    if (META_MEDIA_403) return new Response("forbidden", { status: 403 });
-    const m = url.match(/\/([0-9]+)_n\.jpg/);
-    const png = jpegish(m ? Number(m[1]) : 1);
-    return new Response(png, {
-      status: 200,
-      headers: { "content-type": "image/png", "content-length": String(png.length) },
-    });
+    // start_date is what atc-provider actually sends, so the mock filters on
+    // the same thing the real endpoint does.
+    return json(listingFor(domain in MARKET ? domain : "__unknown__", {
+      format, startDate: q.get("start_date"),
+    }));
   }
 
   if (url.includes("tpc.googlesyndication.com")) {
@@ -125,29 +91,84 @@ const anthropic = http.createServer((req, res) => {
         text = "I'm sorry, I cannot read this creative.";
       } else {
         const id = ID_BY_B64.get(img.source.data);
-        const rec = id ? extractionFor(id) : null;
+        // WHICH READER IS ASKING. The search prompt and the banner prompt want
+        // different shapes; answering both with the banner shape would leave
+        // the search reader — and everything the benchmark board counts —
+        // untested while still reporting green.
+        const isSearch = String(body.system || "").includes("THE DESCRIPTION IS NOT DECORATION");
+        const rec = id ? (isSearch ? searchExtractionFor(id) : extractionFor(id)) : null;
         if (rec) {
           text = JSON.stringify(rec);
-        } else if (String(body.system || "").includes("Facebook or Instagram")) {
-          // The Meta fallback prompt. Answers ONLY what the free tiers could not
-          // resolve — and deliberately answers with a LOW-confidence "other",
-          // because the fixture routes to vision exactly the creatives that
-          // carry no product signal. A confident product here would hide the
-          // fact that the deterministic tiers are what do the real work.
-          text = JSON.stringify({
-            headlineInArt: "Built by the community",
-            offer: { present: false, type: "none", value: "", unit: "none", term: "", minimum: "", qualifier: "" },
-            product: "other",
-            productConfidence: 0.3,
-            visualStyle: "photo",
-            hasPeople: true,
-            tone: "warm local",
-            legible: true,
-          });
         } else {
           text = "{}";
         }
       }
+    } else if (String(body.system || "").includes("You identify which retail banking product")) {
+      // THE PRODUCT READER. Answers from the path it was handed, so the test
+      // exercises the accept/ask threshold rather than a canned reply: a
+      // branded product name comes back confident, a non-product page comes
+      // back "other" and must send the user to the dropdown.
+      const path = String(body.messages?.[0]?.content || "").toLowerCase();
+      const pick =
+        /card|visa|mastercard/.test(path) ? ["credit-card", 0.95]
+        : /powersports|motorcycle|vehicle|auto/.test(path) ? ["auto-loan", 0.88]
+        : /checking/.test(path) ? ["checking", 0.9]
+        : ["other", 0.96];
+      text = JSON.stringify({ product: pick[0], confidence: pick[1], why: "test fixture" });
+    } else if (String(body.system || "").includes("evidence-bound display advertising analyst")) {
+      // THE THEMES PASS, answered like a real model that does not fully obey.
+      //
+      // Two entries are clean. The rest each break a rule the prompt states
+      // plainly — because a fixture where the model behaves proves only that
+      // the happy path renders. Every constraint in themes.js exists for one of
+      // the answers below, and all of them are enforced in code AFTER the model
+      // speaks rather than requested in a prompt and hoped for.
+      const ids = (String(body.messages?.[0]?.content || "").match(/"familyId":\s*"([^"]+)"/g) || [])
+        .map((m) => m.replace(/.*"familyId":\s*"/, "").replace(/"$/, ""));
+      text = JSON.stringify({
+        messageThemes: [
+          { name: "Rate-led typography",
+            observation: "The figure set large with no photography, offer carried in the headline slot.",
+            familyIds: ids.slice(0, 2) },
+          { name: "Community photography",
+            observation: "Local imagery and member portraits carrying a membership message rather than a figure.",
+            familyIds: ids.slice(1, 3) },
+          // Prescriptive: addresses a reader and advises. Must be dropped.
+          { name: "Switching moment",
+            observation: "You should lead with the switching offer to stand out here.",
+            familyIds: ids.slice(0, 2) },
+          // Claims performance the capture cannot support. Must be dropped.
+          { name: "Bonus-forward creative",
+            observation: "Bonus-led banners perform better than rate-led ones in this category.",
+            familyIds: ids.slice(0, 2) },
+          // Cites nothing real. Must be dropped.
+          { name: "Trust signals",
+            observation: "Longevity and member counts used as reassurance throughout the set.",
+            familyIds: ["NOT_A_REAL_ID"] },
+          // A number written in WORDS. The old rule stripped digits and said
+          // "no digits", so this walked straight through — a model-written
+          // figure with no digit in it is still a model-written figure.
+          { name: "Spelled-out counting",
+            observation: "Several of the designs foreground a cash incentive over a rate figure.",
+            familyIds: ids.slice(0, 2) },
+          // Infers intent. "Strategy" is the word that does it.
+          { name: "Acquisition strategy",
+            observation: "The bonus strategy targets switchers rather than existing account holders.",
+            familyIds: ids.slice(0, 2) },
+        ],
+        executionPatterns: [
+          { name: "Single branded system",
+            observation: "One branded layout repeats across different products with only the message swapped.",
+            familyIds: ids.slice(0, 2) },
+        ],
+        cohortContrasts: [
+          // Both sides cite the SAME cohort, so this is not a contrast at all.
+          // The model labelled it one; the code has to check rather than trust.
+          { name: "False contrast",
+            observation: "Regional designs foreground rate figures where national designs foreground incentives.",
+            regionalFamilyIds: ids.slice(0, 2), nationalFamilyIds: ids.slice(0, 2) },
+        ],
+      });
     } else {
       // The gated strategy pass. Digit-free on purpose: the contract is that
       // this model is handed pre-counted facts and never emits a number.

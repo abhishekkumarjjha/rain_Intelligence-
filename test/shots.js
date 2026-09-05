@@ -35,8 +35,11 @@ async function pick(want) {
 await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
 await shot("1-landing");
 
-await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-await page.click("#analyzeBtn");
+await page.waitForFunction(() => document.querySelectorAll("#landProductSel option").length > 1);
+await page.fill("#clientInput", "capitol");
+await page.click("#clientMenu .acitem");
+await page.selectOption("#landProductSel", "checking");
+await page.click("#goBtn");
 await page.waitForSelector("#s-mode.active");
 await shot("2-mode");
 
@@ -57,8 +60,11 @@ await shot("5-evidence-drawer");
 await page.keyboard.press("Escape");
 
 await page.goto(`${S.base}/`, { waitUntil: "networkidle" });
-await page.fill("#urlInput", "lacapfcu.org/checking-accounts");
-await page.click("#analyzeBtn");
+await page.waitForFunction(() => document.querySelectorAll("#landProductSel option").length > 1);
+await page.fill("#clientInput", "capitol");
+await page.click("#clientMenu .acitem");
+await page.selectOption("#landProductSel", "checking");
+await page.click("#goBtn");
 await page.waitForSelector("#s-mode.active");
 await page.click('.modecard[data-mode="benchmark"]');
 await page.waitForSelector("#s-comp.active");
@@ -66,10 +72,6 @@ await pick(["campusfederal.org", "neighborsfcu.org"]);
 await page.click("#captureBtn");
 await page.waitForSelector("table.bench", { timeout: 60000 });
 await shot("6-benchmark", { fullPage: true });
-
-await page.click("#genBtn");
-await page.waitForSelector(".angle", { timeout: 40000 });
-await shot("7-strategies", { fullPage: true });
 
 await browser.close();
 S.stop();

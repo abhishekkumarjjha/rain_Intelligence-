@@ -1,0 +1,14 @@
+# F-020 BEFORE — a 30-day snapshot is offered as the previous of a 90-day run.
+
+# PEL3 stopped running 45 days ago: absent from a 30-day capture, present in a 90-day one.
+
+── regression — a 30-day snapshot is not the previous of a 90-day run
+  ok  a 30-day run still finds the previous 30-day snapshot
+  ok  the wider window really does reveal a figure the narrower one did not
+  FAIL the 90-day run reports no change against the 30-day snapshots
+       a change of window produced change cards: Pelican State CU's cash bonus of $750 is newly observed since the September 2026 benchmark.: expected 0, got 1
+  FAIL and the primary read carries no manufactured month-over-month line
+       the read quotes a change that is a window difference: [{"id":"offer_new_cash_bonus","text":"Pelican State CU's cash bonus of $750 is newly observed since the September 2026 benchmark."}]: expected 0, got 1
+  FAIL the snapshots on disk record the window they covered
+       a snapshot records no window: {"label":"September 2026"}
+

@@ -32,15 +32,47 @@
     <div class="hero">
       <h1>RAIN <span class="hl">Intelligence</span></h1>
       <p class="tagline">AI-powered competitive intelligence — see what your competitors are doing</p>
-      <p class="lede">Start with a product landing page. We pull the real ads their competitors are running — the creative, the offers, and how long each has been live.</p>
+      <p class="lede">Pick the client and the product. We pull the real ads their competitors are running &mdash; the creative, the offers, and how long each has been live.</p>
 
-      <div class="searchbar">
+      <!-- The directory already knows all 40 clients and their markets. Making
+           the strategist go and find a product URL was asking them to encode,
+           as a path, two things they can just say: who and what. The product
+           select is not a convenience here &mdash; every count in this tool is
+           product-scoped, so choosing it up front is the same gate the URL path
+           reaches by inference, only stated instead of guessed. -->
+      <div class="pickbar" id="pickBar">
+        <div class="pk pk-client">
+          <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="clientInput" type="text" spellcheck="false" role="combobox"
+                 aria-autocomplete="list" aria-expanded="false" aria-controls="clientMenu"
+                 placeholder="Start typing a client name" autocomplete="off" />
+          <div class="acmenu" id="clientMenu" role="listbox" hidden></div>
+        </div>
+        <div class="pkdiv"></div>
+        <div class="pk pk-product">
+          <select id="landProductSel" aria-label="Product"><option value="">Product</option></select>
+        </div>
+        <button class="btn primary" id="goBtn" disabled>Analyze</button>
+      </div>
+      <div class="hint" id="pickHint">Both fields are required &mdash; the product scopes every count on the board.</div>
+
+      <div class="altpath">
+        <button class="btn ghost lg" id="urlToggle" aria-expanded="false">Use a landing page instead</button>
+      </div>
+
+      <div class="searchbar" id="urlBlock" hidden>
         <svg class="si" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <input id="urlInput" type="text" spellcheck="false"
                placeholder="yourbank.com/checking" autocomplete="off" />
         <button class="btn primary" id="analyzeBtn">Analyze</button>
       </div>
-      <div class="hint" id="urlHint">Use the product page, not the homepage — it tells us which product to scope to.</div>
+      <div class="hint" id="urlHint" hidden>Use the product page, not the homepage &mdash; it tells us which product to scope to.</div>
+
+      <!-- The way back. The two paths are mutually exclusive on screen, so
+           choosing the URL one has to be reversible or it is a dead end. -->
+      <div class="altpath" id="pickerBackWrap" hidden>
+        <button class="btn ghost lg" id="pickerToggle">&larr; Back to the client list</button>
+      </div>
 
       <div class="statusline" id="healthLine"></div>
     </div>
@@ -56,29 +88,23 @@
     </div>
 
     <div class="modegrid">
-      <button class="modecard" data-mode="creative">
+      <button class="modecard wall" data-mode="creative">
         <div class="mc-icon creative"></div>
-        <div class="mc-title">Creative Inspiration</div>
+        <div class="mc-source">Google image ads</div>
+        <div class="mc-title">The Wall of Creatives</div>
         <div class="mc-q">"What are competitors making?"</div>
-        <p>Real display creatives from competitors, grouped by idea and filtered to your product. Sorted by what is running now, with longevity shown.</p>
-        <div class="mc-tags"><span>Google display</span><span>Image creatives</span></div>
+        <p>Real image creatives from competitors, grouped by idea and filtered to your product. Sorted by what is running now, with longevity shown. Search ads appear on their own wall inside Competitive Intelligence, at no extra cost.</p>
+        <div class="mc-tags"><span>Image creatives</span><span>Longevity</span></div>
       </button>
 
-      <button class="modecard" data-mode="benchmark">
+      <button class="modecard bench" data-mode="benchmark">
         <div class="mc-icon bench"></div>
-        <div class="mc-title">Campaign Benchmark</div>
+        <div class="mc-source">Google Search</div>
+        <div class="mc-title">Competitive Intelligence</div>
         <div class="mc-q">"How did our ads compare to theirs?"</div>
-        <p>Your ads against their ads over the same window — offers, longevity and volume side by side. Facts first; strategies only when you ask.</p>
-        <div class="mc-tags"><span>Google search</span><span>Ads vs ads</span></div>
+        <p>Your ads against their ads over the same window — offers, longevity and volume side by side, with every figure traceable to the ad that carried it.</p>
+        <div class="mc-tags"><span>Ads vs ads</span><span>Counted findings</span></div>
       </button>
-
-      <div class="modecard disabled">
-        <div class="mc-icon proposal"></div>
-        <div class="mc-title">Proposal Evidence</div>
-        <div class="mc-q">"Which ads go in the pitch?"</div>
-        <p>Select competitor ads for a prospect and export them into the proposal deck.</p>
-        <div class="mc-tags"><span class="soon">Next build</span></div>
-      </div>
     </div>
   </section>
 
@@ -93,29 +119,20 @@
       <div class="scopebox">
         <label>Product scope</label>
         <select id="productSel"></select>
-        <!-- Chosen BEFORE anything is spent, so the cost line below can be
-             accurate. Creative work on display does not need Meta requests. -->
-        <label class="lead">Sources</label>
-        <select id="sourceSel" class="primary-select">
-          <option value="google_display">Google display</option>
-          <option value="meta">Meta</option>
-          <option value="both">Both</option>
+        <!-- No source chooser. Each half captures exactly one surface — the
+             Wall is Google image ads, Competitive Intelligence is Google search ads —
+             so there is no choice to offer. Kept as a hidden control because
+             the capture request still carries a source. -->
+        <label class="lead" style="display:none">Sources</label>
+        <select id="sourceSel" class="primary-select" style="display:none">
+          <option value="google_display">Google image ads</option>
         </select>
-        <!-- Two windows, because the two filters ask different questions.
-             Google: served during the window. Meta: started within it. -->
+        <!-- The Transparency Center filters on a SERVED window. -->
         <span class="winwrap" id="winGoogleWrap">
           <label>Google · served in</label>
           <select id="daysSel">
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
-          </select>
-        </span>
-        <span class="winwrap hidden" id="winMetaWrap">
-          <label>Meta · started in</label>
-          <select id="metaDaysSel">
-            <option value="30">Last 30 days</option>
-            <option value="90" selected>Last 3 months</option>
-            <option value="180">Last 6 months</option>
           </select>
         </span>
       </div>
@@ -126,15 +143,14 @@
     <!-- The standing nationals. On by default, mirroring RAIN's six-column
          analysis where slots 4 and 5 never change — but visible and switchable,
          because they cost two SerpApi requests on a cold cache and a strategist
-         asking a purely local question is entitled to say so. Google display
-         only, so the row hides itself for Meta and Benchmark. -->
+         asking a purely local question is entitled to say so. -->
     <label class="natrow" id="natRow">
       <input type="checkbox" id="nationalsChk" checked />
       <span class="nattick" aria-hidden="true"></span>
       <span class="natbody">
         <span class="natname">Include national benchmarks<span class="natbadge2">Always on by default</span></span>
         <span class="natwho">J.P. Morgan Chase · Capital One</span>
-        <span class="natwhy" id="natWhy">A fixed national ceiling added to every display capture, shown in their own section below the local results — not as local competitors.</span>
+        <span class="natwhy" id="natWhy">A fixed national ceiling added to every image capture, shown in their own section below the local results — not as local competitors.</span>
       </span>
     </label>
 
@@ -169,9 +185,38 @@
         <div class="eyebrow" id="resEyebrow">—</div>
         <h2 id="resTitle">—</h2>
       </div>
+      <!-- ACTIONS ON THEIR OWN ROW, hard right and directly under the top bar.
+           Inline with the stats they crowded the numbers, and the one control
+           that navigates somewhere else was competing with three that do not. -->
       <div class="resright">
+        <div class="resactions">
+        <!-- The other half of the tool. One capture set, two ways of reading
+             it: the Wall is what competitors MADE, Competitive Intelligence is
+             how the client COMPARES. This lands on the confirm screen with the
+             same client and competitors already selected, so the cost line can
+             say what the switch costs before anything is spent. -->
+        <!-- Every search ad Competitive Intelligence captured is already read
+             and already on the client — until now it was only reachable one
+             evidence chip at a time. This is the same creatives laid out as a
+             wall. It costs nothing: no capture, no vision call, no request. -->
+        <button class="btn accent hidden" id="searchWallBtn">See all search ads →</button>
+        <!-- Descriptive themes across the captured display creatives. Gated
+             behind a click because it is the one model call on this screen. -->
+        <button class="btn ghost sm hidden" id="insightsBtn">Key insights</button>
+        <!-- The client's own creative, captured beside the wall and kept out of
+             every count on it. "Competitors lead with a bonus" means nothing
+             until you can see whether the client does too. -->
+        <button class="btn ghost sm hidden" id="clientAdsBtn"></button>
+        <button class="btn ghost sm hidden" id="crossBtn"></button>
+        <!-- Adding a competitor is a capture, so it returns to the screen that
+             confirms one. The selection, product and window survive the trip;
+             the cost line there says what the new advertiser costs and what
+             comes back from cache before anything is spent. -->
+        <button class="btn ghost sm" id="addCompBtn"
+                title="Back to the competitor list with this selection intact — everything already captured comes from cache, so only the new advertiser is a request">+ Add a competitor</button>
+        <button class="btn ghost sm greyed" id="reanalyzeBtn" title="Greyed out by dev for the time being">↻ Re-analyze</button>
+        </div>
         <div class="resstats" id="resStats"></div>
-        <button class="btn ghost sm" id="reanalyzeBtn" title="Ignore the cache and capture again">↻ Re-analyze</button>
       </div>
     </div>
 
@@ -181,6 +226,7 @@
     <div class="srctabs hidden" id="srcTabs"></div>
 
     <div class="samplingbar" id="samplingBar"></div>
+    <div class="samplingbar hidden" id="persistWarn"></div>
     <div class="funnel hidden" id="funnelBar"></div>
     <div class="diffbar hidden" id="diffBar"></div>
     <div class="scopebar hidden" id="scopeBar"></div>
@@ -189,6 +235,30 @@
     <div class="filters" id="filters"></div>
 
     <div id="resultBody"></div>
+  </section>
+
+  <!-- ══════════════ SCREEN 6 — the wall of search ads ══════════════
+       Its own screen rather than an overlay: at 131 creatives this is a place
+       you browse, not a thing you peek at. Nothing here costs anything — every
+       ad was captured and read by the Competitive Intelligence run behind it. -->
+  <section class="screen" id="s-searchwall">
+    <div class="resulthead">
+      <div>
+        <div class="eyebrow">All search ads</div>
+        <h2 id="swTitle">—</h2>
+        <p class="sub" id="swSub"></p>
+      </div>
+      <div class="resright">
+        <button class="btn primary" id="swBack">← Back to Competitive Intelligence</button>
+      </div>
+    </div>
+
+    <!-- Same two independent filters as the display wall: product narrows what
+         the ads are about, advertiser narrows whose work it is. -->
+    <div class="filters" id="swProductFilters"></div>
+    <div class="filters" id="swFilters"></div>
+
+    <div id="swBody"></div>
   </section>
 
 </main>
@@ -203,6 +273,21 @@
   <div class="drawer-body" id="drawerBody"></div>
 </aside>
 
+<!-- The wide overlay: a wall, and the themes popup. Both are READ-ONLY views
+     over data already on the client, so they open instantly and cost nothing. -->
+<div class="drawer-bg" id="sheetBg"></div>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="drawer-head">
+    <div>
+      <h3 id="sheetTitle">—</h3>
+      <div class="sheetsub" id="sheetSub"></div>
+    </div>
+    <button class="btn ghost sm" id="sheetClose">Close</button>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</section>
+
+<script src="client-search.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
