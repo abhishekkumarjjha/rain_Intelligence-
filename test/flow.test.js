@@ -7,7 +7,7 @@
 // =============================================================================
 
 import { startServer, check, section, summary, eq, ok } from "./harness.js";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const S = await startServer();
@@ -1479,6 +1479,160 @@ section("sweep — every string in every payload");
           "F-014: a 'display' claim survived in the themes panel"));
     }
   }
+
+// ---------------------------------------------------------------------------
+// F-020 (H17, second half) — A DIFFERENT WINDOW IS A DIFFERENT QUESTION.
+//
+// previousSnapshot() gated on client + product + source. Run a 30-day benchmark,
+// then a 90-day one, and the second picks up the first as its previous — so
+// every figure the wider window newly reveals is reported as "newly observed
+// since the July benchmark". Nothing changed in the market. The window changed,
+// and the tool called it news in the most quotable sentence it produces.
+// ---------------------------------------------------------------------------
+section("regression — a 30-day snapshot is not the previous of a 90-day run");
+{
+  const S = await startServer({}, { keepData: true });
+  const dataDir = S.dataDir;
+  try {
+    const bench = (days) => S.post("/api/capture", {
+      mode: "benchmark", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+      product: "checking", days,
+      competitors: [
+        { label: "Campus Federal", domain: "campusfederal.org" },
+        { label: "Neighbors Federal Credit Union", domain: "neighborsfcu.org" },
+        // PEL3 stopped running 45 days ago: absent from a 30-day capture,
+        // present in a 90-day one. It is the only row in the market that
+        // distinguishes the two windows, and therefore the only one that can
+        // demonstrate a window change being misread as a market change.
+        { label: "Pelican State CU", domain: "pelicanstatecu.com" },
+      ],
+    });
+
+    const { body: a } = await bench(30);
+    await S.awaitRun(a.runId);
+
+    // A SECOND 30-day run must still find the first: the guard has to narrow
+    // comparability, not abolish it.
+    const { body: b } = await bench(30);
+    const run30b = await S.awaitRun(b.runId);
+    await check("a 30-day run still finds the previous 30-day snapshot", () =>
+      ok(run30b.board?.setDrift !== undefined,
+        "the board did not even reach the drift stage"));
+
+    // Now the different question.
+    const { body: c } = await bench(90);
+    const run90 = await S.awaitRun(c.runId);
+
+    await check("the wider window really does reveal a figure the narrower one did not", () => {
+      const in30 = new Set((run30b.ads || []).map((x) => x.creativeId));
+      const in90 = new Set((run90.ads || []).map((x) => x.creativeId));
+      ok(!in30.has("PEL3"), "PEL3 is inside the 30-day window, so this test proves nothing");
+      ok(in90.has("PEL3"), "PEL3 is outside the 90-day window, so this test proves nothing");
+    });
+
+    await check("the 90-day run reports no change against the 30-day snapshots", () => {
+      const manufactured = (run90.board.findings || [])
+        .filter((f) => /^offer_(new|changed|withdrawn)$/.test(f.rule));
+      eq(manufactured.length, 0,
+        `a change of window produced change cards: ${manufactured.map((f) => f.headline).join(" | ")}`);
+    });
+
+    await check("and the primary read carries no manufactured month-over-month line", () => {
+      const changes = run90.board.primaryRead?.changes || [];
+      eq(changes.length, 0, `the read quotes a change that is a window difference: ${JSON.stringify(changes)}`);
+    });
+
+    await check("the snapshots on disk record the window they covered", () => {
+      const dir = path.join(dataDir, "_snapshots");
+      // The directory also holds a _watched__*.json file beside the per-key
+      // snapshot folders, so pick the folder rather than the first entry.
+      const key = readdirSync(dir).find((f) => statSync(path.join(dir, f)).isDirectory());
+      ok(key, `no snapshot directory in ${JSON.stringify(readdirSync(dir))}`);
+      const snaps = readdirSync(path.join(dir, key))
+        .filter((f) => f.endsWith(".json"))
+        .map((f) => JSON.parse(readFileSync(path.join(dir, key, f), "utf8")));
+      ok(snaps.length >= 3, `expected three snapshots, found ${snaps.length}`);
+      for (const s of snaps) {
+        ok(Number.isFinite(s.days), `a snapshot records no window: ${JSON.stringify({ label: s.label, days: s.days })}`);
+      }
+      const windows = [...new Set(snaps.map((s) => s.days))].sort((x, y) => x - y);
+      eq(JSON.stringify(windows), JSON.stringify([30, 90]), "the recorded windows");
+    });
+  } finally {
+    S.stop();
+    try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// H12 — MIGRATING AN OLD RUN'S THEMES INTO THE RIGHT SCOPE SLOT.
+//
+// Runs read before the themes endpoint took a scope hold a single `themes`.
+// The migration reads its `readScope`: "all_products" means the general read
+// and belongs under "all"; anything else was the run's own product. A run whose
+// saved read was a GENERAL FALLBACK is the case a code reading is least
+// trustworthy on, so it is written to disk here and read back through the real
+// endpoint.
+// ---------------------------------------------------------------------------
+section("regression — an old run's saved themes migrate to the slot they belong in");
+{
+  for (const [name, readScope, expectSlot] of [
+    ["a product read", "product", "checking"],
+    ["a general fallback", "all_products", "all"],
+    ["a read that never said", undefined, "checking"],
+  ]) {
+    const S = await startServer({}, { keepData: true });
+    const dataDir = S.dataDir;
+    try {
+      const { body: started } = await S.post("/api/capture", {
+        mode: "creative", clientDomain: "lacapfcu.org", clientLabel: "La Capitol",
+        product: "checking", days: 30,
+        competitors: [{ label: "Campus Federal", domain: "campusfederal.org" }],
+      });
+      const run = await S.awaitRun(started.runId);
+      S.stop();   // the run is on disk; edit it the way an older build left it
+
+      const file = path.join(dataDir, `${run.id}.json`);
+      const saved = JSON.parse(readFileSync(file, "utf8"));
+      delete saved.themesByScope;                     // pre-scope shape
+      saved.themes = {
+        messageThemes: [{ name: "A saved theme", creativeIds: [], familyCount: 2 }],
+        themes: [{ name: "A saved theme" }],
+        framing: "written before this endpoint took a scope",
+        creativesRead: 7,
+        ...(readScope ? { readScope } : {}),
+      };
+      writeFileSync(file, JSON.stringify(saved, null, 2));
+
+      // A FRESH PROCESS, so the run is loaded off disk in its old shape.
+      const T = await startServer({}, { dataDir, keepData: true });
+      try {
+        const { body } = await T.post(`/api/run/${run.id}/themes`, { scope: expectSlot });
+        await check(`${name} migrates into "${expectSlot}" and is served from the saved copy`, () => {
+          ok(body.ok, `refused: ${body.reason}`);
+          eq(body.cached, true, "the saved read was re-bought instead of migrated");
+          eq(body.scope, expectSlot, "scope");
+          eq(body.themes.framing, "written before this endpoint took a scope",
+            "a different read came back");
+        });
+
+        const onDisk = JSON.parse(readFileSync(file, "utf8"));
+        await check(`${name} does not land in any other slot`, () => {
+          const slots = Object.keys(onDisk.themesByScope || {});
+          // The migration is in-memory until something writes; either way no
+          // OTHER scope may claim this read.
+          for (const s of slots) {
+            if (s === expectSlot) continue;
+            ok(onDisk.themesByScope[s]?.framing !== "written before this endpoint took a scope",
+              `the saved read was also filed under "${s}"`);
+          }
+        });
+      } finally { T.stop(); }
+    } finally {
+      try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  }
+}
 
 summary();
 } finally {

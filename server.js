@@ -815,6 +815,9 @@ async function executeRun(run) {
         competitorSet: board.competitorSet,
         windowStart: run.days ? new Date(Date.now() - run.days * 864e5).toISOString().slice(0, 10) : null,
         windowEnd: new Date().toISOString().slice(0, 10),
+        // Recorded as a number too, so comparability never has to be inferred
+        // from two dates that a daylight-saving boundary can shift.
+        days: run.days,
       });
       // The watched set is the DEFAULT for next month, never a restriction.
       // Fulfillment may pick anyone; prefilling last month's set just makes
@@ -895,6 +898,9 @@ function boardFor(run) {
   const previous = previousSnapshot({
     clientDomain: run.client.domain, product: run.product, source: run.source,
     excludeRunId: run.id,
+    // A 30-day capture and a 90-day capture are different questions. Diffing
+    // them reports the extra window as "newly observed". See F-020.
+    days: run.days,
   });
   return buildBoard({
     client: { ...run.client, ads: run.ads.filter((a) => a.isClient) },

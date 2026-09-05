@@ -48,7 +48,11 @@ globalThis.fetch = async function mockFetch(input, init = {}) {
     if (FAIL === "auth") return json({ error: "Invalid API key." }, 401);
     if (domain === FAIL_DOMAIN) throw Object.assign(new Error("aborted"), { name: "AbortError" });
 
-    return json(listingFor(domain in MARKET ? domain : "__unknown__", { format }));
+    // start_date is what atc-provider actually sends, so the mock filters on
+    // the same thing the real endpoint does.
+    return json(listingFor(domain in MARKET ? domain : "__unknown__", {
+      format, startDate: q.get("start_date"),
+    }));
   }
 
   if (url.includes("tpc.googlesyndication.com")) {

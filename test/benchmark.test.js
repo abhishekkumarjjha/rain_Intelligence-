@@ -17,7 +17,8 @@ import { normalizeObservation, rollUpBrand, rankAgainst } from "../lib/observati
 import { productFromUrl } from "../lib/products.js";
 import { comparable, better } from "../lib/metrics.js";
 import { buildBoard } from "../lib/benchmark.js";
-import { buildBenchmark } from "../lib/analyze.js";
+import { buildBenchmark, clusterAds } from "../lib/analyze.js";
+import { competitorSetVersion, setDrift } from "../lib/snapshot.js";
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -1756,6 +1757,328 @@ for (const [name, input] of ADVERSARIAL) {
     }
   });
 }
+
+// ===========================================================================
+console.log("\nSTAGE 13 — H6: a refusal to rank must reach the reader with its reason");
+// ===========================================================================
+//
+// comparable() returns { ok, reason } and the reason is the whole point: "we are
+// not ranking these" is only useful if it says why. The failure mode is a
+// SILENTLY BLANK CELL, which looks exactly like "not observed" and means
+// something completely different. One is "nobody printed a figure"; the other is
+// "both printed one and we refuse to compare them".
+
+const refusalBoard = ({ clientFact, competitorFacts, product = "cd" }) => buildBoard({
+  client: { label: "Client CU", domain: "client.org", ads: [chk("client.org", "Client CU", {
+    headlines: [`Earn ${clientFact.raw}`], description: `Earn ${clientFact.raw} on a certificate.${clientFact.blurb || ""}`,
+    economicFacts: [clientFact], claims: [], leadEmphasis: "rate", product,
+  })] },
+  competitors: competitorFacts.map((f, i) => ({
+    label: `Comp ${"ABC"[i]}`, domain: `${"abc"[i]}.org`,
+    ads: [chk(`${"abc"[i]}.org`, `Comp ${"ABC"[i]}`, {
+      headlines: [`Earn ${f.raw}`], description: `Earn ${f.raw} on a certificate.${f.blurb || ""}`,
+      economicFacts: [f], claims: [], leadEmphasis: "rate", product,
+    })],
+  })),
+  product,
+  progress: Object.fromEntries(["client.org", "a.org", "b.org", "c.org"].map((d) => [d, { listed: 1, read: 1 }])),
+});
+
+// --- the three refusal kinds the work order names ---------------------------
+
+const REFUSALS = [
+  ["different CD terms", {
+    clientFact: { metric: "apy", raw: "5.00% APY", qualifiers: { term_months: 12 }, sourceField: "headline",
+                  blurb: " 12-month term." },
+    competitorFacts: [
+      { metric: "apy", raw: "5.25% APY", qualifiers: { term_months: 60 }, sourceField: "headline", blurb: " 60-month term." },
+      { metric: "apy", raw: "5.10% APY", qualifiers: { term_months: 36 }, sourceField: "headline", blurb: " 36-month term." },
+      { metric: "apy", raw: "5.05% APY", qualifiers: { term_months: 24 }, sourceField: "headline", blurb: " 24-month term." },
+    ],
+  }, /term/i],
+  ["a balance cap on one side only", {
+    clientFact: { metric: "apy", raw: "5.00% APY", qualifiers: { term_months: 12 }, sourceField: "headline",
+                  blurb: " 12-month term." },
+    competitorFacts: [
+      { metric: "apy", raw: "6.00% APY", qualifiers: { term_months: 12, balance_cap: 5000 }, sourceField: "headline",
+        blurb: " 12-month term on balances up to $5,000." },
+      { metric: "apy", raw: "5.90% APY", qualifiers: { term_months: 12, balance_cap: 2500 }, sourceField: "headline",
+        blurb: " 12-month term on balances up to $2,500." },
+      { metric: "apy", raw: "5.80% APY", qualifiers: { term_months: 12, balance_cap: 1000 }, sourceField: "headline",
+        blurb: " 12-month term on balances up to $1,000." },
+    ],
+  }, /balance/i],
+];
+
+for (const [name, input, reasonShape] of REFUSALS) {
+  const board = refusalBoard(input);
+
+  test(`H6 — ${name}: the refusal is a finding, not a silence`, () => {
+    const notRanked = board.findings.find((f) => f.rule === "not_ranked");
+    const ranked = board.findings.find((f) => /rate_(advantage|position)/.test(f.rule) && (f.excluded || []).length);
+    assert.ok(notRanked || ranked,
+      `neither a NOT LIKE-FOR-LIKE card nor an excluded list — the refusal vanished.\n       findings: ${board.findings.map((f) => f.rule).join(", ")}`);
+  });
+
+  test(`H6 — ${name}: the reason travels with it, in words`, () => {
+    const notRanked = board.findings.find((f) => f.rule === "not_ranked");
+    const withExcl = board.findings.find((f) => (f.excluded || []).length);
+    const text = notRanked
+      ? [notRanked.headline, notRanked.detail].join(" ")
+      : withExcl.excluded.map((x) => x.reason).join(" ");
+    assert.match(text, reasonShape,
+      `the refusal reached the reader with no usable reason: "${text}"`);
+  });
+
+  test(`H6 — ${name}: the figures are still SHOWN, never hidden by the refusal`, () => {
+    // A fact you decline to rank is still a fact the strategist should see.
+    const cells = board.snapshot.rows.flatMap((r) => r.cells);
+    const printed = cells.filter((c) => !c.absent).map((c) => c.value);
+    for (const f of [input.clientFact, ...input.competitorFacts]) {
+      assert.ok(printed.includes(f.raw),
+        `${f.raw} was advertised and is nowhere in the snapshot — a refusal to rank became a refusal to show`);
+    }
+  });
+
+  test(`H6 — ${name}: no cell goes silently blank`, () => {
+    for (const row of board.snapshot.rows) {
+      for (const cell of row.cells) {
+        assert.notEqual(String(cell.value).trim(), "", `${row.metric}/${cell.column} rendered an empty string`);
+        assert.notEqual(String(cell.value).trim(), "—", "an em-dash reads as nothing rather than as an observation");
+        if (cell.absent) {
+          assert.ok(cell.note, `${row.metric}/${cell.column} is absent with no note explaining which kind of absence`);
+        }
+      }
+    }
+  });
+}
+
+test("H6 — an add-on price and an account fee are never ranked against each other", () => {
+  // matchOn: ["waiver_condition", "applies_to"] on monthly_fee. The comment in
+  // metrics.js says a $5.99 benefits bundle and a $5.00 account fee are not the
+  // same measurement; this is the assertion behind that comment.
+  const v = comparable(
+    { metric: "monthly_fee", value: 5.99, qualifiers: { applies_to: "BaZing" } },
+    { metric: "monthly_fee", value: 5.00, qualifiers: {} },
+  );
+  assert.equal(v.ok, false, "a benefits bundle was ranked against an account fee");
+  assert.match(v.reason, /fee covers|applies_to/i, `the refusal gives no usable reason: "${v.reason}"`);
+});
+
+test("H6 — every refusal reason is a sentence, not a code", () => {
+  // These strings are rendered to the user verbatim. A reason like
+  // "matchOn:term_months" is a refusal the reader cannot act on.
+  const cases = [
+    [{ metric: "apy", value: 5, qualifiers: { term_months: 12 } }, { metric: "apy", value: 5, qualifiers: { term_months: 60 } }],
+    [{ metric: "apy", value: 5, qualifiers: { term_months: 12 } }, { metric: "apy", value: 5, qualifiers: {} }],
+    [{ metric: "apy", value: 5, qualifiers: {} }, { metric: "cash_bonus", value: 5, qualifiers: {} }],
+    [{ metric: "loan_amount", value: 5, qualifiers: {} }, { metric: "loan_amount", value: 6, qualifiers: {} }],
+    [{ metric: "apy", value: NaN, qualifiers: {} }, { metric: "apy", value: 5, qualifiers: {} }],
+  ];
+  for (const [a, b] of cases) {
+    const v = comparable(a, b);
+    assert.equal(v.ok, false, `expected a refusal for ${a.metric} vs ${b.metric}`);
+    assert.ok(v.reason && v.reason.length > 8, `reason too terse to render: "${v.reason}"`);
+    assert.doesNotMatch(v.reason, /_|matchOn|undefined|null/,
+      `the reason is a code, not a sentence: "${v.reason}"`);
+  }
+});
+
+// ===========================================================================
+console.log("\nSTAGE 14 — H7: a change to the SET is not a change in the MARKET");
+// ===========================================================================
+//
+// The snapshot delta is the most quotable thing this tool produces — "their
+// bonus is newly observed since the July benchmark" is a sentence a strategist
+// repeats out loud. It is also the easiest to manufacture: add a competitor to
+// the set and every figure they print is new to the comparison while nothing at
+// all has changed in the market.
+
+const bonusAdFor = (domain, label, amount) => chk(domain, label, {
+  headlines: [`Earn ${amount}`], description: `Open checking and earn ${amount}.`,
+  economicFacts: [{ metric: "cash_bonus", raw: amount, qualifiers: {}, sourceField: "headline" }],
+  claims: [], leadEmphasis: "bonus",
+});
+
+const clientAd = () => chk("client.org", "Client CU", {
+  headlines: ["Client Checking"], description: "Open Choice Checking today.",
+  economicFacts: [], claims: [], leadEmphasis: "brand",
+});
+
+/** A previous snapshot in the shape putSnapshot() writes. */
+const prevSnapshot = (domains, { label = "July" } = {}) => ({
+  label,
+  competitorSet: competitorSetVersion(domains),
+  brands: domains.map((d) => ({
+    domain: d, label: d, isClient: false, adCount: 1, hasCoverage: true,
+    // Deliberately EMPTY positions: in July nobody had printed a bonus. So any
+    // "newly observed" card today is the engine comparing against a brand it
+    // had no prior state for, which is exactly the manufacture being tested.
+    positions: {}, claims: [],
+  })),
+});
+
+const boardWith = ({ competitors, previous }) => buildBoard({
+  client: { label: "Client CU", domain: "client.org", ads: [clientAd()] },
+  competitors,
+  product: "checking",
+  previous,
+  progress: Object.fromEntries(
+    ["client.org", ...competitors.map((c) => c.domain)].map((d) => [d, { listed: 1, read: 1 }])),
+});
+
+const A = { label: "Comp A", domain: "a.org", ads: [bonusAdFor("a.org", "Comp A", "$500")] };
+const B = { label: "Comp B", domain: "b.org", ads: [bonusAdFor("b.org", "Comp B", "$400")] };
+const C = { label: "Comp C", domain: "c.org", ads: [bonusAdFor("c.org", "Comp C", "$300")] };
+const NEWCOMER = { label: "Comp D", domain: "d.org", ads: [bonusAdFor("d.org", "Comp D", "$900")] };
+
+test("H7 — adding a competitor never manufactures a 'newly observed' card", () => {
+  // July watched A, B, C. August adds D, who prints the biggest bonus in the
+  // set. D has no prior state at all, so every figure they print is new TO THE
+  // COMPARISON and nothing has changed in the market.
+  const board = boardWith({
+    competitors: [A, B, C, NEWCOMER],
+    previous: prevSnapshot(["a.org", "b.org", "c.org"]),
+  });
+  const manufactured = board.findings.filter(
+    (f) => /^offer_(new|changed|withdrawn)$/.test(f.rule) && /Comp D/.test(f.headline));
+  assert.equal(manufactured.length, 0,
+    `a competitor added this month produced a change card: ${manufactured.map((f) => f.headline).join(" | ")}`);
+});
+
+test("H7 — the set change is DISCLOSED rather than silently absorbed", () => {
+  const board = boardWith({
+    competitors: [A, B, C, NEWCOMER],
+    previous: prevSnapshot(["a.org", "b.org", "c.org"]),
+  });
+  assert.ok(board.setDrift, "the set changed and the board says nothing about it");
+  assert.deepEqual(board.setDrift.added, ["d.org"]);
+  assert.match(board.setDrift.note, /only the 3 competitors present in both/i,
+    `the drift note does not say what the comparison actually covers: "${board.setDrift.note}"`);
+});
+
+test("H7 — REMOVING a competitor never manufactures a 'withdrawn' card", () => {
+  // The mirror image, and the more damaging one: "Comp C withdrew their bonus"
+  // about a competitor who was simply dropped from the set this month.
+  const board = boardWith({
+    competitors: [A, B],
+    previous: prevSnapshot(["a.org", "b.org", "c.org"]),
+  });
+  const withdrawn = board.findings.filter((f) => f.rule === "offer_withdrawn");
+  assert.equal(withdrawn.length, 0,
+    `dropping a competitor produced a withdrawal card: ${withdrawn.map((f) => f.headline).join(" | ")}`);
+  assert.deepEqual(board.setDrift?.removed, ["c.org"]);
+});
+
+test("H7 — with the set unchanged, a real change IS still reported", () => {
+  // The control. If the guard above worked by suppressing all deltas it would
+  // be useless, so this proves the engine still speaks when it should.
+  const previous = prevSnapshot(["a.org", "b.org", "c.org"]);
+  const board = boardWith({ competitors: [A, B, C], previous });
+  const changes = board.findings.filter((f) => /^offer_(new|changed|withdrawn)$/.test(f.rule));
+  assert.ok(changes.length > 0,
+    "the set did not change and three competitors newly printed a bonus, and nothing was reported");
+  assert.equal(board.setDrift, null, "an unchanged set reported drift");
+});
+
+test("H7 — a set version ignores order, so re-ordering is not a change", () => {
+  const one = competitorSetVersion(["a.org", "b.org", "c.org"]);
+  const two = competitorSetVersion(["c.org", "a.org", "b.org"]);
+  assert.equal(one.hash, two.hash,
+    "the same three competitors in a different order read as a different set");
+});
+
+test("H7 — a different WINDOW is not comparable to a different window", () => {
+  // findPreviousRun() gates on client, mode, source and product. The window is
+  // not in that gate, so this is the exposure being recorded: a 30-day run and
+  // a 90-day run of the same client ARE offered to each other as previous.
+  // Asserting the shape of the guard that does exist rather than a fix.
+  const drift = setDrift(competitorSetVersion(["a.org"]), {
+    label: "July", competitorSet: competitorSetVersion(["a.org", "b.org"]),
+  });
+  assert.ok(drift, "a shrunken set produced no drift record");
+  assert.deepEqual(drift.stable, ["a.org"], "the intersection is what deltas may run over");
+});
+
+// ===========================================================================
+console.log("\nSTAGE 15 — H9: whose idea is it? clustering must stay advertiser-scoped");
+// ===========================================================================
+//
+// Without the advertiser in the cluster key, two banks running the same generic
+// line collapse into one card credited to whichever ran longer, and the other
+// bank's evidence disappears from the wall. The CLIENT tier is new, so the
+// question is whether a client design can absorb — or be absorbed by — a
+// competitor's.
+
+const banner = (institution, headline, { isClient = false, tier = "local", days = 100, offer = null, id } = {}) => ({
+  creativeId: id, institution, institutionLabel: institution, isClient, tier,
+  headline, subhead: "", product: "checking", offer,
+  totalDaysShown: days, width: 300, height: 250, legible: true,
+});
+
+test("H9 — a client design and a competitor's identical design stay two cards", () => {
+  // THE SAME GENERIC LINE. "Open An Account Today" is copy every bank runs, and
+  // it is the exact case that collapses if the advertiser leaves the key.
+  const clusters = clusterAds([
+    banner("client.org", "Open An Account Today", { isClient: true, tier: "client", days: 400, id: "CL1" }),
+    banner("a.org", "Open An Account Today", { days: 50, id: "A1" }),
+  ]);
+  assert.equal(clusters.length, 2,
+    "a client design and a competitor's were collapsed into one idea");
+  const owners = clusters.map((c) => c.institution).sort();
+  assert.deepEqual(owners, ["a.org", "client.org"]);
+});
+
+test("H9 — the longer-running client design does not absorb the competitor's evidence", () => {
+  // The failure is directional and silent: the representative is the
+  // longest-running member, so the client — who has run their line for 400 days
+  // — would become the face of the competitor's card, and the competitor's
+  // creative id would vanish from the wall entirely.
+  const clusters = clusterAds([
+    banner("client.org", "Open An Account Today", { isClient: true, tier: "client", days: 400, id: "CL1" }),
+    banner("a.org", "Open An Account Today", { days: 50, id: "A1" }),
+  ]);
+  const competitorCard = clusters.find((c) => c.institution === "a.org");
+  assert.ok(competitorCard, "the competitor's card is gone");
+  assert.deepEqual(competitorCard.variationIds, ["A1"]);
+  assert.equal(competitorCard.isClient, false);
+  const clientCard = clusters.find((c) => c.institution === "client.org");
+  assert.deepEqual(clientCard.variationIds, ["CL1"]);
+  assert.equal(clientCard.isClient, true);
+});
+
+test("H9 — nor the other way round when the competitor has run longer", () => {
+  const clusters = clusterAds([
+    banner("client.org", "Open An Account Today", { isClient: true, tier: "client", days: 20, id: "CL1" }),
+    banner("a.org", "Open An Account Today", { days: 900, id: "A1" }),
+  ]);
+  assert.equal(clusters.length, 2);
+  assert.equal(clusters.find((c) => c.institution === "client.org").isClient, true,
+    "the client's own design was absorbed into a competitor's card");
+});
+
+test("H9 — a national cannot absorb a local card either", () => {
+  const clusters = clusterAds([
+    banner("chase.com", "Open An Account Today", { tier: "national", days: 1200, id: "CH1" }),
+    banner("a.org", "Open An Account Today", { days: 30, id: "A1" }),
+    banner("client.org", "Open An Account Today", { isClient: true, tier: "client", days: 60, id: "CL1" }),
+  ]);
+  assert.equal(clusters.length, 3, "three advertisers running one generic line collapsed");
+  assert.deepEqual(clusters.map((c) => c.tier).sort(), ["client", "local", "national"]);
+});
+
+test("H9 — one advertiser's design cut into many sizes IS still one card", () => {
+  // The guard must not be so wide that clustering stops working. Same
+  // advertiser, same line, three sizes: one idea, three executions.
+  const clusters = clusterAds([
+    { ...banner("a.org", "Switch And Get Paid", { days: 100, id: "A1" }), width: 300, height: 250 },
+    { ...banner("a.org", "Switch And Get Paid", { days: 80, id: "A2" }), width: 728, height: 90 },
+    { ...banner("a.org", "Switch And Get Paid", { days: 60, id: "A3" }), width: 970, height: 250 },
+  ]);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].variations, 3);
+  assert.deepEqual(clusters[0].sizes.sort(), ["300x250", "728x90", "970x250"]);
+});
 
 // ===========================================================================
 console.log(`\n${passed} passed, ${failed} failed\n`);
