@@ -151,3 +151,61 @@ npm audit                   > bughunt/logs/91-npm-audit-after.txt          # 0  
 git log --oneline 7010b4e..HEAD                                           # 0
 git diff --stat 7010b4e..HEAD                                             # 0
 git push -u origin bughunt/phase-0                                        # see REPORT.md
+
+# ===========================================================================
+# SECOND SESSION — the seven pending hypotheses, run on request.
+# ===========================================================================
+
+## Branch verification (asked: is this on the benchmark branch, not main?)
+git merge-base --is-ancestor origin/benchmark-v4-truncation-and-set-shape HEAD  # 0  yes
+git branch -r                                                             # 0  origin/main was never fetched
+git log --oneline -1 origin/benchmark-v4-truncation-and-set-shape         # 0  7010b4e — my base commit
+
+## H6 — comparability refusals
+node test/benchmark.test.js  (STAGE 13)                                   # 1 -> 0  my fixture was scoped to the wrong product
+node test/benchmark.test.js                                               # 0  10 assertions, all clean
+
+## H7 + H9 — snapshot deltas, clustering
+node test/benchmark.test.js  (STAGE 14, STAGE 15)                         # 0  11 assertions, all clean
+# ...but the window question inside H7 pointed at something:
+sed -n '/export function previousSnapshot/,/^}/p' lib/snapshot.js         # 0  gates on client+product+source only
+
+## F-020 — the window is part of comparability
+node --check lib/snapshot.js server.js                                    # 0
+node test/flow.test.js                                                    # 0  ...but the before-log showed the test proved nothing
+grep -n "days" test/mock-net.js                                           # 0  no matches: the mock ignored the window entirely
+node scratch/dbg.mjs                                                      # 0  30d and 90d returned identical listings
+node --check test/fixture-lab.js                                          # 0  after adding the served-window filter + PEL3
+node scratch/dbg2.mjs                                                     # 0  STILL identical — ago() is epoch SECONDS
+node scratch/dbg2.mjs                                                     # 0  STILL identical — dateRange() sends YYYYMMDD, Date.parse -> NaN
+node scratch/dbg2.mjs                                                     # 0  30d: PEL1,PEL2   90d: PEL1,PEL2,PEL3
+node test/flow.test.js > bughunt/logs/02-F-020-before.txt (libs stashed)  # 1  "$750 is newly observed since the September 2026 benchmark"
+node test/flow.test.js > bughunt/logs/03-F-020-after.txt                  # 0
+npm test && npm run test:ui                                              # 0
+git commit -F -                                                           # 0  302f736
+
+## H10 + H11 — funnel reconciliation, combined losses
+node test/flow.test.js                                                    # 1  15 of 16 clean; one real gap
+
+## F-021 — an empty capture must say which kind of empty
+sed -n '/^export async function capture/,/^}/p' lib/atc-provider.js       # 0  ok:true, images:[], no reason
+node --check lib/atc-provider.js public/app.js                            # 0
+node test/flow.test.js > bughunt/logs/02-F-021-before.txt (libs stashed)  # 1  reason undefined
+node test/flow.test.js > bughunt/logs/03-F-021-after.txt                  # 0
+
+## H19 — the national age caveat
+node test/flow.test.js                                                    # 1  "the note does not state the age: undefined"
+grep -n "referenceNote" lib/analyze.js                                    # 1  NO MATCHES — the field never existed
+
+## F-022 — the caveat was appended to a field that is never produced
+grep -c referenceNote lib/analyze.js                                      # 0  prints 0
+node --check server.js                                                    # 0
+node test/flow.test.js > bughunt/logs/02-F-022-before.txt (server stashed) # 1  caveat absent on a 60-day-old capture
+node test/flow.test.js > bughunt/logs/03-F-022-after.txt                   # 0
+npm test && npm run test:ui                                              # 0
+git commit -F -                                                           # 0  7523411
+
+## HAND-BACK
+npm test          > bughunt/logs/90-final-test.txt                        # 0  466 assertions + 142 corpus fields
+npm run test:ui   > bughunt/logs/92-playwright.txt                        # 0  88 assertions
+git push origin bughunt/phase-0                                           # see REPORT.md

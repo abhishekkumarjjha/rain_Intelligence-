@@ -9,29 +9,31 @@ Node v22.22.2. Nothing was spent: no SerpApi call, no model call, no key.
 
 | | before | after |
 |---|---|---|
-| API assertions (`npm test`) | 273 | **411** |
+| API assertions (`npm test`) | 273 | **466** |
 | Browser assertions (`npm run test:ui`) | 0 — *the suite exited 0 without running* | **88** |
 | Corpus fields (`test/corpus-runner.js`) | 0 | **142** |
 | `npm audit` | 3 moderate | **0** |
 | failures | 0 | **0** |
 
-**19 findings, 17 fixed, 2 already-correct-but-now-guarded**, plus 8 hypotheses
-tested and found correct and 10 not attempted with reasons.
+**35 things checked. 22 were real bugs and all 22 are fixed. 13 came back
+clean** and now have a regression test each so the next agent does not re-derive
+them.
 
 | severity | fixed | already correct |
 |---|---|---|
-| blocker | F-001, F-003, F-017 | H4, H16 |
-| high | F-002, F-005, F-006, F-007, F-008, F-009, F-015, F-016, F-019, H5 | H3, H8, H18 |
-| medium | F-004, F-010, F-011, F-013, F-014, F-018 | H2, H13, H17 |
+| blocker | F-001, F-003, F-017, F-020 | H4, H16 |
+| high | F-002, F-005, F-006, F-007, F-008, F-009, F-015, F-016, F-019, F-021 | H3, H8, H9, H10, H18 |
+| medium | F-004, F-010, F-011, F-013, F-014, F-018, F-022 | H2, H6, H11, H12, H13, H17 |
 | low | F-012 | — |
 
-Everything the work order listed as Phase 0 (§5) is done. Phase 2 (§7) is done and
-found three real bugs on its first run. Phase 3's cross-cutting sweeps (§8) are
-done and found one blocker. Phase 1 (§6) is built and its cost quoted; the read
-pass is blocked on approval **and on evidence that does not exist in a clone** —
-see §6 below. Phase 4 is disabled and untouched.
+Everything the work order listed as Phase 0 (§5) is done. Phase 2 (§7) is done
+and found three real bugs on its first run. **Every hypothesis in §8 has now been
+tested** — the cross-cutting sweeps and all sixteen named suspects — and three of
+them turned up defects while being written. Phase 1 (§6) is built and its cost
+quoted; the read pass is blocked on approval **and on evidence that does not
+exist in a clone** — see §6 below. Phase 4 is disabled and untouched.
 
-### The three that were producing wrong client-facing output right now
+### The five that were producing wrong client-facing output right now
 
 1. **F-001** — a model could return a rate that appears nowhere in the ad and it
    became the brand's advertised position, was ranked against the client, and
@@ -46,8 +48,26 @@ see §6 below. Phase 4 is disabled and untouched.
    "1.99% APR" into the offer snapshot as a competitor's advertised auto-loan
    rate.
 
-All three are the same failure in different clothes: **a sentence stronger than
+4. **F-020** — a 90-day benchmark picked up July's 30-day snapshot as its
+   "previous" and announced *"Pelican State CU's cash bonus of $750 is newly
+   observed since the September 2026 benchmark."* Nothing was newly observed.
+   The ad had run for months and stopped 45 days ago — outside the narrow
+   window, inside the wide one. **The window changed and the tool called it
+   news**, in the findings and in the primary read.
+5. **F-021** — when every artwork download failed, the competitor rendered as
+   "empty" with **no reason at all**, which on screen is indistinguishable from
+   a competitor who simply is not advertising.
+
+All five are the same failure in different clothes: **a sentence stronger than
 its evidence.**
+
+And one that is the opposite — a true sentence that could never be said:
+
+6. **F-022** — the caveat warning that a national's creative may have been
+   captured outside the client's window appends to `bm.referenceNote`, a field
+   `buildBenchmark()` has never produced. `grep -c referenceNote lib/analyze.js`
+   returns **0**. The condition read `undefined` on every run in the product's
+   history, so **the caveat has never once appeared.**
 
 ---
 
@@ -529,6 +549,101 @@ that add up, instead of one that hides a population.
 
 ---
 
+---
+
+### F-020 · blocker · P3 · `lib/snapshot.js` (= H17, second half)
+**A 30-day snapshot was offered as the previous of a 90-day run**
+
+Found while writing the H7 tests, which is the argument for writing them.
+
+```
+BEFORE: "Pelican State CU's cash bonus of $750 is newly observed since the
+         September 2026 benchmark."
+```
+
+`previousSnapshot()` gated comparability on client + product + source. The window
+was written onto every snapshot and **read by nothing**.
+
+```diff
+-export function previousSnapshot({ clientDomain, product, source, before = null, excludeRunId = null }) {
++export function previousSnapshot({ clientDomain, product, source, before = null, excludeRunId = null, days = null }) {
+...
++      if (days != null) {
++        const was = snapshotWindowDays(snap);
++        if (was == null) continue;                      // cannot establish it: refuse
++        if (Math.abs(was - Number(days)) > 1) continue;  // a different question
++      }
+```
+
+The window is now recorded as a number, not only as two dates, so comparability
+is never inferred from timestamps a daylight-saving boundary can shift.
+`snapshotWindowDays()` derives it for snapshots written before the field existed
+— almost all of them — so no existing month-over-month comparison is lost. Fails
+closed on a window that cannot be established: **no delta is honest, a wrong
+delta is not.**
+
+**The fixture lab could not express this, which is why nobody could have caught
+it.** `listingFor()` returned every row whatever `start_date` was asked for, so a
+30-day and a 90-day capture of one advertiser came back identical and the whole
+class was untestable. It filters on last-shown now, as the real Transparency
+Center does, and PEL3 exists to sit between the two windows.
+
+Two traps inside that fixture change, both worth naming because they are the
+same defect this repo keeps producing — **a filter that silently disables itself,
+inside the test written to prove a filter works**:
+
+- `ago()` yields epoch **seconds** and `start_date` arrives as a string.
+  Comparing them directly matched nothing and filtered nothing.
+- `dateRange()` formats as `YYYYMMDD` with the hyphens stripped, and
+  `Date.parse` of that is `NaN`. `windowStartMs()` now accepts both spellings and
+  **throws** on anything else.
+
+---
+
+### F-021 · high · P1 · `lib/atc-provider.js`
+**A failed artwork download read as a competitor who is not advertising**
+
+`capture()` returns `ok: true` with an empty `images` array when every download
+fails, and set no reason. The empty-**listing** path directly above it already
+distinguishes `preview_only` from `no_ads`. This one said nothing, so the target
+rendered as "empty" with a blank explanation.
+
+```diff
++  const emptyReason = images.length ? undefined
++    : downloadFailed > 0 ? "download_failed"
++      : listing.run.previewOnly > 0 ? "preview_only"
++        : "no_ads";
+```
+
+"We could not fetch their artwork" is a fact about our capture. "They are not
+advertising" is a claim about them. Only one of them was true, and the screen
+was showing the other.
+
+---
+
+### F-022 · medium · P7 · `server.js`
+**The national age caveat has never once fired**
+
+Nationals are cached for 90 days and local competitors for 7, so a board read
+over a 30-day window can carry reference rows captured two months outside it.
+The caveat for exactly that exists, is well written — and appends to
+`bm.referenceNote`:
+
+```
+$ grep -c referenceNote lib/analyze.js
+0
+```
+
+`buildBenchmark()` has never produced that field. The condition read `undefined`
+on every run in the product's history. The note that **does** exist is the
+snapshot's, which is what the reference block carries and what `snapshotHtml()`
+renders; the caveat moved there.
+
+Tested three ways, because **a caveat that always fires is wallpaper and one that
+never fires is a lie**: silent on a same-day capture, present with the age *and*
+the window on a 60-day-old capture read over 30 days, silent again on that same
+capture read over 90.
+
 ## 3. Negative results — hypotheses tested and found already correct
 
 These are as valuable as the bugs. **Do not re-test them.**
@@ -543,6 +658,11 @@ These are as valuable as the bugs. **Do not re-test them.**
 | **H8** | client column empty; client-gap findings must suppress | **Already correct.** `allowClientGapFindings` goes false, `board.empty.kind` is `no_client_ads`, and the product-fact sweep over three whole payloads found nothing. |
 | **H13** | an empty product scope costs a model call to discover | **Already correct.** `designs < MIN_FAMILIES` returns *before* `readThemes()` is called, with a comment saying so. |
 | **H16** | a shared cache entry carries client framing into a competitor's replay | **Already correct** by construction, and **nothing tested it**. Now does: run one captures `lacapfcu.org` as the client, run two captures it as EFCU's competitor from that same entry, and the test asserts the replay is genuinely a cache hit *before* asserting anything else. |
+| **H6** | a comparability refusal goes silently blank | **Already correct.** Different CD terms and a one-sided balance cap both produce a NOT LIKE-FOR-LIKE card or an excluded list, carrying the reason in words. The figures are still *shown*, no cell goes blank, and every reason is a sentence rather than a field name. |
+| **H9** | a client design absorbs, or is absorbed by, a competitor's | **Already correct.** Two cards in **both** directions — including when the client has run their generic line for 400 days and would otherwise become the face of the competitor's card. A national cannot absorb a local. One advertiser's design in three sizes is still one card. |
+| **H10** | the wall's funnel double-counts the client | **Already correct**, verified at last on a client that *has* ads. Every earlier test ran on a client with nothing captured, where "excluded" and "absent" are indistinguishable. |
+| **H11** | preview-only + download-failed + extraction-failed together | **Already correct** — the arithmetic closes in all three, including at zero. The one gap found was the missing *reason* on a download failure, which is F-021. |
+| **H12** | an old run's themes migrate to the wrong scope slot | **Already correct.** Written to disk in the pre-scope shape and read back through the real endpoint in a fresh process: a product read, a general fallback, and one that never said which. Each served from the saved copy, none landing in a second slot. |
 | **H17** | 30/60/90-day windows share a cache key | **Already correct.** `cacheKey` hashes source, domain **and** days. |
 | **H18** | a search reader can consume a display extraction | **Already correct**, and already covered by a pre-existing regression test. The cache path carries the reader family and its version. |
 
@@ -576,13 +696,9 @@ anything, and it is quoted, not written.
   evidence of this local market."* The exposure is real — one page of `num:100`
   against ~4,000 listed for Chase — but it is **phrased correctly everywhere I
   looked**, and the sweep in §3 checks that automatically now.
-- **H6, H7, H9, H10, H11, H12, H19** — listed in `findings.json` under
-  `notAttempted`, each with what specifically is missing. The two I would do
-  first: **H12** (an old `run.themes` migrating into the right scope slot — the
-  code reads correctly, but a saved general fallback is exactly the case a code
-  reading is least trustworthy on) and **H6** (a comparability refusal whose
-  failure mode is a *silently blank cell*, which looks identical to "not
-  observed" and means something completely different).
+- **H6, H7, H9, H10, H11, H12, H19 — all now done.** Five came back clean;
+  H7 turned up F-020 and H19 turned up F-022. Nothing in §8 remains untested
+  except H20, which is out of scope by instruction.
 - **The Phase 1 read pass** — see §6.
 - **`lib/industry-context.js`** — kept, not deleted. Reasoning under F-004.
 - **The source key `google_display`** — kept. Reasoning under F-014.
@@ -701,6 +817,10 @@ Full text in `findings.json` → `newSuspicions`. The three worth a look first:
 
 ```
 $ git log --oneline 7010b4e..HEAD
+7523411 F-021, F-022 + H6, H9, H10, H11, H12: the last seven hypotheses
+302f736 F-020 (H17): a 30-day snapshot was offered as the previous of a 90-day run
+814a9fb bughunt: state the one commit where the browser suite was red
+a018c5e bughunt: the report, the structured findings, and every log behind them
 1a6bc18 H16: a cached advertiser carries no client framing into its next role — verified
 100dcad F-019 (H15): the Key insights framing counted the client among the competitors
 b0bb18d Phase 1 + F-018: the corpus, the runner, and the first thing it caught
@@ -722,11 +842,12 @@ e956178 F-003: /api/rate-pages would fetch anything, including this machine
 e16e763 F-001: a figure a model returned was never checked against the ad it read
 ```
 
-One commit per finding, as asked, with two exceptions stated plainly: Phase 2
-carries F-010, F-015 and F-016 together because they were found by the same first
-run of the same suite and the suite had to be made runnable before any of them
-could be seen; and F-009 has a follow-up commit for the browser assertions that
-matched its old wording.
+One commit per finding, with three exceptions stated plainly: Phase 2 carries
+F-010, F-015 and F-016 together because they were found by the same first run of
+the same suite and the suite had to be made runnable before any of them could be
+seen; F-009 has a follow-up commit for the browser assertions that matched its
+old wording; and the final commit carries F-021 and F-022 with the five clean
+hypotheses they were found inside.
 
 `npm test` passes at **every** commit. The browser suite passes at every commit
 except `3c46e4a`, where two of its assertions still matched the cost line's old
@@ -736,8 +857,9 @@ would find it and be right to.
 
 ```
 $ git diff --stat 7010b4e..HEAD | tail -1
- 95 files changed, 6571 insertions(+), 442 deletions(-)
+ 112 files changed, 9786 insertions(+), 464 deletions(-)
 ```
+
 
 Application code changed: `lib/observations.js`, `lib/analyze.js`,
 `lib/benchmark.js`, `lib/findings.js`, `lib/primary-read.js`, `lib/themes.js`,

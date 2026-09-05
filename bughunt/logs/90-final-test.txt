@@ -249,10 +249,54 @@ STAGE 4 — the edit-distance primitive
   ok  the client's designs are reported separately, never folded in
   ok  no count on this panel names a network the capture cannot establish
 
-138 passed, 0 failed
+── regression — a 30-day snapshot is not the previous of a 90-day run
+  ok  a 30-day run still finds the previous 30-day snapshot
+  ok  the wider window really does reveal a figure the narrower one did not
+  ok  the 90-day run reports no change against the 30-day snapshots
+  ok  and the primary read carries no manufactured month-over-month line
+  ok  the snapshots on disk record the window they covered
+
+── regression — an old run's saved themes migrate to the slot they belong in
+  ok  a product read migrates into "checking" and is served from the saved copy
+  ok  a product read does not land in any other slot
+  ok  a general fallback migrates into "all" and is served from the saved copy
+  ok  a general fallback does not land in any other slot
+  ok  a read that never said migrates into "checking" and is served from the saved copy
+  ok  a read that never said does not land in any other slot
+
+── H10 — the wall's funnel counts competitors, with a client that has ads
+  ok  the premise holds — the client really does have captured ads
+  ok  the funnel's 'read' is the competitor count, not everything captured
+  ok  every funnel step is a real subset of the one above it
+  ok  each step's declared loss equals the drop it describes
+  ok  the client's own numbers reconcile separately and are never merged
+  ok  the competitor breakdown and the wall total agree
+  ok  unreadable creatives are counted, not quietly dropped
+
+── H11 — three different losses in one run still leave the counts consistent
+  ok  the run completes rather than throwing
+  ok  preview-only creatives are counted where they were lost
+  ok  a download failure reads as a download failure, not as 'no ads'
+  ok  nothing invented anything to fill the gaps
+  ok  the screen says which kind of nothing this is
+  ok  an extraction failure is counted against the read step
+  ok  a run that read nothing does not report a wall
+  ok  and the funnel still adds up at zero
+
+── H19 — the national age caveat appears exactly when it should
+  ok  the premise holds — the nationals are in the run as reference
+  ok  a national captured today carries NO age caveat
+  ok  the national capture entries were found and aged
+  ok  the aged national is still served from cache, not silently refetched
+  ok  the caveat fires, names the age AND names the window
+  ok  the caveat is about the CAPTURE, never about the advertiser
+  ok  ageing a national never moves a local count
+  ok  a 60-day-old capture read over a 90-day window raises no caveat
+
+172 passed, 0 failed
 
 ── provider quota exhausted
-(node:23943) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(node:7006) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
 (Use `node --trace-deprecation ...` to show where the warning was created)
   ok  the run still completes rather than hanging
   ok  every target reports the quota reason, not a generic failure
@@ -534,7 +578,34 @@ STAGE 12 — adversarial input, and the table agreeing with the board
   ok  an absurd figure — H3: every table figure equals the board's figure for that brand and metric
   ok  an absurd figure — every finding's evidence resolves to an ad in this set
 
-131 passed, 0 failed
+STAGE 13 — H6: a refusal to rank must reach the reader with its reason
+  ok  H6 — different CD terms: the refusal is a finding, not a silence
+  ok  H6 — different CD terms: the reason travels with it, in words
+  ok  H6 — different CD terms: the figures are still SHOWN, never hidden by the refusal
+  ok  H6 — different CD terms: no cell goes silently blank
+  ok  H6 — a balance cap on one side only: the refusal is a finding, not a silence
+  ok  H6 — a balance cap on one side only: the reason travels with it, in words
+  ok  H6 — a balance cap on one side only: the figures are still SHOWN, never hidden by the refusal
+  ok  H6 — a balance cap on one side only: no cell goes silently blank
+  ok  H6 — an add-on price and an account fee are never ranked against each other
+  ok  H6 — every refusal reason is a sentence, not a code
+
+STAGE 14 — H7: a change to the SET is not a change in the MARKET
+  ok  H7 — adding a competitor never manufactures a 'newly observed' card
+  ok  H7 — the set change is DISCLOSED rather than silently absorbed
+  ok  H7 — REMOVING a competitor never manufactures a 'withdrawn' card
+  ok  H7 — with the set unchanged, a real change IS still reported
+  ok  H7 — a set version ignores order, so re-ordering is not a change
+  ok  H7 — a different WINDOW is not comparable to a different window
+
+STAGE 15 — H9: whose idea is it? clustering must stay advertiser-scoped
+  ok  H9 — a client design and a competitor's identical design stay two cards
+  ok  H9 — the longer-running client design does not absorb the competitor's evidence
+  ok  H9 — nor the other way round when the competitor has run longer
+  ok  H9 — a national cannot absorb a local card either
+  ok  H9 — one advertiser's design cut into many sizes IS still one card
+
+152 passed, 0 failed
 
   ok   CORPUS_ADDON_PRICE
   ok   CORPUS_ADJECTIVE_AS_FIGURE

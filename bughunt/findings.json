@@ -1,12 +1,22 @@
 {
-  "generatedAt": "2026-09-04T23:30:00Z",
+  "generatedAt": "2026-09-05T02:10:00Z",
   "baseCommit": "7010b4e",
   "workOrderCommitReferenced": "37ca25a",
   "branch": "bughunt/phase-0",
   "node": "v22.22.2",
   "suites": {
-    "before": { "assertions": 273, "failed": 0, "browserAssertions": 0, "corpusFields": 0 },
-    "after":  { "assertions": 411, "failed": 0, "browserAssertions": 88, "corpusFields": 142 }
+    "before": {
+      "assertions": 273,
+      "failed": 0,
+      "browserAssertions": 0,
+      "corpusFields": 0
+    },
+    "after": {
+      "assertions": 466,
+      "failed": 0,
+      "browserAssertions": 88,
+      "corpusFields": 142
+    }
   },
   "findings": [
     {
@@ -527,20 +537,160 @@
       "riskOfFix": "n/a",
       "testAdded": "none — pre-existing coverage is adequate",
       "commit": ""
+    },
+    {
+      "id": "F-020",
+      "phase": 3,
+      "severity": "blocker",
+      "pattern": "P3",
+      "title": "A 30-day snapshot was offered as the previous of a 90-day run",
+      "file": "lib/snapshot.js",
+      "line": 178,
+      "status": "fixed",
+      "clientFacing": true,
+      "repro": "node test/flow.test.js :: 'a 30-day snapshot is not the previous of a 90-day run'. Capture at 30 days, then at 90; PEL3 stopped running 45 days ago so it sits between the two windows.",
+      "evidence": "bughunt/logs/02-F-020-before.txt — \"Pelican State CU's cash bonus of $750 is newly observed since the September 2026 benchmark.\" It was not. The same ad had run for months and stopped 45 days ago; it was outside the narrower window and inside the wider one. The sentence reached the findings AND the primary read.",
+      "rootCause": "previousSnapshot() gated comparability on client + product + source. The window was written onto every snapshot and read by nothing.",
+      "fix": "The window joins the gate and is recorded as a number, not only as two dates, so comparability is never inferred from timestamps a daylight-saving boundary can shift. snapshotWindowDays() derives it for snapshots written before the field existed — almost all of them — so no existing month-over-month comparison is lost. Fails closed: a candidate whose window cannot be established is not offered. A day of tolerance absorbs DST; it is not wide enough to let 30 meet 60.",
+      "riskOfFix": "A client who changes window loses their delta for one cycle. That is the correct outcome: the two captures are not comparable.",
+      "testAdded": "test/flow.test.js :: 'a 30-day snapshot is not the previous of a 90-day run' (5 assertions). test/fixture-lab.js gained a served-window filter and PEL3, without which the whole class was untestable.",
+      "commit": "302f736"
+    },
+    {
+      "id": "F-021",
+      "phase": 3,
+      "severity": "high",
+      "pattern": "P1",
+      "title": "A failed artwork download read as a competitor who is not advertising",
+      "file": "lib/atc-provider.js",
+      "line": 435,
+      "status": "fixed",
+      "clientFacing": true,
+      "repro": "node test/flow.test.js :: 'H11 — three different losses in one run', with RI_MOCK_IMG_403=1.",
+      "evidence": "bughunt/logs/02-F-021-before.txt — the target reports status 'empty' with reason undefined. On screen that is the same as a competitor who simply is not running ads.",
+      "rootCause": "capture() returns ok:true with an empty images array when every download fails, and set no reason. The empty-LISTING path above it already distinguishes 'preview_only' from 'no_ads'; this path said nothing.",
+      "fix": "An empty capture names which of the three happened — download_failed, preview_only or no_ads — and the UI has words for the new one. 'We could not fetch their artwork' is a fact about our capture; 'they are not advertising' is a claim about them.",
+      "riskOfFix": "None identified. The field is present only when there is nothing to show.",
+      "testAdded": "test/flow.test.js :: 'the screen says which kind of nothing this is'",
+      "commit": "7523411"
+    },
+    {
+      "id": "F-022",
+      "phase": 3,
+      "severity": "medium",
+      "pattern": "P7",
+      "title": "The national age caveat has never once fired",
+      "file": "server.js",
+      "line": 876,
+      "status": "fixed",
+      "clientFacing": true,
+      "repro": "node test/flow.test.js :: 'H19 — the national age caveat appears exactly when it should'. Age a national cache entry to 60 days and read the board over a 30-day window.",
+      "evidence": "bughunt/logs/02-F-022-before.txt — grep -c referenceNote lib/analyze.js returns 0. The caveat appends to bm.referenceNote, which buildBenchmark() has never produced, so the condition read undefined on every run in the product's history.",
+      "rootCause": "The caveat was written against the audit table's object instead of the board's. The note that exists is the snapshot's referenceNote, which is what the reference block carries and what snapshotHtml() renders.",
+      "fix": "Moved into boardFor(), onto the note the UI actually renders. Tested three ways, because a caveat that always fires is wallpaper and one that never fires is a lie: silent on a same-day capture, present with the age and the window on a 60-day-old capture read over 30 days, silent again on that same capture read over 90.",
+      "riskOfFix": "The caveat now appears where it never did. That is the fix, and the wording was already written to be honest about it: 'may fall outside'.",
+      "testAdded": "test/flow.test.js :: 'H19 — the national age caveat appears exactly when it should' (8 assertions)",
+      "commit": "7523411"
+    },
+    {
+      "id": "H6",
+      "phase": 3,
+      "severity": "medium",
+      "pattern": "P4",
+      "title": "Comparability refusals reach the UI with their reason",
+      "file": "lib/metrics.js",
+      "status": "already-correct",
+      "clientFacing": true,
+      "repro": "node test/benchmark.test.js",
+      "evidence": "Different CD terms and a one-sided balance cap both produce a NOT LIKE-FOR-LIKE card or an excluded list, carrying the reason in words. The figures are still shown, no cell goes blank, and every reason is a sentence rather than a field name. An add-on price is never ranked against an account fee.",
+      "rootCause": "n/a",
+      "fix": "none needed — a regression test was added, because nothing tested it",
+      "riskOfFix": "n/a",
+      "testAdded": "test/benchmark.test.js :: STAGE 13 (10 assertions)",
+      "commit": "7523411"
+    },
+    {
+      "id": "H9",
+      "phase": 3,
+      "severity": "high",
+      "pattern": "P4",
+      "title": "Clustering stays advertiser-scoped across the new client tier",
+      "file": "lib/analyze.js",
+      "status": "already-correct",
+      "clientFacing": true,
+      "repro": "node test/benchmark.test.js",
+      "evidence": "A client design and a competitor's identical generic line stay two cards in BOTH directions — including when the client has run theirs for 400 days and would otherwise become the face of the competitor's card. A national cannot absorb a local. One advertiser's design cut into three sizes is still one card.",
+      "rootCause": "n/a",
+      "fix": "none needed — a regression test was added, because nothing tested it",
+      "riskOfFix": "n/a",
+      "testAdded": "test/benchmark.test.js :: STAGE 15 (5 assertions)",
+      "commit": "7523411"
+    },
+    {
+      "id": "H10",
+      "phase": 3,
+      "severity": "high",
+      "pattern": "P4",
+      "title": "The wall's funnel reconciles with the client excluded, on a client that has ads",
+      "file": "server.js",
+      "status": "already-correct",
+      "clientFacing": true,
+      "repro": "node test/flow.test.js",
+      "evidence": "Every earlier test of this ran on a client with nothing captured, where 'excluded from the funnel' and 'absent from the capture' are indistinguishable. On lacapfcu.org, which has two creatives: funnel.read is the competitor count, every step is a real subset of the one above it, each declared loss equals the drop it describes, and the client's numbers reconcile separately.",
+      "rootCause": "n/a",
+      "fix": "none needed — a regression test was added, because nothing tested it",
+      "riskOfFix": "n/a",
+      "testAdded": "test/flow.test.js :: 'H10 — the wall's funnel counts competitors' (7 assertions)",
+      "commit": "7523411"
+    },
+    {
+      "id": "H11",
+      "phase": 3,
+      "severity": "medium",
+      "pattern": "P4",
+      "title": "Preview-only, download-failed and extraction-failed leave every count consistent",
+      "file": "lib/analyze.js",
+      "status": "already-correct",
+      "clientFacing": true,
+      "repro": "node test/flow.test.js",
+      "evidence": "Each was covered separately; the combination was not. The arithmetic closes in all three, including at zero. The one gap found was the missing reason on a download failure — that is F-021.",
+      "rootCause": "n/a",
+      "fix": "none needed — a regression test was added, because nothing tested it",
+      "riskOfFix": "n/a",
+      "testAdded": "test/flow.test.js :: 'H11 — three different losses in one run' (8 assertions)",
+      "commit": "7523411"
+    },
+    {
+      "id": "H12",
+      "phase": 3,
+      "severity": "medium",
+      "pattern": "P4",
+      "title": "An old run's saved themes migrate into the right scope slot",
+      "file": "server.js",
+      "status": "already-correct",
+      "clientFacing": true,
+      "repro": "node test/flow.test.js",
+      "evidence": "Written to disk in the pre-scope shape and read back through the real endpoint in a fresh process: a product read lands under its product, a general fallback under 'all', and one that never said which under the run's product. Each is served from the saved copy rather than re-bought, and none lands in a second slot.",
+      "rootCause": "n/a",
+      "fix": "none needed — a regression test was added, because nothing tested it",
+      "riskOfFix": "n/a",
+      "testAdded": "test/flow.test.js :: 'an old run's saved themes migrate to the slot they belong in' (6 assertions)",
+      "commit": "7523411"
     }
   ],
   "notAttempted": [
-    { "id": "H6", "why": "Comparability refusals reaching the UI with their reason. rankAgainst() carries notComparable WITH reasons and the finding renders them as `excluded`, and the adversarial sweep found no blank cells — but I did not build a fixture per refusal kind (CD terms, balance caps, add-on vs account fee), so I am reporting it as untested rather than correct." },
-    { "id": "H7", "why": "Partly covered by pre-existing tests ('a run is never its own previous snapshot', 'a national never enters the competitor set version', and the deltas-over-drift.stable filter in buildBoard). I did not build the two-run fixture that changes the competitor set AND the window between runs, so the 'newly observed' manufacturing case is not proven either way." },
-    { "id": "H9", "why": "Clustering is advertiser-scoped by key construction (institution is part of the cluster key, with a load-bearing comment). The CLIENT-tier half — can a client design absorb or be absorbed by a competitor's — follows from the same key, but I did not build the fixture that proves it." },
-    { "id": "H10", "why": "Funnel reconciliation with the client excluded, on a client that actually has captured ads. The fixtures have client ads (LAC1/LAC2) and the funnel reconciles in the tests I added for F-002, but I did not write the specific client-excluded reconciliation assertion." },
-    { "id": "H11", "why": "Preview-only is covered by test/pipeline.test.js and download-failed/extraction-failed by test/degraded.test.js, each separately. The combined 'all three at once leave every count consistent' case is not built." },
-    { "id": "H12", "why": "Migration of an old run.themes into the right scope slot. The code reads correctly (readScope === 'all_products' -> 'all', else run.product) but I did not construct a pre-migration run file on disk to prove it, and a run whose saved read was a general fallback is exactly the case a code reading is least trustworthy on." },
-    { "id": "H14", "why": "Became F-007 and is fixed." },
-    { "id": "H19", "why": "National TTL (90d) outrunning the client's window, and whether the age note appears exactly when it should. Needs a fixture that ages a cache entry, which means either faking clock time or writing an entry with a backdated capturedAt — doable, not done." },
-    { "id": "H20", "why": "Pagination. Explicitly out of scope per §4 — implementing it changes spend. The exposure is reported in REPORT.md rather than changed." },
-    { "id": "PHASE_1_READ_PASS", "why": "The corpus replay needs one Haiku vision call per creative and §10 requires approval first. It also needs creatives: runs/_evidence is empty in a clone. The runner refuses without RI_CORPUS_APPROVED=1 and --dry-run prints the exact count, which is currently 0." },
-    { "id": "PHASE_4", "why": "Deployment-conditional and disabled. The work order says to start it only if deployment is explicitly in scope, and it is not." }
+    {
+      "id": "H20",
+      "why": "Pagination. Explicitly out of scope per §4 — implementing it changes spend. The exposure is audited in REPORT.md instead: every sentence leaning on national absence already reads as an observation about the capture, and the cross-cutting sweep now checks that automatically."
+    },
+    {
+      "id": "PHASE_1_READ_PASS",
+      "why": "The corpus replay needs one Haiku vision call per creative and §10 requires approval first. It also needs creatives: runs/ is gitignored, so _evidence is empty in a clone. The runner refuses without RI_CORPUS_APPROVED=1 and --dry-run prints the exact count, currently 0. Nothing else is blocking it."
+    },
+    {
+      "id": "PHASE_4",
+      "why": "Deployment-conditional and disabled. The work order says to start it only if deployment is explicitly in scope, and it is not."
+    }
   ],
   "newSuspicions": [
     {
@@ -578,6 +728,18 @@
       "file": "lib/benchmark.js",
       "line": 216,
       "why": "This is H6, listed as not attempted. Raising it here too because the failure mode is a silently blank cell, which looks identical to 'not observed' and means something completely different."
+    },
+    {
+      "title": "findPreviousRun() still does not gate on the window",
+      "file": "lib/store.js",
+      "line": 173,
+      "why": "F-020 fixed previousSnapshot(), which is what the BOARD reads. findPreviousRun() — which feeds run.diff, the 'still running / newly appeared / no longer observed' strip — gates on client, mode, source and product, and not on days. The same 30-vs-90 mismatch is therefore still available to that strip. It counts creative ids rather than figures, so the damage is smaller and the wording ('no longer observed') is already correctly hedged, but it is the same defect and it is one line from the same fix."
+    },
+    {
+      "title": "The fixture market had no window dimension until this branch",
+      "file": "test/fixture-lab.js",
+      "line": 199,
+      "why": "listingFor() returned every row whatever start_date was asked for, so a 30-day and a 90-day capture came back identical and every window-shaped bug was untestable — which is why F-020 survived. It filters now, and PEL3 sits between the two windows, but ONE row is thin: a second, on a different advertiser and a different product, would let the window interact with product scope and with the national tier."
     }
   ]
 }
